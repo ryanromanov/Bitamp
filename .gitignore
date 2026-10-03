@@ -1,0 +1,6 @@
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.app
+.DS_Store
