@@ -15,6 +15,10 @@ Bitamp isn't affiliated with or endorsed by Winamp or Nullsoft. Its default skin
 - Shade mode for each window (double-click a title bar), and window sizes from 1× to 4×
 - Spectrum and oscilloscope visualizer, shuffle and repeat, `.m3u` playlists
 
+## Download
+
+Get the latest `Bitamp-x.y.z.zip` from [Releases](https://github.com/ryanromanov/Bitamp/releases). It runs on macOS 13 or later, on Apple Silicon and Intel. Bitamp isn't notarized yet, so the first time you open it, allow it under **System Settings → Privacy & Security → Open Anyway**.
+
 ## Build
 
 Needs macOS 13+ and the Xcode Command Line Tools (`xcode-select --install`). The full Xcode app isn't needed.
@@ -22,7 +26,7 @@ Needs macOS 13+ and the Xcode Command Line Tools (`xcode-select --install`). The
 ```sh
 swift build            # debug build
 scripts/test.sh        # run tests (wraps swift test; see below)
-scripts/bundle.sh      # release build → Bitamp.app
+scripts/bundle.sh      # release build → Bitamp.app (--universal, --version X.Y.Z)
 open Bitamp.app
 ```
 
