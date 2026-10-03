@@ -43,6 +43,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         for view in views {
             view.windowGroup = group
         }
+        group.setShadows(preferences.windowShadows)
         self.mainView = mainView
         windowGroup = group
 
@@ -161,6 +162,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowGroup?.toggleShade(.playlist)
     }
 
+    @objc private func toggleShadows(_ sender: Any?) {
+        preferences.windowShadows.toggle()
+        windowGroup?.setShadows(preferences.windowShadows)
+    }
+
     @objc private func setScale(_ sender: NSMenuItem) {
         preferences.scale = sender.tag
         windowGroup?.setScale(CGFloat(sender.tag))
@@ -209,11 +215,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let mainShade = Menus.item("Shade Main Window", #selector(MainView.toggleShade(_:)), "w", [.control])
         let equalizerShade = Menus.item("Shade Equalizer", #selector(toggleEqualizerShade(_:)), "w", [.control, .option])
         let playlistShade = Menus.item("Shade Playlist", #selector(togglePlaylistShade(_:)), "w", [.control, .shift])
-        for item in [equalizer, playlist, minimize, equalizerShade, playlistShade] { item.target = self }
+        let shadows = Menus.item("Window Shadows", #selector(toggleShadows(_:)))
+        for item in [equalizer, playlist, minimize, equalizerShade, playlistShade, shadows] { item.target = self }
         let windowMenu = Menus.menu("Window", [
             equalizer, playlist, .separator(),
             mainShade, equalizerShade, playlistShade, .separator(),
-            Menus.submenu(Menus.menu("Size", sizes)), .separator(),
+            Menus.submenu(Menus.menu("Size", sizes)), shadows, .separator(),
             minimize,
         ])
         NSApp.windowsMenu = windowMenu
@@ -237,6 +244,7 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(toggleEqualizer(_:)): item.state = windowGroup?.isVisible(.equalizer) == true ? .on : .off
         case #selector(togglePlaylist(_:)): item.state = windowGroup?.isVisible(.playlist) == true ? .on : .off
         case #selector(setScale(_:)): item.state = item.tag == preferences.scale ? .on : .off
+        case #selector(toggleShadows(_:)): item.state = preferences.windowShadows ? .on : .off
         case #selector(toggleEqualizerShade(_:)):
             item.state = windowGroup.map { $0.isShaded(.equalizer) } == true ? .on : .off
             return windowGroup?.isVisible(.equalizer) == true

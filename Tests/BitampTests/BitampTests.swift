@@ -810,3 +810,59 @@ import Testing
         #expect(size(.mainShadePosition) == ShadeLayout.mainPosition.size)
     }
 }
+
+@Suite struct ListFontTests {
+    @Test func glyphsAreWellFormed() {
+        for (character, rows) in ListFont.glyphs {
+            #expect((1...9).contains(rows.count), "\(character) has \(rows.count) rows")
+            #expect(Set(rows.map(\.count)).count == 1, "\(character) has uneven rows")
+            #expect(rows.allSatisfy { $0.allSatisfy { $0 == "." || $0 == "#" } }, "\(character)")
+            #expect(rows.joined().contains("#"), "\(character) is blank")
+        }
+    }
+
+    @Test func coversPrintableASCII() {
+        for value in 32...126 {
+            let character = Character(UnicodeScalar(UInt8(value)))
+            #expect(ListFont.glyph(for: character) != nil, "Missing \(character)")
+        }
+    }
+
+    @Test func buildsAccentedLetters() {
+        for character in "éèêëàáâäãåçñöøüÉÖÅÇÑíì" {
+            #expect(ListFont.glyph(for: character) != nil, "Missing \(character)")
+        }
+        guard case .glyph(_, let accent)? = ListFont.glyph(for: "ö") else {
+            Issue.record("ö isn't a glyph")
+            return
+        }
+        #expect(accent == .diaeresis)
+    }
+
+    @Test func fallsBackForOtherScripts() {
+        #expect(ListFont.pieces("坂本 - Merry") == [.fallback("坂本")] + ListFont.pieces(" - Merry"))
+        #expect(ListFont.width(of: "坂本") > 0)
+    }
+
+    @Test func measuresAndTruncates() {
+        #expect(ListFont.width(of: "") == 0)
+        #expect(ListFont.width(of: "A") == 5)
+        #expect(ListFont.width(of: "AA") == 11)  // Two glyphs and a 1-pixel gap.
+        #expect(ListFont.width(of: "il") == 4)
+        let long = "The Avalanches - Since I Left You"
+        let cut = ListFont.truncate(long, toWidth: 60)
+        #expect(cut.hasSuffix("..."))
+        #expect(ListFont.width(of: cut) <= 60)
+        #expect(ListFont.truncate("Short", toWidth: 200) == "Short")
+    }
+
+    @Test func plainsTypographicPunctuation() {
+        #expect(ListFont.substitute("It’s “Here” – now…") == "It's \"Here\" - now...")
+    }
+
+    @Test func rowsFitTheFont() {
+        #expect(PlaylistLayout.rowHeight == CGFloat(ListFont.lineHeight))
+        // Descenders end on the last row of the line.
+        #expect(ListFont.accentRows + 9 == ListFont.lineHeight)
+    }
+}

@@ -98,6 +98,12 @@ final class PlaybackController {
         }
     }
 
+    /// Sets the queue as given, without expanding folders or checking the files exist.
+    /// For rendering and tests.
+    func setQueueItems(_ urls: [URL]) {
+        queue.replace(with: urls)
+    }
+
     func playItem(at index: Int) {
         queue.select(index)
         loadCurrent(andPlay: true)

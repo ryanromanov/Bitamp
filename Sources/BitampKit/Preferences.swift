@@ -127,6 +127,12 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.scale) }
     }
 
+    /// macOS's soft drop shadow around each window. Off by default: the classic windows had none.
+    var windowShadows: Bool {
+        get { defaults.bool(forKey: Key.windowShadows) }
+        set { defaults.set(newValue, forKey: Key.windowShadows) }
+    }
+
     /// The installed skin in use, by name; nil for the default skin.
     var skinName: String? {
         get { defaults.string(forKey: Key.skinName) }
@@ -161,5 +167,6 @@ final class Preferences {
         static let queueIndex = "queueIndex"
         static let skinName = "skin"
         static let scale = "scale"
+        static let windowShadows = "windowShadows"
     }
 }

@@ -3,8 +3,8 @@ import UniformTypeIdentifiers
 
 /// The playlist window: the play queue as an editable list.
 ///
-/// The frame is skin pixels like the other windows, but track names are drawn with a real
-/// font at full resolution, so any title is readable, including non-Latin ones.
+/// Everything, track names included, is drawn in skin pixels: names use `ListFont`, which
+/// falls back to unsmoothed Arial for characters it doesn't have.
 final class PlaylistView: SkinnedView {
 
     let controller: PlaybackController
@@ -53,8 +53,6 @@ final class PlaylistView: SkinnedView {
     }
 
     private var queue: PlayQueue { controller.queue }
-    /// 11 points at the normal 2× size, scaled with the window.
-    private var font: NSFont { NSFont.monospacedDigitSystemFont(ofSize: 5.5 * scale, weight: .regular) }
     private var listRect: CGRect { PlaylistLayout.list(in: pixelSize) }
     private var visibleRows: Int { max(1, Int(listRect.height / PlaylistLayout.rowHeight)) }
     private var maxScrollRow: Int { max(0, queue.count - visibleRows) }
@@ -107,7 +105,7 @@ final class PlaylistView: SkinnedView {
                at: ShadeLayout.playlistShadeButton(width: size.width).origin)
         c.draw(skin.image(for: .playlistCloseButton(pressed: closePressed)), at: PlaylistLayout.close(in: size).origin)
 
-        // The list: background, selection and drop marker. The text is drawn in drawOverlay.
+        // The list: background, selection, rows and drop marker.
         let colors = skin.playlistColors
         c.fill(listRect, colors.normalBackground)
         for row in visibleRange where selection.contains(row) {
@@ -117,6 +115,8 @@ final class PlaylistView: SkinnedView {
             let y = listRect.minY + CGFloat(dropIndex - scrollRow) * PlaylistLayout.rowHeight
             c.fill(CGRect(x: listRect.minX, y: min(y, listRect.maxY - 1), width: listRect.width, height: 1), colors.current)
         }
+
+        drawRows(c)
 
         let thumb = scrollThumbRect
         c.draw(skin.image(for: .playlistScrollThumb(pressed: isDraggingThumb)), at: thumb.origin)
@@ -194,36 +194,28 @@ final class PlaylistView: SkinnedView {
         return "\(TimeFormat.clock(selected))/\(TimeFormat.clock(total))\(complete ? "" : "+")"
     }
 
-    override func drawOverlay(in context: CGContext) {
-        guard !isShaded else { return }
+    /// Track numbers and names on the left, lengths on the right, in the pixel list font.
+    private func drawRows(_ c: Canvas) {
         let colors = skin.playlistColors
-        let list = viewRect(forPixels: listRect)
-        NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(rect: list).addClip()
         let playing = queue.playingIndex
+        c.context.saveGState()
+        c.context.clip(to: listRect)
         for row in visibleRange {
             let url = queue.items[row]
-            let color = NSColor(cgColor: row == playing ? colors.current : colors.normal) ?? .green
-            let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
-            let rect = viewRect(forPixels: rowRect(row)).insetBy(dx: 2 * scale, dy: 0)
-            let textY = rect.minY + (rect.height - font.boundingRectForFont.height) / 2 + scale / 2
-
-            var nameWidth = rect.width
+            let color = row == playing ? colors.current : colors.normal
+            let rect = rowRect(row)
+            let (left, right, top) = (Int(rect.minX) + 2, Int(rect.maxX) - 2, Int(rect.minY))
+            var nameRight = right
             if let duration = controller.info.duration(for: url) {
-                let time = NSAttributedString(string: TimeFormat.clock(duration), attributes: attributes)
-                let timeWidth = time.size().width
-                time.draw(at: NSPoint(x: rect.maxX - timeWidth, y: textY))
-                nameWidth -= timeWidth + 4 * scale
+                let time = TimeFormat.clock(duration)
+                let timeX = right - ListFont.width(of: time)
+                ListFont.draw(time, in: c, x: timeX, y: top, color: color)
+                nameRight = timeX - 6
             }
-            let style = NSMutableParagraphStyle()
-            style.lineBreakMode = .byTruncatingTail
-            var nameAttributes = attributes
-            nameAttributes[.paragraphStyle] = style
-            let name = NSAttributedString(string: "\(row + 1). \(controller.info.displayName(for: url))", attributes: nameAttributes)
-            name.draw(with: NSRect(x: rect.minX, y: textY, width: max(0, nameWidth), height: rect.height),
-                      options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+            let name = ListFont.truncate("\(row + 1). \(controller.info.displayName(for: url))", toWidth: nameRight - left)
+            ListFont.draw(name, in: c, x: left, y: top, color: color)
         }
-        NSGraphicsContext.restoreGraphicsState()
+        c.context.restoreGState()
     }
 
     // MARK: - Mouse

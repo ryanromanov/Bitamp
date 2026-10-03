@@ -212,7 +212,7 @@ final class SkinnedWindow: NSWindow {
             backing: .buffered, defer: false)
         contentView = view
         isOpaque = true
-        hasShadow = true
+        hasShadow = false
         backgroundColor = .black
         isReleasedWhenClosed = false
         title = "Bitamp"

@@ -155,7 +155,8 @@ enum PlaylistLayout {
     static let bottom: CGFloat = 38
     static let left: CGFloat = 12
     static let right: CGFloat = 20
-    static let rowHeight: CGFloat = 8
+    /// One line of `ListFont`.
+    static let rowHeight = CGFloat(ListFont.lineHeight)
     static let scrollThumb = CGSize(width: 8, height: 18)
 
     static func snappedHeight(_ height: CGFloat) -> CGFloat {

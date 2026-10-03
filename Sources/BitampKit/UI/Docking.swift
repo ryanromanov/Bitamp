@@ -89,6 +89,10 @@ final class WindowGroup {
         [main] + Panel.allCases.compactMap { panels[$0] }
     }
 
+    func setShadows(_ shadows: Bool) {
+        for window in windows { window.hasShadow = shadows }
+    }
+
     func isVisible(_ panel: Panel) -> Bool {
         panels[panel]?.isVisible ?? false
     }
