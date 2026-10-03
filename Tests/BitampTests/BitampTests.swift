@@ -334,3 +334,54 @@ import Testing
         #expect(Falloff.slow.peakRate < Falloff.fast.peakRate)
     }
 }
+
+@Suite struct VisualizerTuningTests {
+    /// A 2048-frame stereo buffer of a 1 kHz sine at `amplitude`.
+    func sine(_ amplitude: Float) throws -> AVAudioPCMBuffer {
+        let frames = AVAudioFrameCount(SpectrumAnalyzer.fftSize)
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2))
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames))
+        buffer.frameLength = frames
+        for channel in 0..<2 {
+            for i in 0..<Int(frames) {
+                buffer.floatChannelData![channel][i] = amplitude * Float(sin(2 * .pi * 1_000 * Double(i) / 44_100))
+            }
+        }
+        return buffer
+    }
+
+    @Test func quietAudioFillsTheScope() throws {
+        let analyzer = SpectrumAnalyzer()
+        analyzer.process(try sine(0.2))
+        analyzer.advance()
+        let peak = analyzer.waveform.map(abs).max()!
+        #expect(peak > 0.8 && peak <= 1)
+    }
+
+    @Test func silenceIsNotAmplifiedIntoNoise() {
+        let analyzer = SpectrumAnalyzer()
+        analyzer.advance()
+        #expect(analyzer.waveform.allSatisfy { $0 == 0 })
+    }
+
+    @Test(arguments: Falloff.allCases)
+    func barsFallAtTheChosenRate(falloff: Falloff) throws {
+        let analyzer = SpectrumAnalyzer()
+        analyzer.barFall = falloff.barRate
+        analyzer.process(try sine(1))
+        analyzer.advance()
+        let loudest = analyzer.bars.indices.max { analyzer.bars[$0] < analyzer.bars[$1] }!
+        let start = analyzer.bars[loudest]
+
+        analyzer.process(try sine(0))
+        for _ in 0..<5 { analyzer.advance() }
+        let expected = max(0, start - 5 * falloff.barRate)
+        #expect(abs(analyzer.bars[loudest] - expected) < 0.001)
+    }
+
+    @Test func speedsAreFarApart() {
+        #expect(Falloff.fast.barRate / Falloff.slow.barRate >= 10)
+        #expect(Falloff.fast.peakRate / Falloff.slow.peakRate >= 10)
+        #expect(Falloff.slow.peakHoldFrames > Falloff.fast.peakHoldFrames)
+    }
+}

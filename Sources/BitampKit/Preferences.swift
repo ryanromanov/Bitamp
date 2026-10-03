@@ -8,23 +8,34 @@ enum OscilloscopeStyle: String, CaseIterable {
     case dots, lines, solid
 }
 
-/// How quickly spectrum bars or peak dots drop, per display frame.
+/// How quickly spectrum bars or peak dots drop. Rates are fractions of full height per
+/// frame at 30 fps; the speeds are far apart on purpose so the choice is visible.
 enum Falloff: String, CaseIterable {
     case slow, normal, fast
 
+    /// Slow drains a full bar in about 2.8 s, normal in 0.8 s, fast in 0.17 s.
     var barRate: Float {
         switch self {
-        case .slow: return 0.03
-        case .normal: return 0.06
-        case .fast: return 0.12
+        case .slow: return 0.012
+        case .normal: return 0.04
+        case .fast: return 0.2
         }
     }
 
     var peakRate: Float {
         switch self {
-        case .slow: return 0.008
-        case .normal: return 0.015
-        case .fast: return 0.03
+        case .slow: return 0.004
+        case .normal: return 0.012
+        case .fast: return 0.05
+        }
+    }
+
+    /// How long a peak dot waits at the top before falling.
+    var peakHoldFrames: Int {
+        switch self {
+        case .slow: return 30
+        case .normal: return 12
+        case .fast: return 3
         }
     }
 }

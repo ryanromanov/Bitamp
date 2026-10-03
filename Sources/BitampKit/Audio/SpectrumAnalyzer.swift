@@ -12,7 +12,6 @@ final class SpectrumAnalyzer: @unchecked Sendable {
     static let minFrequency = 40.0
     static let maxFrequency = 16_000.0
 
-    static let peakHoldFrames = 12
     /// Data older than this counts as silence, so bars fall when playback stops.
     static let staleAfter: TimeInterval = 0.25
 
@@ -33,10 +32,25 @@ final class SpectrumAnalyzer: @unchecked Sendable {
     /// How far bars and peaks drop per display frame, as a fraction of full height.
     var barFall = Falloff.normal.barRate
     var peakFall = Falloff.normal.peakRate
+    var peakHoldFrames = Falloff.normal.peakHoldFrames
     private(set) var bars = [Float](repeating: 0, count: barCount)
     private(set) var peaks = [Float](repeating: 0, count: barCount)
+    /// The latest waveform, scaled by `scopeGain` to fill the display; clamped to -1...1.
     private(set) var waveform = [Float](repeating: 0, count: waveformCount)
     private var peakHold = [Int](repeating: 0, count: barCount)
+    /// Recent waveform peak: jumps up with louder audio, eases back down.
+    private var scopeLevel: Float = 0
+
+    /// Music rarely peaks above ±0.3, which is only a couple of pixels on a 16-pixel
+    /// scope, so the oscilloscope scales recent peaks up to about 90% of full height.
+    static let scopeTarget: Float = 0.9
+    static let scopeMaxGain: Float = 8
+    /// Per frame; at 30 fps the level halves in about a second.
+    static let scopeRelease: Float = 0.977
+
+    var scopeGain: Float {
+        min(Self.scopeTarget / max(scopeLevel, 1e-6), Self.scopeMaxGain)
+    }
 
     init() {
         var window = [Float](repeating: 0, count: Self.fftSize)
@@ -157,14 +171,19 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         lock.lock()
         let fresh = ProcessInfo.processInfo.systemUptime - updatedAt < Self.staleAfter
         let target = fresh ? self.target : [Float](repeating: 0, count: Self.barCount)
-        waveform = fresh ? wave : [Float](repeating: 0, count: Self.waveformCount)
+        let wave = fresh ? self.wave : [Float](repeating: 0, count: Self.waveformCount)
         lock.unlock()
+
+        let peak = wave.map(abs).max() ?? 0
+        scopeLevel = max(peak, scopeLevel * Self.scopeRelease)
+        let gain = scopeGain
+        waveform = wave.map { min(max($0 * gain, -1), 1) }
 
         for i in 0..<Self.barCount {
             bars[i] = max(target[i], bars[i] - barFall)
             if bars[i] >= peaks[i] {
                 peaks[i] = bars[i]
-                peakHold[i] = Self.peakHoldFrames
+                peakHold[i] = peakHoldFrames
             } else if peakHold[i] > 0 {
                 peakHold[i] -= 1
             } else {

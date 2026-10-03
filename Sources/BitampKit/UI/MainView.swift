@@ -195,6 +195,8 @@ final class MainView: NSView, NSMenuItemValidation {
             let style = preferences.oscilloscopeStyle
             var previous: Int?
             for (x, sample) in analyzer.waveform.enumerated() {
+                // Dots skip every other column; packed tighter they'd read as a line.
+                if style == .dots && x % 2 == 1 { continue }
                 let y = min(max(middle - Int((sample * Float(middle)).rounded()), 0), height - 1)
                 let rows: ClosedRange<Int>
                 switch style {
@@ -461,25 +463,42 @@ final class MainView: NSView, NSMenuItemValidation {
     }
 
     @objc func setVisMode(_ sender: NSMenuItem) {
-        if let mode = choice(VisMode.self, sender) { preferences.visMode = mode }
+        guard let mode = choice(VisMode.self, sender) else { return }
+        preferences.visMode = mode
+        let names: [VisMode: String] = [.spectrum: "SPECTRUM ANALYZER", .oscilloscope: "OSCILLOSCOPE", .off: "OFF"]
+        marquee.flash("VISUALIZATION: \(names[mode]!)", for: 1.5)
     }
+
+    // Each option below also switches to the mode it belongs to, so the change is visible.
 
     @objc func togglePeaks(_ sender: Any?) {
         preferences.showPeaks.toggle()
+        preferences.visMode = .spectrum
+        marquee.flash("PEAKS: \(preferences.showPeaks ? "ON" : "OFF")", for: 1.5)
     }
 
     @objc func setBarFalloff(_ sender: NSMenuItem) {
-        if let falloff = choice(Falloff.self, sender) { preferences.barFalloff = falloff }
+        guard let falloff = choice(Falloff.self, sender) else { return }
+        preferences.barFalloff = falloff
+        preferences.visMode = .spectrum
         applyFalloff()
+        marquee.flash("ANALYZER FALLOFF: \(falloff.rawValue)", for: 1.5)
     }
 
     @objc func setPeakFalloff(_ sender: NSMenuItem) {
-        if let falloff = choice(Falloff.self, sender) { preferences.peakFalloff = falloff }
+        guard let falloff = choice(Falloff.self, sender) else { return }
+        preferences.peakFalloff = falloff
+        preferences.visMode = .spectrum
+        preferences.showPeaks = true
         applyFalloff()
+        marquee.flash("PEAK FALLOFF: \(falloff.rawValue)", for: 1.5)
     }
 
     @objc func setOscilloscopeStyle(_ sender: NSMenuItem) {
-        if let style = choice(OscilloscopeStyle.self, sender) { preferences.oscilloscopeStyle = style }
+        guard let style = choice(OscilloscopeStyle.self, sender) else { return }
+        preferences.oscilloscopeStyle = style
+        preferences.visMode = .oscilloscope
+        marquee.flash("OSCILLOSCOPE: \(style.rawValue)", for: 1.5)
     }
 
     private func choice<T: RawRepresentable>(_ type: T.Type, _ item: NSMenuItem) -> T? where T.RawValue == String {
@@ -489,6 +508,7 @@ final class MainView: NSView, NSMenuItemValidation {
     private func applyFalloff() {
         engine.analyzer.barFall = preferences.barFalloff.barRate
         engine.analyzer.peakFall = preferences.peakFalloff.peakRate
+        engine.analyzer.peakHoldFrames = preferences.peakFalloff.peakHoldFrames
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
