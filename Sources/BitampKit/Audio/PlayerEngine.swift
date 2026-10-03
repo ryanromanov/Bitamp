@@ -24,7 +24,8 @@ final class PlayerEngine {
 
     private(set) var state = State.stopped
     private(set) var track: Track?
-    var repeatTrack = false
+    /// Called after a track plays to the end and the engine has stopped.
+    var onTrackEnd: (() -> Void)?
     let analyzer = SpectrumAnalyzer()
 
     /// 0...1, applied on a squared curve so the slider feels even.
@@ -137,12 +138,6 @@ final class PlayerEngine {
         state = .stopped
     }
 
-    /// Restarts the current track. Stands in for previous/next until there is a playlist.
-    func restart() {
-        guard file != nil else { return }
-        startPlayback(at: 0)
-    }
-
     func seek(to seconds: Double) {
         guard let file, state != .stopped else { return }
         let frame = AVAudioFramePosition(max(0, seconds) * file.processingFormat.sampleRate)
@@ -190,11 +185,8 @@ final class PlayerEngine {
     }
 
     private func trackEnded() {
-        if repeatTrack {
-            startPlayback(at: 0)
-        } else {
-            stop()
-        }
+        stop()
+        onTrackEnd?()
     }
 
     /// The output device changed and the engine stopped itself; pick up where we were.

@@ -202,3 +202,135 @@ import Testing
         #expect(skin.visColors.count == 24)
     }
 }
+
+@Suite struct PlayQueueTests {
+    let urls = (1...5).map { URL(fileURLWithPath: "/music/\($0).mp3") }
+
+    @Test func playsInOrderAndStopsAtTheEnd() {
+        var queue = PlayQueue(seed: 1)
+        queue.replace(with: urls)
+        var played = [queue.current!]
+        while let next = queue.next() { played.append(next) }
+        #expect(played == urls)
+        #expect(queue.current == urls.last)  // Stays on the last track.
+    }
+
+    @Test func previousStopsAtTheStart() {
+        var queue = PlayQueue(seed: 1)
+        queue.replace(with: urls)
+        #expect(queue.previous() == urls[0])
+    }
+
+    @Test func repeatWrapsBothWays() {
+        var queue = PlayQueue(seed: 1)
+        queue.replace(with: urls)
+        queue.repeats = true
+        #expect(queue.previous() == urls[4])
+        #expect(queue.next() == urls[0])
+    }
+
+    @Test func shufflePlaysEveryTrackOnce() {
+        var queue = PlayQueue(seed: 42)
+        queue.setShuffled(true)
+        queue.replace(with: urls)
+        var played = [queue.current!]
+        while let next = queue.next() { played.append(next) }
+        #expect(Set(played) == Set(urls))
+        #expect(played.count == urls.count)
+    }
+
+    @Test func turningShuffleOnKeepsTheCurrentTrack() {
+        var queue = PlayQueue(seed: 7)
+        queue.replace(with: urls)
+        queue.next()
+        queue.next()
+        queue.setShuffled(true)
+        #expect(queue.current == urls[2])
+        queue.setShuffled(false)
+        #expect(queue.current == urls[2])
+        #expect(queue.next() == urls[3])
+    }
+
+    @Test func shuffledRepeatDoesNotRepeatATrackBackToBack() {
+        for seed in 0..<50 as Range<UInt64> {
+            var queue = PlayQueue(seed: seed)
+            queue.setShuffled(true)
+            queue.repeats = true
+            queue.replace(with: urls)
+            for _ in 0..<4 { queue.next() }
+            let last = queue.current
+            #expect(queue.next() != last)
+        }
+    }
+
+    @Test func appendKeepsTheCurrentTrack() {
+        var queue = PlayQueue(seed: 3)
+        queue.replace(with: Array(urls[..<2]))
+        queue.next()
+        queue.append(Array(urls[2...]))
+        #expect(queue.current == urls[1])
+        #expect(queue.next() == urls[2])
+
+        var shuffled = PlayQueue(seed: 3)
+        shuffled.setShuffled(true)
+        shuffled.replace(with: Array(urls[..<2]))
+        let current = shuffled.current
+        shuffled.append(Array(urls[2...]))
+        #expect(shuffled.current == current)
+        #expect(Set(shuffled.order) == Set(0..<5))
+    }
+
+    @Test func emptyQueue() {
+        var queue = PlayQueue()
+        #expect(queue.current == nil)
+        #expect(queue.next() == nil)
+        #expect(queue.previous() == nil)
+    }
+}
+
+@Suite struct AudioFilesTests {
+    @Test func expandsFoldersInNameOrder() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let album = root.appendingPathComponent("Album")
+        try FileManager.default.createDirectory(at: album, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for name in ["10 Ten.mp3", "2 Two.m4a", "1 One.flac", "cover.jpg", ".hidden.mp3", "list.m3u"] {
+            FileManager.default.createFile(atPath: album.appendingPathComponent(name).path, contents: Data())
+        }
+        let loose = root.appendingPathComponent("loose.wav")
+        FileManager.default.createFile(atPath: loose.path, contents: Data())
+
+        let names = AudioFiles.expand([loose, album, root.appendingPathComponent("missing.mp3")])
+            .map(\.lastPathComponent)
+        #expect(names == ["loose.wav", "1 One.flac", "2 Two.m4a", "10 Ten.mp3"])
+    }
+}
+
+@MainActor
+@Suite struct PreferencesTests {
+    @Test func defaultsAndRoundTrip() throws {
+        let suite = "BitampTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let preferences = Preferences(defaults: defaults)
+        #expect(preferences.volume == 0.75)
+        #expect(preferences.visMode == .spectrum)
+        #expect(preferences.showPeaks)
+        #expect(preferences.barFalloff == .normal)
+
+        preferences.visMode = .oscilloscope
+        preferences.oscilloscopeStyle = .solid
+        preferences.volume = 0.3
+        let reloaded = Preferences(defaults: defaults)
+        #expect(reloaded.visMode == .oscilloscope)
+        #expect(reloaded.oscilloscopeStyle == .solid)
+        #expect(reloaded.volume == 0.3)
+    }
+
+    @Test func falloffSpeedsAreOrdered() {
+        #expect(Falloff.slow.barRate < Falloff.normal.barRate)
+        #expect(Falloff.normal.barRate < Falloff.fast.barRate)
+        #expect(Falloff.slow.peakRate < Falloff.fast.peakRate)
+    }
+}

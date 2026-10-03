@@ -12,9 +12,6 @@ final class SpectrumAnalyzer: @unchecked Sendable {
     static let minFrequency = 40.0
     static let maxFrequency = 16_000.0
 
-    /// How far bars and peaks drop per display frame, as a fraction of full height.
-    static let barFall: Float = 0.06
-    static let peakFall: Float = 0.015
     static let peakHoldFrames = 12
     /// Data older than this counts as silence, so bars fall when playback stops.
     static let staleAfter: TimeInterval = 0.25
@@ -33,6 +30,9 @@ final class SpectrumAnalyzer: @unchecked Sendable {
     private let fftSetup: FFTSetup
 
     // Main thread only.
+    /// How far bars and peaks drop per display frame, as a fraction of full height.
+    var barFall = Falloff.normal.barRate
+    var peakFall = Falloff.normal.peakRate
     private(set) var bars = [Float](repeating: 0, count: barCount)
     private(set) var peaks = [Float](repeating: 0, count: barCount)
     private(set) var waveform = [Float](repeating: 0, count: waveformCount)
@@ -161,14 +161,14 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         lock.unlock()
 
         for i in 0..<Self.barCount {
-            bars[i] = max(target[i], bars[i] - Self.barFall)
+            bars[i] = max(target[i], bars[i] - barFall)
             if bars[i] >= peaks[i] {
                 peaks[i] = bars[i]
                 peakHold[i] = Self.peakHoldFrames
             } else if peakHold[i] > 0 {
                 peakHold[i] -= 1
             } else {
-                peaks[i] = max(0, peaks[i] - Self.peakFall)
+                peaks[i] = max(0, peaks[i] - peakFall)
             }
         }
     }

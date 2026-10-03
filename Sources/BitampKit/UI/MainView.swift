@@ -1,28 +1,24 @@
 import AppKit
-import UniformTypeIdentifiers
 
 /// The main window's only view. Composes the skin into a 275×116 bitmap each frame,
 /// then scales it up with nearest-neighbor filtering. All hit-testing is in 1× pixels.
-final class MainView: NSView {
+///
+/// It's also the first responder for the Playback and Visualization menus.
+final class MainView: NSView, NSMenuItemValidation {
     static let scale: CGFloat = 2
     static let framesPerSecond = 30.0
 
-    enum VisMode {
-        case spectrum, oscilloscope, off
-    }
-
-    let engine: PlayerEngine
+    let controller: PlaybackController
+    let preferences: Preferences
     var skin: Skin
-    var onOpenFiles: (([URL]) -> Void)?
-    var onEject: (() -> Void)?
+    /// Shows the open panel.
+    var onOpen: (() -> Void)?
 
+    private var engine: PlayerEngine { controller.engine }
     private let canvas = Canvas(Layout.size)
     private var timer: Timer?
     private var frameCount = 0
     private var marquee = Marquee(visibleWidth: Int(Layout.marquee.width))
-    private var visMode = VisMode.spectrum
-    private var showRemaining = false
-    private var shuffle = false
 
     // Mouse tracking.
     private var pressed: Control?
@@ -30,13 +26,17 @@ final class MainView: NSView {
     private var slider: (control: Control, grab: CGFloat)?
     /// Where the position thumb sits while it's being dragged, 0...1. Seeks on release.
     private var pendingSeek: Double?
+    /// Audio files in the drag over the window, keyed by pasteboard change count.
+    private var dropFileCount: (changeCount: Int, count: Int)?
 
-    init(engine: PlayerEngine, skin: Skin) {
-        self.engine = engine
+    init(controller: PlaybackController, preferences: Preferences, skin: Skin) {
+        self.controller = controller
+        self.preferences = preferences
         self.skin = skin
         super.init(frame: NSRect(origin: .zero, size: NSSize(
             width: Layout.size.width * Self.scale, height: Layout.size.height * Self.scale)))
         registerForDraggedTypes([.fileURL])
+        applyFalloff()
     }
 
     required init?(coder: NSCoder) {
@@ -75,10 +75,11 @@ final class MainView: NSView {
 
     private var titleText: String {
         guard let track = engine.track else {
-            return "BITAMP - DROP A FILE HERE OR PRESS L TO OPEN ONE"
+            return "BITAMP - DROP FILES OR FOLDERS HERE, OR PRESS L TO OPEN"
         }
         let name = [track.artist, track.title].compactMap { $0 }.joined(separator: " - ")
-        return "\(name) (\(TimeFormat.clock(track.duration)))"
+        let number = controller.queue.currentIndex.map { "\($0 + 1). " } ?? ""
+        return "\(number)\(name) (\(TimeFormat.clock(track.duration)))"
     }
 
     // MARK: - Drawing
@@ -120,8 +121,8 @@ final class MainView: NSView {
 
     private func isOn(_ button: ToggleButton) -> Bool {
         switch button {
-        case .shuffle: return shuffle
-        case .repeatTrack: return engine.repeatTrack
+        case .shuffle: return controller.shuffle
+        case .repeatTrack: return controller.repeats
         case .equalizer, .playlist: return false
         }
     }
@@ -144,6 +145,7 @@ final class MainView: NSView {
             return
         }
         let elapsed = currentTime(of: track)
+        let showRemaining = preferences.showRemaining
         let shown = showRemaining ? max(0, track.duration - elapsed) : elapsed
         if showRemaining {
             c.draw(skin.image(for: .minus), at: Layout.minus.origin)
@@ -164,7 +166,8 @@ final class MainView: NSView {
         let (x0, y0) = (Int(rect.minX), Int(rect.minY))
         let colors = skin.visColors
         c.fill(rect, colors[0])
-        guard visMode != .off else { return }
+        let mode = preferences.visMode
+        guard mode != .off else { return }
         for y in stride(from: 1, to: Int(rect.height), by: 2) {
             for x in stride(from: 1, to: Int(rect.width), by: 2) {
                 c.fill(x0 + x, y0 + y, 1, 1, colors[1])
@@ -173,8 +176,9 @@ final class MainView: NSView {
 
         let height = Int(rect.height)
         let analyzer = engine.analyzer
-        switch visMode {
+        switch mode {
         case .spectrum:
+            let showPeaks = preferences.showPeaks
             for i in 0..<SpectrumAnalyzer.barCount {
                 let x = x0 + i * 4
                 let bar = Int((analyzer.bars[i] * Float(height)).rounded())
@@ -182,17 +186,23 @@ final class MainView: NSView {
                     c.fill(x, y0 + row, 3, 1, colors[2 + row])
                 }
                 let peak = Int((analyzer.peaks[i] * Float(height)).rounded())
-                if peak > 0 {
+                if showPeaks && peak > 0 {
                     c.fill(x, y0 + height - peak, 3, 1, colors[23])
                 }
             }
         case .oscilloscope:
             let middle = height / 2
+            let style = preferences.oscilloscopeStyle
             var previous: Int?
             for (x, sample) in analyzer.waveform.enumerated() {
                 let y = min(max(middle - Int((sample * Float(middle)).rounded()), 0), height - 1)
-                let (low, high) = (min(y, previous ?? y), max(y, previous ?? y))
-                for row in low...high {
+                let rows: ClosedRange<Int>
+                switch style {
+                case .dots: rows = y...y
+                case .lines: rows = min(y, previous ?? y)...max(y, previous ?? y)
+                case .solid: rows = min(y, middle)...max(y, middle)
+                }
+                for row in rows {
                     c.fill(x0 + x, y0 + row, 1, 1, colors[18 + min(4, abs(row - middle) / 2)])
                 }
                 previous = y
@@ -256,14 +266,14 @@ final class MainView: NSView {
     private func drawSliders(_ c: Canvas) {
         let lastLevel = Double(SkinElement.sliderLevels - 1)
 
-        let volumeLevel = Int((engine.volume * lastLevel).rounded())
+        let volumeLevel = Int((controller.volume * lastLevel).rounded())
         c.draw(skin.image(for: .volumeBackground(level: volumeLevel)), at: Layout.volume.origin)
-        let volumeX = SliderGeometry.volume.thumbX(for: engine.volume)
+        let volumeX = SliderGeometry.volume.thumbX(for: controller.volume)
         c.draw(skin.image(for: .volumeThumb(pressed: slider?.control == .volume)), Int(volumeX), Int(Layout.volume.minY) + 1)
 
-        let balanceLevel = Int((abs(engine.balance) * lastLevel).rounded())
+        let balanceLevel = Int((abs(controller.balance) * lastLevel).rounded())
         c.draw(skin.image(for: .balanceBackground(level: balanceLevel)), at: Layout.balance.origin)
-        let balanceX = SliderGeometry.balance.thumbX(for: BalanceMapping.slider(fromBalance: engine.balance))
+        let balanceX = SliderGeometry.balance.thumbX(for: BalanceMapping.slider(fromBalance: controller.balance))
         c.draw(skin.image(for: .balanceThumb(pressed: slider?.control == .balance)), Int(balanceX), Int(Layout.balance.minY) + 1)
 
         c.draw(skin.image(for: .positionBackground), at: Layout.position.origin)
@@ -295,13 +305,10 @@ final class MainView: NSView {
         case .volume, .balance, .position:
             beginSliderDrag(control, at: point)
         case .timeDisplay:
-            showRemaining.toggle()
+            preferences.showRemaining.toggle()
         case .visualizer:
-            switch visMode {
-            case .spectrum: visMode = .oscilloscope
-            case .oscilloscope: visMode = .off
-            case .off: visMode = .spectrum
-            }
+            let modes = VisMode.allCases
+            preferences.visMode = modes[(modes.firstIndex(of: preferences.visMode)! + 1) % modes.count]
         default:
             pressed = control
             pressedInside = true
@@ -335,6 +342,16 @@ final class MainView: NSView {
         needsDisplay = true
     }
 
+    /// Right-clicking the visualizer shows its options; anywhere else, the main menu.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        Layout.control(at: pixel(for: event)) == .visualizer ? Menus.visualization() : Menus.context()
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        let step = event.hasPreciseScrollingDeltas ? 0.002 : 0.02
+        nudgeVolume(by: Double(event.scrollingDeltaY) * step)
+    }
+
     private func geometry(for control: Control) -> SliderGeometry {
         switch control {
         case .volume: return .volume
@@ -345,8 +362,8 @@ final class MainView: NSView {
 
     private func sliderValue(for control: Control) -> Double {
         switch control {
-        case .volume: return engine.volume
-        case .balance: return BalanceMapping.slider(fromBalance: engine.balance)
+        case .volume: return controller.volume
+        case .balance: return BalanceMapping.slider(fromBalance: controller.balance)
         default:
             guard let track = engine.track, track.duration > 0 else { return 0 }
             return engine.currentTime / track.duration
@@ -370,11 +387,11 @@ final class MainView: NSView {
         let value = geometry(for: slider.control).value(forThumbX: point.x - slider.grab)
         switch slider.control {
         case .volume:
-            engine.volume = value
+            controller.volume = value
             marquee.message = volumeMessage
         case .balance:
-            engine.balance = BalanceMapping.balance(fromSlider: value)
-            let balance = engine.balance
+            controller.balance = BalanceMapping.balance(fromSlider: value)
+            let balance = controller.balance
             marquee.message = balance == 0
                 ? "BALANCE: CENTER"
                 : "BALANCE: \(Int((abs(balance) * 100).rounded()))% \(balance < 0 ? "LEFT" : "RIGHT")"
@@ -387,42 +404,125 @@ final class MainView: NSView {
     }
 
     private var volumeMessage: String {
-        "VOLUME: \(Int((engine.volume * 100).rounded()))%"
+        "VOLUME: \(Int((controller.volume * 100).rounded()))%"
+    }
+
+    private func nudgeVolume(by amount: Double) {
+        guard amount != 0 else { return }
+        controller.volume += amount
+        marquee.flash(volumeMessage, for: 1)
     }
 
     private func perform(_ control: Control) {
         switch control {
+        case .title(.options):
+            let button = TitleButton.options.rect
+            let below = NSPoint(x: button.minX * Self.scale, y: bounds.height - button.maxY * Self.scale)
+            Menus.context().popUp(positioning: nil, at: below, in: self)
         case .title(.close): NSApp.terminate(nil)
         case .title(.minimize): window?.miniaturize(nil)
-        case .transport(.previous), .transport(.next): engine.restart()
-        case .transport(.play): play()
-        case .transport(.pause): engine.pause()
-        case .transport(.stop): engine.stop()
-        case .transport(.eject): onEject?()
-        case .toggle(.shuffle): shuffle.toggle()
-        case .toggle(.repeatTrack): engine.repeatTrack.toggle()
+        case .transport(.previous): previousTrack(nil)
+        case .transport(.play): play(nil)
+        case .transport(.pause): pause(nil)
+        case .transport(.stop): stop(nil)
+        case .transport(.next): nextTrack(nil)
+        case .transport(.eject): openFiles(nil)
+        case .toggle(.shuffle): toggleShuffle(nil)
+        case .toggle(.repeatTrack): toggleRepeat(nil)
         case .about: NSApp.orderFrontStandardAboutPanel(nil)
-        default: break  // Options, shade, EQ and playlist arrive in later phases.
+        default: break  // Shade, EQ and playlist arrive in later phases.
         }
     }
 
-    private func play() {
-        if engine.track == nil {
-            onEject?()
+    // MARK: - Menu actions
+
+    @objc func openFiles(_ sender: Any?) { onOpen?() }
+    @objc func previousTrack(_ sender: Any?) { controller.previous() }
+    @objc func nextTrack(_ sender: Any?) { controller.next() }
+    @objc func pause(_ sender: Any?) { engine.pause() }
+    @objc func stop(_ sender: Any?) { engine.stop() }
+
+    @objc func play(_ sender: Any?) {
+        if controller.queue.isEmpty {
+            onOpen?()
         } else {
-            engine.play()
+            controller.play()
         }
+    }
+
+    @objc func toggleShuffle(_ sender: Any?) {
+        controller.shuffle.toggle()
+        marquee.flash("SHUFFLE: \(controller.shuffle ? "ON" : "OFF")", for: 1)
+    }
+
+    @objc func toggleRepeat(_ sender: Any?) {
+        controller.repeats.toggle()
+        marquee.flash("REPEAT: \(controller.repeats ? "ON" : "OFF")", for: 1)
+    }
+
+    @objc func setVisMode(_ sender: NSMenuItem) {
+        if let mode = choice(VisMode.self, sender) { preferences.visMode = mode }
+    }
+
+    @objc func togglePeaks(_ sender: Any?) {
+        preferences.showPeaks.toggle()
+    }
+
+    @objc func setBarFalloff(_ sender: NSMenuItem) {
+        if let falloff = choice(Falloff.self, sender) { preferences.barFalloff = falloff }
+        applyFalloff()
+    }
+
+    @objc func setPeakFalloff(_ sender: NSMenuItem) {
+        if let falloff = choice(Falloff.self, sender) { preferences.peakFalloff = falloff }
+        applyFalloff()
+    }
+
+    @objc func setOscilloscopeStyle(_ sender: NSMenuItem) {
+        if let style = choice(OscilloscopeStyle.self, sender) { preferences.oscilloscopeStyle = style }
+    }
+
+    private func choice<T: RawRepresentable>(_ type: T.Type, _ item: NSMenuItem) -> T? where T.RawValue == String {
+        (item.representedObject as? String).flatMap(T.init(rawValue:))
+    }
+
+    private func applyFalloff() {
+        engine.analyzer.barFall = preferences.barFalloff.barRate
+        engine.analyzer.peakFall = preferences.peakFalloff.peakRate
+    }
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        let selected = item.representedObject as? String
+        switch item.action {
+        case #selector(toggleShuffle(_:)): item.state = controller.shuffle ? .on : .off
+        case #selector(toggleRepeat(_:)): item.state = controller.repeats ? .on : .off
+        case #selector(togglePeaks(_:)): item.state = preferences.showPeaks ? .on : .off
+        case #selector(setVisMode(_:)): item.state = selected == preferences.visMode.rawValue ? .on : .off
+        case #selector(setBarFalloff(_:)): item.state = selected == preferences.barFalloff.rawValue ? .on : .off
+        case #selector(setPeakFalloff(_:)): item.state = selected == preferences.peakFalloff.rawValue ? .on : .off
+        case #selector(setOscilloscopeStyle(_:)):
+            item.state = selected == preferences.oscilloscopeStyle.rawValue ? .on : .off
+        case #selector(previousTrack(_:)), #selector(nextTrack(_:)): return controller.queue.count > 0
+        case #selector(pause(_:)), #selector(stop(_:)): return engine.track != nil
+        default: break
+        }
+        return true
     }
 
     // MARK: - Keyboard
 
     override func keyDown(with event: NSEvent) {
+        // The menu bar usually claims the letters first; this covers L, which is only in
+        // the right-click menu, and anything the menus didn't take.
         switch event.charactersIgnoringModifiers?.lowercased() {
-        case "z", "b": engine.restart()
-        case "x": play()
-        case "c": engine.pause()
-        case "v": engine.stop()
-        case "l": onEject?()
+        case "l": openFiles(nil)
+        case "z": previousTrack(nil)
+        case "x": play(nil)
+        case "c": pause(nil)
+        case "v": stop(nil)
+        case "b": nextTrack(nil)
+        case "s": toggleShuffle(nil)
+        case "r": toggleRepeat(nil)
         default:
             switch event.specialKey {
             case .leftArrow?: engine.seek(to: engine.currentTime - 5)
@@ -434,27 +534,46 @@ final class MainView: NSView {
         }
     }
 
-    private func nudgeVolume(by amount: Double) {
-        engine.volume = min(max(engine.volume + amount, 0), 1)
-        marquee.flash(volumeMessage, for: 1)
-    }
-
     // MARK: - Drag and drop
 
+    /// Dropping replaces the queue and plays; holding Shift adds to it instead.
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        audioURLs(in: sender).isEmpty ? [] : .copy
+        draggingUpdated(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        // This runs repeatedly during a drag, so only scan dropped folders once.
+        let changeCount = sender.draggingPasteboard.changeCount
+        if dropFileCount?.changeCount != changeCount {
+            dropFileCount = (changeCount, AudioFiles.expand(droppedURLs(sender)).count)
+        }
+        let count = dropFileCount?.count ?? 0
+        guard count > 0 else {
+            marquee.message = "NO AUDIO FILES THERE"
+            return []
+        }
+        let files = count == 1 ? "1 FILE" : "\(count) FILES"
+        marquee.message = NSEvent.modifierFlags.contains(.shift) ? "DROP TO ADD \(files)" : "DROP TO PLAY \(files)"
+        return .copy
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        marquee.message = nil
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let urls = audioURLs(in: sender)
-        guard !urls.isEmpty else { return false }
-        onOpenFiles?(urls)
+        marquee.message = nil
+        let urls = droppedURLs(sender)
+        if NSEvent.modifierFlags.contains(.shift) {
+            controller.enqueue(urls)
+        } else {
+            controller.open(urls)
+        }
         return true
     }
 
-    private func audioURLs(in info: NSDraggingInfo) -> [URL] {
-        let urls = info.draggingPasteboard.readObjects(
+    private func droppedURLs(_ info: NSDraggingInfo) -> [URL] {
+        info.draggingPasteboard.readObjects(
             forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
-        return urls.filter { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .audio) ?? false }
     }
 }
