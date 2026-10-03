@@ -123,14 +123,15 @@ enum EQLayout {
     }
 
     enum Control: Hashable {
-        case close, button(EQButton), preamp, band(Int)
+        case close, shade, button(EQButton), preamp, band(Int)
 
-        static let all: [Control] = [.close, .button(.on), .button(.auto), .button(.presets), .preamp]
+        static let all: [Control] = [.close, .shade, .button(.on), .button(.auto), .button(.presets), .preamp]
             + (0..<EqualizerSettings.bandCount).map(Control.band)
 
         var rect: CGRect {
             switch self {
             case .close: return EQLayout.close
+            case .shade: return ShadeLayout.eqShadeButton
             case .button(let button): return EQLayout.button(button)
             case .preamp: return EQLayout.preamp
             case .band(let index): return EQLayout.band(index)
@@ -211,11 +212,12 @@ enum PlaylistLayout {
     }
 
     enum Control: Hashable {
-        case close, titleBar, list, scrollbar, button(Button), transport(TransportButton), resizeGrip
+        case close, shade, titleBar, list, scrollbar, button(Button), transport(TransportButton), resizeGrip
     }
 
     static func control(at point: CGPoint, in size: CGSize) -> Control? {
         if close(in: size).contains(point) { return .close }
+        if ShadeLayout.playlistShadeButton(width: size.width).contains(point) { return .shade }
         if titleBar(in: size).contains(point) { return .titleBar }
         if list(in: size).contains(point) { return .list }
         if scrollTrack(in: size).contains(point) { return .scrollbar }
@@ -223,5 +225,66 @@ enum PlaylistLayout {
         for button in TransportButton.allCases where rect(button, in: size).contains(point) { return .transport(button) }
         if resizeGrip(in: size).contains(point) { return .resizeGrip }
         return nil
+    }
+}
+
+/// Geometry of the 14-pixel shade strips, in 1× pixels.
+enum ShadeLayout {
+    static let height: CGFloat = 14
+    static let thumb = CGSize(width: 3, height: 7)
+
+    // Main window
+    static let mainVisualizer = CGRect(x: 79, y: 5, width: 38, height: 5)
+    /// The minus sign, two minute digits and two second digits, in text glyphs.
+    static let mainTimeGlyphs: [Int] = [126, 132, 137, 147, 152]
+    static let mainTimeY = 4
+    static let mainTime = CGRect(x: 126, y: 3, width: 32, height: 8)
+    static let mainPosition = CGRect(x: 226, y: 4, width: 17, height: 7)
+
+    static func mainTransport(_ button: TransportButton) -> CGRect {
+        switch button {
+        case .previous: return CGRect(x: 168, y: 2, width: 8, height: 10)
+        case .play: return CGRect(x: 176, y: 2, width: 10, height: 10)
+        case .pause: return CGRect(x: 186, y: 2, width: 9, height: 10)
+        case .stop: return CGRect(x: 195, y: 2, width: 9, height: 10)
+        case .next: return CGRect(x: 204, y: 2, width: 10, height: 10)
+        case .eject: return CGRect(x: 214, y: 2, width: 11, height: 10)
+        }
+    }
+
+    /// Main-window controls in shade mode, as the same `Control`s the full window uses.
+    static func mainControl(at point: CGPoint) -> Control? {
+        for button in TitleButton.allCases where button.rect.contains(point) { return .title(button) }
+        for button in TransportButton.allCases where mainTransport(button).contains(point) { return .transport(button) }
+        if mainVisualizer.insetBy(dx: 0, dy: -2).contains(point) { return .visualizer }
+        if mainTime.contains(point) { return .timeDisplay }
+        if mainPosition.contains(point) { return .position }
+        return nil
+    }
+
+    // Equalizer
+    static let eqShadeButton = CGRect(x: 254, y: 3, width: 9, height: 9)
+    static let eqVolume = CGRect(x: 61, y: 4, width: 97, height: 7)
+    static let eqBalance = CGRect(x: 164, y: 4, width: 43, height: 7)
+
+    // Playlist (measured from the right edge, since the strip can be any width)
+    static func playlistShadeButton(width: CGFloat) -> CGRect {
+        CGRect(x: width - 20, y: 3, width: 9, height: 9)
+    }
+
+    static func playlistUnshade(width: CGFloat) -> CGRect {
+        CGRect(x: width - 19, y: 3, width: 9, height: 9)
+    }
+
+    static func playlistClose(width: CGFloat) -> CGRect {
+        CGRect(x: width - 10, y: 3, width: 9, height: 9)
+    }
+
+    static func playlistTitle(width: CGFloat) -> CGRect {
+        CGRect(x: 5, y: 4, width: width - 57, height: 6)
+    }
+
+    static func playlistTime(width: CGFloat) -> CGPoint {
+        CGPoint(x: width - 48, y: 4)
     }
 }

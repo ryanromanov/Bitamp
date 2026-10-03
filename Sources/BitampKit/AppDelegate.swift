@@ -34,10 +34,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             view.announce = mainView.announce
         }
 
-        let main = SkinnedWindow(view: mainView, autosaveName: "BitampMainWindow", isMain: true)
+        let main = SkinnedWindow(view: mainView, layoutName: "MainWindow", isMain: true)
         let group = WindowGroup(main: main, panels: [
-            .equalizer: SkinnedWindow(view: equalizerView, autosaveName: "BitampEqualizerWindow", isMain: false),
-            .playlist: SkinnedWindow(view: playlistView, autosaveName: "BitampPlaylistWindow", isMain: false),
+            .equalizer: SkinnedWindow(view: equalizerView, layoutName: "EqualizerWindow", isMain: false),
+            .playlist: SkinnedWindow(view: playlistView, layoutName: "PlaylistWindow", isMain: false),
         ])
         views = [mainView, equalizerView, playlistView]
         for view in views {
@@ -57,6 +57,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationWillTerminate(_ notification: Notification) {
         controller.saveSession()
+        windowGroup?.saveLayout()
     }
 
     public func application(_ application: NSApplication, open urls: [URL]) {
@@ -152,6 +153,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         for item in skinsMenu.items { item.target = self }
     }
 
+    @objc private func toggleEqualizerShade(_ sender: Any?) {
+        windowGroup?.toggleShade(.equalizer)
+    }
+
+    @objc private func togglePlaylistShade(_ sender: Any?) {
+        windowGroup?.toggleShade(.playlist)
+    }
+
     @objc private func setScale(_ sender: NSMenuItem) {
         preferences.scale = sender.tag
         windowGroup?.setScale(CGFloat(sender.tag))
@@ -196,9 +205,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             item.target = self
             return item
         }
-        for item in [equalizer, playlist, minimize] { item.target = self }
-        let windowMenu = Menus.menu("Window", [equalizer, playlist, .separator(), Menus.submenu(Menus.menu("Size", sizes)),
-                                               .separator(), minimize])
+        // Shade mode: the main window's item goes to the main view, like the playback commands.
+        let mainShade = Menus.item("Shade Main Window", #selector(MainView.toggleShade(_:)), "w", [.control])
+        let equalizerShade = Menus.item("Shade Equalizer", #selector(toggleEqualizerShade(_:)), "w", [.control, .option])
+        let playlistShade = Menus.item("Shade Playlist", #selector(togglePlaylistShade(_:)), "w", [.control, .shift])
+        for item in [equalizer, playlist, minimize, equalizerShade, playlistShade] { item.target = self }
+        let windowMenu = Menus.menu("Window", [
+            equalizer, playlist, .separator(),
+            mainShade, equalizerShade, playlistShade, .separator(),
+            Menus.submenu(Menus.menu("Size", sizes)), .separator(),
+            minimize,
+        ])
         NSApp.windowsMenu = windowMenu
 
         skinsMenu.delegate = self
@@ -220,6 +237,12 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(toggleEqualizer(_:)): item.state = windowGroup?.isVisible(.equalizer) == true ? .on : .off
         case #selector(togglePlaylist(_:)): item.state = windowGroup?.isVisible(.playlist) == true ? .on : .off
         case #selector(setScale(_:)): item.state = item.tag == preferences.scale ? .on : .off
+        case #selector(toggleEqualizerShade(_:)):
+            item.state = windowGroup.map { $0.isShaded(.equalizer) } == true ? .on : .off
+            return windowGroup?.isVisible(.equalizer) == true
+        case #selector(togglePlaylistShade(_:)):
+            item.state = windowGroup.map { $0.isShaded(.playlist) } == true ? .on : .off
+            return windowGroup?.isVisible(.playlist) == true
         default: break
         }
         return true

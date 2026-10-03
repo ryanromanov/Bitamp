@@ -114,6 +114,7 @@ final class WindowGroup {
     /// as `setScale` does, so the layout survives a size change between launches.
     func restore() {
         guard let mainView = main.contentView as? SkinnedView else { return }
+        restoreShade()
         let savedMain = savedFrame(main)
         // The size the frames were saved at, from the main window's saved width.
         let savedScale = savedMain.map { $0.width / Layout.size.width } ?? mainView.scale
@@ -139,13 +140,28 @@ final class WindowGroup {
         keepOnScreen()
     }
 
-    /// The frame AppKit autosaved. Read directly, because `setFrameUsingName` restores only
-    /// the position of a window that isn't user-resizable.
+    /// Saves every window's frame; `restore` reads them back on the next launch.
+    func saveLayout() {
+        for window in windows {
+            defaults.set(NSStringFromRect(window.frame), forKey: Self.key(window, "Frame"))
+        }
+    }
+
     private func savedFrame(_ window: NSWindow) -> NSRect? {
-        guard let string = defaults.string(forKey: "NSWindow Frame \(window.frameAutosaveName)") else { return nil }
-        let numbers = string.split(separator: " ").prefix(4).compactMap { Double($0) }
+        if let string = defaults.string(forKey: Self.key(window, "Frame")) {
+            let frame = NSRectFromString(string)
+            return frame.width > 0 && frame.height > 0 ? frame : nil
+        }
+        // Earlier versions used AppKit's autosave: "x y width height …" under "NSWindow Frame Bitamp…".
+        guard let legacy = defaults.string(forKey: "NSWindow Frame Bitamp\(Self.key(window, ""))") else { return nil }
+        let numbers = legacy.split(separator: " ").prefix(4).compactMap { Double($0) }
         guard numbers.count == 4, numbers[2] > 0, numbers[3] > 0 else { return nil }
         return NSRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3])
+    }
+
+    /// A settings key for one window, such as "MainWindowFrame".
+    private static func key(_ window: NSWindow, _ suffix: String) -> String {
+        "\((window as? SkinnedWindow)?.layoutName ?? window.title)\(suffix)"
     }
 
     /// Sizes a window for its view's scale (and, for the playlist, a height in skin pixels)
@@ -175,6 +191,62 @@ final class WindowGroup {
 
     private static func visibilityKey(_ panel: Panel) -> String {
         "\(panel.rawValue)Visible"
+    }
+
+    // MARK: - Shade mode
+
+    func isShaded(_ window: NSWindow) -> Bool {
+        (window.contentView as? SkinnedView)?.isShaded ?? false
+    }
+
+    func toggleShade(_ window: NSWindow) {
+        setShaded(window, !isShaded(window))
+    }
+
+    func isShaded(_ panel: Panel) -> Bool {
+        panels[panel].map(isShaded) ?? false
+    }
+
+    func toggleShade(_ panel: Panel) {
+        if let window = panels[panel] { toggleShade(window) }
+    }
+
+    /// Collapses or expands a window from its top edge. Windows docked below it move with
+    /// its bottom edge, so a docked stack stays docked.
+    func setShaded(_ window: NSWindow, _ shaded: Bool) {
+        guard let view = window.contentView as? SkinnedView, view.isShaded != shaded else { return }
+        let others = windows.filter { $0 !== window && $0.isVisible }
+        let below = Docking.docked(to: window.frame, among: others.map(\.frame))
+            .map { others[$0] }
+            .filter { $0.frame.maxY <= window.frame.minY + 1 }
+        let top = window.frame.maxY
+        let oldHeight = window.frame.height
+        view.setShaded(shaded)
+        window.setFrameOrigin(NSPoint(x: window.frame.minX, y: top - window.frame.height))
+        let rise = oldHeight - window.frame.height
+        for other in below {
+            other.setFrameOrigin(NSPoint(x: other.frame.minX, y: other.frame.minY + rise))
+        }
+        defaults.set(shaded, forKey: Self.shadeKey(window))
+        defaults.set(view.unshadedPixelHeight.map(Double.init), forKey: Self.unshadedHeightKey(window))
+    }
+
+    private static func shadeKey(_ window: NSWindow) -> String {
+        key(window, "Shaded")
+    }
+
+    private static func unshadedHeightKey(_ window: NSWindow) -> String {
+        key(window, "UnshadedHeight")
+    }
+
+    /// Puts windows back in shade mode before their frames are placed.
+    private func restoreShade() {
+        for window in windows where defaults.bool(forKey: Self.shadeKey(window)) {
+            guard let view = window.contentView as? SkinnedView else { continue }
+            let height = defaults.double(forKey: Self.unshadedHeightKey(window))
+            view.setShaded(true)
+            view.unshadedPixelHeight = height > 0 ? height : nil
+        }
     }
 
     /// Resizes every window to `scale`, keeping the main window's top-left corner fixed

@@ -20,6 +20,7 @@ final class PlaylistView: SkinnedView {
     private var scrollAccumulator: CGFloat = 0
     private var lastPlayingIndex: Int?
     private var closePressed = false
+    private var shadePressed = false
     /// Where dropped files would go, as an insertion index, while a drag is over the list.
     private var dropIndex: Int?
 
@@ -29,6 +30,7 @@ final class PlaylistView: SkinnedView {
         case scrollThumb(grab: CGFloat)
         case resize(startHeight: CGFloat, startMouseY: CGFloat)
         case close
+        case shade
     }
     private var drag: Drag?
 
@@ -46,7 +48,8 @@ final class PlaylistView: SkinnedView {
     }
 
     override func normalizedPixelSize(_ proposed: CGSize) -> CGSize {
-        CGSize(width: PlaylistLayout.width, height: PlaylistLayout.snappedHeight(proposed.height))
+        CGSize(width: PlaylistLayout.width,
+               height: isShaded ? ShadeLayout.height : PlaylistLayout.snappedHeight(proposed.height))
     }
 
     private var queue: PlayQueue { controller.queue }
@@ -77,6 +80,10 @@ final class PlaylistView: SkinnedView {
     // MARK: - Drawing
 
     override func render(into c: Canvas) {
+        if isShaded {
+            renderShade(c)
+            return
+        }
         let size = pixelSize
         let (w, h) = (Int(size.width), Int(size.height))
         let top = Int(PlaylistLayout.top), bottom = Int(PlaylistLayout.bottom)
@@ -96,6 +103,8 @@ final class PlaylistView: SkinnedView {
         }
         c.draw(skin.image(for: .playlistBottomLeft), 0, h - bottom)
         c.draw(skin.image(for: .playlistBottomRight), w - 150, h - bottom)
+        c.draw(skin.image(for: .playlistShadeButton(pressed: shadePressed)),
+               at: ShadeLayout.playlistShadeButton(width: size.width).origin)
         c.draw(skin.image(for: .playlistCloseButton(pressed: closePressed)), at: PlaylistLayout.close(in: size).origin)
 
         // The list: background, selection and drop marker. The text is drawn in drawOverlay.
@@ -117,6 +126,35 @@ final class PlaylistView: SkinnedView {
         let miniTime = PlaylistLayout.miniTime(in: size)
         if controller.engine.state != .stopped {
             drawPixelText(c, TimeFormat.clock(controller.engine.currentTime), Int(miniTime.x), Int(miniTime.y))
+        }
+    }
+
+    /// The strip shows the current track and its length.
+    private func renderShade(_ c: Canvas) {
+        let width = pixelSize.width
+        let w = Int(width)
+        for x in stride(from: 25, to: w - 50, by: 25) {
+            c.draw(skin.image(for: .playlistShadeTile), x, 0)
+        }
+        c.draw(skin.image(for: .playlistShadeLeft(active: isActive)), 0, 0)
+        c.draw(skin.image(for: .playlistShadeRight(active: isActive)), w - 50, 0)
+        c.draw(skin.image(for: .playlistUnshadeButton(pressed: shadePressed)),
+               at: ShadeLayout.playlistUnshade(width: width).origin)
+        c.draw(skin.image(for: .playlistCloseButton(pressed: closePressed)),
+               at: ShadeLayout.playlistClose(width: width).origin)
+
+        guard let index = queue.playingIndex ?? queue.currentIndex else { return }
+        let url = queue.items[index]
+        let title = ShadeLayout.playlistTitle(width: width)
+        c.context.saveGState()
+        c.context.clip(to: title)
+        drawPixelText(c, "\(index + 1). \(controller.info.displayName(for: url))", Int(title.minX), Int(title.minY))
+        c.context.restoreGState()
+        if let duration = controller.info.duration(for: url) {
+            let time = ShadeLayout.playlistTime(width: width)
+            let text = TimeFormat.clock(duration)
+            // Right-aligned in the 20-pixel time box.
+            drawPixelText(c, text, Int(time.x) + 20 - PixelFont.width(of: text), Int(time.y))
         }
     }
 
@@ -157,6 +195,7 @@ final class PlaylistView: SkinnedView {
     }
 
     override func drawOverlay(in context: CGContext) {
+        guard !isShaded else { return }
         let colors = skin.playlistColors
         let list = viewRect(forPixels: listRect)
         NSGraphicsContext.saveGraphicsState()
@@ -194,11 +233,34 @@ final class PlaylistView: SkinnedView {
     }
 
     override func pixelMouseDown(at point: CGPoint, event: NSEvent) -> Bool {
-        guard let control = PlaylistLayout.control(at: point, in: pixelSize), control != .titleBar else { return false }
+        if isShaded {
+            if ShadeLayout.playlistUnshade(width: pixelSize.width).contains(point) {
+                drag = .shade
+                shadePressed = true
+            } else if ShadeLayout.playlistClose(width: pixelSize.width).contains(point) {
+                drag = .close
+                closePressed = true
+            } else if event.clickCount == 2 {
+                windowGroup?.toggleShade(.playlist)
+            } else {
+                return false
+            }
+            return true
+        }
+        guard let control = PlaylistLayout.control(at: point, in: pixelSize), control != .titleBar else {
+            if event.clickCount == 2 && PlaylistLayout.titleBar(in: pixelSize).contains(point) {
+                windowGroup?.toggleShade(.playlist)
+                return true
+            }
+            return false
+        }
         switch control {
         case .close:
             drag = .close
             closePressed = true
+        case .shade:
+            drag = .shade
+            shadePressed = true
         case .list:
             listMouseDown(row: row(at: point), event: event)
         case .scrollbar:
@@ -274,7 +336,13 @@ final class PlaylistView: SkinnedView {
             frame.size.height = height
             window.setFrame(frame, display: true)
         case .close:
-            closePressed = PlaylistLayout.close(in: pixelSize).contains(point)
+            let rect = isShaded ? ShadeLayout.playlistClose(width: pixelSize.width) : PlaylistLayout.close(in: pixelSize)
+            closePressed = rect.contains(point)
+        case .shade:
+            let rect = isShaded
+                ? ShadeLayout.playlistUnshade(width: pixelSize.width)
+                : ShadeLayout.playlistShadeButton(width: pixelSize.width)
+            shadePressed = rect.contains(point)
         case nil:
             break
         }
@@ -286,11 +354,14 @@ final class PlaylistView: SkinnedView {
             selection = [clicked]
         case .close where closePressed:
             windowGroup?.setVisible(.playlist, false)
+        case .shade where shadePressed:
+            windowGroup?.toggleShade(.playlist)
         default:
             break
         }
         drag = nil
         closePressed = false
+        shadePressed = false
     }
 
     override func scrollWheel(with event: NSEvent) {

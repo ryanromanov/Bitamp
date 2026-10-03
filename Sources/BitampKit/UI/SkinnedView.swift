@@ -56,6 +56,26 @@ class SkinnedView: NSView {
         window?.isKeyWindow ?? false
     }
 
+    /// Collapsed to a 14-pixel strip. Subclasses draw and hit-test differently while shaded.
+    private(set) var isShaded = false
+    /// The height to go back to when unshading.
+    var unshadedPixelHeight: CGFloat?
+
+    /// Collapses to or expands from the shade strip, keeping the width.
+    func setShaded(_ shaded: Bool) {
+        guard shaded != isShaded else { return }
+        if shaded { unshadedPixelHeight = pixelSize.height }
+        isShaded = shaded
+        let height = shaded ? ShadeLayout.height : (unshadedPixelHeight ?? pixelSize.height)
+        let pixels = normalizedPixelSize(CGSize(width: pixelSize.width, height: height))
+        let size = NSSize(width: pixels.width * scale, height: pixels.height * scale)
+        if let window {
+            window.setContentSize(size)
+        } else {
+            setFrameSize(size)
+        }
+    }
+
     /// The nearest valid size for this window, in skin pixels. Fixed-size windows override
     /// this to return their size; the playlist snaps to its tile steps.
     func normalizedPixelSize(_ proposed: CGSize) -> CGSize {
@@ -178,9 +198,14 @@ class SkinnedView: NSView {
 /// for menu commands while the equalizer or playlist has focus.
 final class SkinnedWindow: NSWindow {
     private let becomesMain: Bool
+    /// Names this window's saved frame and shade state. `WindowGroup` saves and restores
+    /// frames itself rather than with AppKit's autosave, which rewrites a saved frame as soon
+    /// as the window moves, even mid-restore.
+    let layoutName: String
 
-    init(view: SkinnedView, autosaveName: String, isMain: Bool) {
+    init(view: SkinnedView, layoutName: String, isMain: Bool) {
         becomesMain = isMain
+        self.layoutName = layoutName
         super.init(
             contentRect: NSRect(origin: .zero, size: view.frame.size),
             styleMask: [.borderless, .miniaturizable],
@@ -191,7 +216,6 @@ final class SkinnedWindow: NSWindow {
         backgroundColor = .black
         isReleasedWhenClosed = false
         title = "Bitamp"
-        setFrameAutosaveName(autosaveName)
         makeFirstResponder(view)
     }
 

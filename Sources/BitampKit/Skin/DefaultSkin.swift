@@ -59,7 +59,7 @@ final class DefaultSkin: Skin {
             return c.image()
 
         case .eqBackground: return eqBackground()
-        case .eqTitleBar(let active): return titleBar("BITAMP EQUALIZER", active: active, ridgesEnd: 259)
+        case .eqTitleBar(let active): return titleBar("BITAMP EQUALIZER", active: active, ridgesEnd: 249)
         case .eqCloseButton(let pressed), .playlistCloseButton(let pressed): return titleButton(.close, pressed: pressed)
         case .eqButton(let button, let on, let pressed): return eqButton(button, on: on, pressed: pressed)
         case .eqSliderBackground(let level): return eqSliderBackground(level)
@@ -92,7 +92,93 @@ final class DefaultSkin: Skin {
                 c.fill(2, y + 1, 4, 1, Palette.faceLight)
             }
             return c.image()
+
+        case .mainShadeBackground(let active): return mainShadeBackground(active: active)
+        case .mainUnshadeButton(let pressed), .eqUnshadeButton(let pressed), .playlistUnshadeButton(let pressed):
+            return unshadeButton(pressed: pressed)
+        case .mainShadePosition:
+            let c = Canvas(ShadeLayout.mainPosition.size)
+            groove(c, 0, 1, c.width, 5)
+            return c.image()
+        case .mainShadeThumb, .eqShadeVolumeThumb, .eqShadeBalanceThumb:
+            let c = Canvas(ShadeLayout.thumb)
+            c.fill(0, 0, c.width, c.height, Palette.icon)
+            c.fill(0, c.height - 1, c.width, 1, Palette.faceLight)
+            return c.image()
+        case .eqShadeButton(let pressed), .playlistShadeButton(let pressed):
+            return titleButton(.shade, pressed: pressed)
+        case .eqShadeCloseButton(let pressed):
+            return titleButton(.close, pressed: pressed)
+        case .eqShadeBackground(let active): return eqShadeBackground(active: active)
+        case .playlistShadeLeft: return playlistShade(width: 25, lcdFrom: 4, lcdTo: 25, leftEdge: true)
+        case .playlistShadeTile: return playlistShade(width: 25, lcdFrom: 0, lcdTo: 25)
+        case .playlistShadeRight: return playlistShade(width: 50, lcdFrom: 0, lcdTo: 23, rightEdge: true)
         }
+    }
+
+    // MARK: - Shade mode
+
+    private func shadeStrip(_ c: Canvas) {
+        c.fill(0, 0, c.width, c.height, Palette.title)
+        c.bevel(0, 0, c.width, c.height, light: Palette.faceLight, dark: Palette.faceDark)
+    }
+
+    private func mainShadeBackground(active: Bool) -> CGImage {
+        let c = Canvas(Layout.titleBar.size)
+        shadeStrip(c)
+        ridges(c, 18, 74, rows: [4, 7, 10], active: active)
+        let vis = ShadeLayout.mainVisualizer
+        inset(c, Int(vis.minX), Int(vis.minY), Int(vis.width), Int(vis.height))
+        inset(c, 125, 3, 33, 8)
+        c.glyph(":", 142, ShadeLayout.mainTimeY, Palette.lcdOn)
+
+        // Mini transport icons, matching the click areas.
+        let ink = Palette.icon
+        let y = 3
+        c.fill(169, y + 1, 1, 6, ink)
+        for i in 0..<3 { c.fill(170 + i, y + 3 - i, 1, 1 + 2 * i, ink) }
+        for i in 0..<4 { c.fill(179 + i, y + i, 1, 8 - 2 * i, ink) }
+        c.fill(188, y + 1, 2, 6, ink); c.fill(191, y + 1, 2, 6, ink)
+        c.fill(197, y + 1, 6, 6, ink)
+        for i in 0..<3 { c.fill(206 + i, y + 1 + i, 1, 5 - 2 * i, ink) }
+        c.fill(209, y + 1, 1, 6, ink)
+        for i in 0..<4 { c.fill(219 - i, y + 1 + i, 1 + 2 * i, 1, ink) }
+        c.fill(216, y + 6, 7, 1, ink)
+        return c.image()
+    }
+
+    private func unshadeButton(pressed: Bool) -> CGImage {
+        let c = Canvas(9, 9)
+        raised(c, pressed: pressed)
+        let o = pressed ? 1 : 0
+        c.fill(2 + o, 2 + o, 5, 1, Palette.icon)
+        c.fill(2 + o, 2 + o, 1, 5, Palette.icon)
+        c.fill(6 + o, 2 + o, 1, 5, Palette.icon)
+        c.fill(2 + o, 6 + o, 5, 1, Palette.icon)
+        return c.image()
+    }
+
+    private func eqShadeBackground(active: Bool) -> CGImage {
+        let c = Canvas(Layout.titleBar.size)
+        shadeStrip(c)
+        c.text("EQ", 6, 4, active ? Palette.amber : Palette.label)
+        ridges(c, 18, 56, rows: [4, 7, 10], active: active)
+        for rect in [ShadeLayout.eqVolume, ShadeLayout.eqBalance] {
+            groove(c, Int(rect.minX), Int(rect.minY) + 1, Int(rect.width), 5)
+        }
+        ridges(c, 210, 250, rows: [4, 7, 10], active: active)
+        return c.image()
+    }
+
+    private func playlistShade(width: Int, lcdFrom: Int, lcdTo: Int, leftEdge: Bool = false, rightEdge: Bool = false) -> CGImage {
+        let c = Canvas(width, Int(ShadeLayout.height))
+        c.fill(0, 0, width, c.height, Palette.title)
+        c.fill(0, 0, width, 1, Palette.faceLight)
+        c.fill(0, c.height - 1, width, 1, Palette.faceDark)
+        if leftEdge { c.fill(0, 0, 1, c.height, Palette.faceLight) }
+        if rightEdge { c.fill(width - 1, 0, 1, c.height, Palette.faceDark) }
+        c.fill(lcdFrom, 3, lcdTo - lcdFrom, 8, Palette.lcd)
+        return c.image()
     }
 
     // MARK: - Window
@@ -396,8 +482,8 @@ final class DefaultSkin: Skin {
         c.fill(0, c.height - 1, width, 1, Palette.faceDark)
         if leftEdge { c.fill(0, 0, 1, c.height, Palette.faceLight) }
         if rightEdge { c.fill(width - 1, 0, 1, c.height, Palette.faceDark) }
-        // The top-right corner leaves room for the close button.
-        ridges(c, leftEdge ? 6 : 0, rightEdge ? 12 : width, rows: [5, 8, 11], active: active)
+        // The top-right corner leaves room for the shade and close buttons.
+        ridges(c, leftEdge ? 6 : 0, rightEdge ? 3 : width, rows: [5, 8, 11], active: active)
         return c.image()
     }
 

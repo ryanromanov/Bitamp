@@ -31,6 +31,17 @@ final class EqualizerView: SkinnedView {
     /// The slider being dragged, and where on its thumb it was grabbed.
     private var slider: (control: EQLayout.Control, grab: CGFloat)?
 
+    /// In shade mode the strip has tiny volume and balance sliders instead.
+    private enum ShadeSlider {
+        case volume, balance
+
+        var geometry: SliderGeometry {
+            SliderGeometry(track: self == .volume ? ShadeLayout.eqVolume : ShadeLayout.eqBalance,
+                           thumbWidth: ShadeLayout.thumb.width)
+        }
+    }
+    private var shadeSlider: ShadeSlider?
+
     init(controller: PlaybackController, skin: Skin, scale: CGFloat) {
         self.controller = controller
         super.init(pixelSize: EQLayout.size, skin: skin, scale: scale)
@@ -41,7 +52,7 @@ final class EqualizerView: SkinnedView {
     }
 
     override func normalizedPixelSize(_ proposed: CGSize) -> CGSize {
-        EQLayout.size
+        isShaded ? CGSize(width: EQLayout.size.width, height: ShadeLayout.height) : EQLayout.size
     }
 
     private var settings: EqualizerSettings {
@@ -52,8 +63,13 @@ final class EqualizerView: SkinnedView {
     // MARK: - Drawing
 
     override func render(into c: Canvas) {
+        if isShaded {
+            renderShade(c)
+            return
+        }
         c.draw(skin.image(for: .eqBackground), 0, 0)
         c.draw(skin.image(for: .eqTitleBar(active: isActive)), 0, 0)
+        c.draw(skin.image(for: .eqShadeButton(pressed: isPressed(.shade))), at: ShadeLayout.eqShadeButton.origin)
         c.draw(skin.image(for: .eqCloseButton(pressed: isPressed(.close))), at: EQLayout.close.origin)
         for button in [EQButton.on, .auto, .presets] {
             let on = button == .on && settings.enabled
@@ -64,6 +80,19 @@ final class EqualizerView: SkinnedView {
         for (index, gain) in settings.bands.enumerated() {
             drawSlider(c, .band(index), gain)
         }
+    }
+
+    private func renderShade(_ c: Canvas) {
+        c.draw(skin.image(for: .eqShadeBackground(active: isActive)), 0, 0)
+        c.draw(skin.image(for: .eqUnshadeButton(pressed: isPressed(.shade))), at: ShadeLayout.eqShadeButton.origin)
+        c.draw(skin.image(for: .eqShadeCloseButton(pressed: isPressed(.close))), at: EQLayout.close.origin)
+        let volume = controller.volume
+        let balance = BalanceMapping.slider(fromBalance: controller.balance)
+        let y = Int(ShadeLayout.eqVolume.minY)
+        c.draw(skin.image(for: .eqShadeVolumeThumb(ShadeThumb(volume))),
+               Int(ShadeSlider.volume.geometry.thumbX(for: volume)), y)
+        c.draw(skin.image(for: .eqShadeBalanceThumb(ShadeThumb(balance))),
+               Int(ShadeSlider.balance.geometry.thumbX(for: balance)), y)
     }
 
     private func isPressed(_ control: EQLayout.Control) -> Bool {
@@ -124,7 +153,14 @@ final class EqualizerView: SkinnedView {
     // MARK: - Mouse
 
     override func pixelMouseDown(at point: CGPoint, event: NSEvent) -> Bool {
-        guard let control = EQLayout.control(at: point) else { return false }
+        if isShaded { return shadeMouseDown(at: point, event: event) }
+        guard let control = EQLayout.control(at: point) else {
+            if event.clickCount == 2 && EQLayout.titleBar.contains(point) {
+                windowGroup?.toggleShade(.equalizer)
+                return true
+            }
+            return false
+        }
         switch control {
         case .preamp, .band:
             let geometry = VerticalSliderGeometry(track: control.rect, thumbHeight: EQLayout.thumb.height)
@@ -144,8 +180,46 @@ final class EqualizerView: SkinnedView {
         return true
     }
 
+    private func shadeMouseDown(at point: CGPoint, event: NSEvent) -> Bool {
+        if ShadeLayout.eqShadeButton.contains(point) {
+            pressed = .shade
+        } else if EQLayout.close.contains(point) {
+            pressed = .close
+        } else if ShadeLayout.eqVolume.contains(point) {
+            shadeSlider = .volume
+        } else if ShadeLayout.eqBalance.contains(point) {
+            shadeSlider = .balance
+        } else if event.clickCount == 2 {
+            windowGroup?.toggleShade(.equalizer)
+            return true
+        } else {
+            return false
+        }
+        pressedInside = pressed != nil
+        updateShadeSlider(at: point)
+        return true
+    }
+
+    private func updateShadeSlider(at point: CGPoint) {
+        guard let shadeSlider else { return }
+        let value = shadeSlider.geometry.value(forThumbX: point.x - 1)
+        switch shadeSlider {
+        case .volume:
+            controller.volume = value
+            announce?("VOLUME: \(Int((controller.volume * 100).rounded()))%")
+        case .balance:
+            controller.balance = BalanceMapping.balance(fromSlider: value)
+            let balance = controller.balance
+            announce?(balance == 0
+                ? "BALANCE: CENTER"
+                : "BALANCE: \(Int((abs(balance) * 100).rounded()))% \(balance < 0 ? "LEFT" : "RIGHT")")
+        }
+    }
+
     override func pixelMouseDragged(to point: CGPoint, event: NSEvent) {
-        if slider != nil {
+        if shadeSlider != nil {
+            updateShadeSlider(at: point)
+        } else if slider != nil {
             updateSlider(at: point)
         } else if let pressed {
             pressedInside = pressed.rect.contains(point)
@@ -153,12 +227,14 @@ final class EqualizerView: SkinnedView {
     }
 
     override func pixelMouseUp(at point: CGPoint, event: NSEvent) {
-        if slider != nil {
+        if slider != nil || shadeSlider != nil {
             slider = nil
+            shadeSlider = nil
             announce?(nil)
         } else if let pressed, pressedInside {
             switch pressed {
             case .close: windowGroup?.setVisible(.equalizer, false)
+            case .shade: windowGroup?.toggleShade(.equalizer)
             case .button(.on):
                 settings.enabled.toggle()
                 announce?(nil)

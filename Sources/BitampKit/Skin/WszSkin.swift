@@ -118,7 +118,10 @@ final class WszSkin: Skin {
 
     private static func paintedIntoBackground(_ element: SkinElement) -> Bool {
         switch element {
-        case .about, .eqCloseButton(pressed: false), .playlistCloseButton(pressed: false): return true
+        case .about, .eqCloseButton(pressed: false), .playlistCloseButton(pressed: false),
+             .eqShadeButton(pressed: false), .eqUnshadeButton(pressed: false), .eqShadeCloseButton(pressed: false),
+             .playlistShadeButton(pressed: false), .playlistUnshadeButton(pressed: false):
+            return true
         default: return false
         }
     }
@@ -232,7 +235,39 @@ final class WszSkin: Skin {
         case .playlistCloseButton(pressed: true):
             return ("pledit", r(52, 42, 9, 9))
 
-        case .about, .eqCloseButton, .playlistCloseButton, .digit, .minus:
+        case .mainShadeBackground(let active):
+            return ("titlebar", r(27, active ? 29 : 42, 275, 14))
+        case .mainUnshadeButton(let pressed):
+            return ("titlebar", r(pressed ? 9 : 0, 27, 9, 9))
+        case .mainShadePosition:
+            return ("titlebar", r(0, 36, 17, 7))
+        case .mainShadeThumb(let thumb):
+            return ("titlebar", r([ShadeThumb.left: 17, .center: 20, .right: 23][thumb]!, 36, 3, 7))
+        case .eqShadeButton(pressed: true):
+            return ("eq_ex", r(1, 38, 9, 9))
+        case .eqShadeBackground(let active):
+            return ("eq_ex", r(0, active ? 0 : 15, 275, 14))
+        case .eqUnshadeButton(pressed: true):
+            return ("eq_ex", r(1, 47, 9, 9))
+        case .eqShadeCloseButton(pressed: true):
+            return ("eq_ex", r(11, 47, 9, 9))
+        case .eqShadeVolumeThumb(let thumb):
+            return ("eq_ex", r(1 + [ShadeThumb.left: 0, .center: 3, .right: 6][thumb]!, 30, 3, 7))
+        case .eqShadeBalanceThumb(let thumb):
+            return ("eq_ex", r(11 + [ShadeThumb.left: 0, .center: 3, .right: 6][thumb]!, 30, 3, 7))
+        case .playlistShadeButton(pressed: true):
+            return ("pledit", r(62, 42, 9, 9))
+        case .playlistShadeLeft:
+            return ("pledit", r(72, 42, 25, 14))
+        case .playlistShadeTile:
+            return ("pledit", r(72, 57, 25, 14))
+        case .playlistShadeRight(let active):
+            return ("pledit", r(99, active ? 42 : 57, 50, 14))
+        case .playlistUnshadeButton(pressed: true):
+            return ("pledit", r(150, 42, 9, 9))
+
+        case .about, .eqCloseButton, .playlistCloseButton, .digit, .minus, .eqShadeButton, .eqUnshadeButton,
+             .eqShadeCloseButton, .playlistShadeButton, .playlistUnshadeButton:
             return nil
         }
     }

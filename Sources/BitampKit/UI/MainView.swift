@@ -38,7 +38,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     }
 
     override func normalizedPixelSize(_ proposed: CGSize) -> CGSize {
-        Layout.size
+        isShaded ? CGSize(width: Layout.size.width, height: ShadeLayout.height) : Layout.size
     }
 
     func flash(_ message: String, for seconds: TimeInterval = 3) {
@@ -65,6 +65,10 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     // MARK: - Drawing
 
     override func render(into c: Canvas) {
+        if isShaded {
+            renderShade(c)
+            return
+        }
         c.draw(skin.image(for: .mainBackground), 0, 0)
         c.draw(skin.image(for: .titleBar(active: isActive)), 0, 0)
         for button in TitleButton.allCases {
@@ -85,6 +89,64 @@ final class MainView: SkinnedView, NSMenuItemValidation {
             c.draw(image, at: button.rect.origin)
         }
         c.draw(skin.image(for: .about(pressed: isPressed(.about))), at: Layout.about.origin)
+    }
+
+    /// The 14-pixel strip: mini visualizer, time, transport and position.
+    private func renderShade(_ c: Canvas) {
+        c.draw(skin.image(for: .mainShadeBackground(active: isActive)), 0, 0)
+        for button in TitleButton.allCases {
+            let pressed = isPressed(.title(button))
+            let element: SkinElement = button == .shade
+                ? .mainUnshadeButton(pressed: pressed)
+                : .titleButton(button, pressed: pressed)
+            c.draw(skin.image(for: element), at: button.rect.origin)
+        }
+        drawShadeVisualizer(c)
+        drawShadeTime(c)
+        c.draw(skin.image(for: .mainShadePosition), at: ShadeLayout.mainPosition.origin)
+        if canSeek, let track = engine.track {
+            let progress = pendingSeek ?? engine.currentTime / track.duration
+            let x = geometry(for: .position).thumbX(for: progress)
+            c.draw(skin.image(for: .mainShadeThumb(ShadeThumb(progress))), Int(x), Int(ShadeLayout.mainPosition.minY))
+        }
+    }
+
+    private func drawShadeVisualizer(_ c: Canvas) {
+        let rect = ShadeLayout.mainVisualizer
+        let (x0, y0, height) = (Int(rect.minX), Int(rect.minY), Int(rect.height))
+        let colors = skin.visColors
+        c.fill(rect, colors[0])
+        let analyzer = engine.analyzer
+        switch preferences.visMode {
+        case .spectrum:
+            for i in 0..<SpectrumAnalyzer.barCount {
+                let bar = Int((analyzer.bars[i] * Float(height)).rounded())
+                for row in (height - bar)..<height {
+                    // Pick from the full 16-row palette so the colors match the big analyzer.
+                    c.fill(x0 + i * 2, y0 + row, 2, 1, colors[2 + row * 15 / (height - 1)])
+                }
+            }
+        case .oscilloscope:
+            for x in 0..<Int(rect.width) {
+                let sample = analyzer.waveform[x * 2]
+                let y = min(max(height / 2 - Int((sample * Float(height / 2)).rounded()), 0), height - 1)
+                c.fill(x0 + x, y0 + y, 1, 1, colors[18])
+            }
+        case .off:
+            break
+        }
+    }
+
+    private func drawShadeTime(_ c: Canvas) {
+        let blinkOff = engine.state == .paused && frameCount / 15 % 2 == 1
+        guard let track = engine.track, engine.state != .stopped, !blinkOff else { return }
+        let elapsed = currentTime(of: track)
+        let showRemaining = preferences.showRemaining
+        let digits = TimeFormat.lcdDigits(showRemaining ? max(0, track.duration - elapsed) : elapsed)
+        let characters: [Character] = [showRemaining ? "-" : " "] + digits.map { Character(String($0)) }
+        for (character, x) in zip(characters, ShadeLayout.mainTimeGlyphs) {
+            c.draw(skin.glyph(for: character), x, ShadeLayout.mainTimeY)
+        }
     }
 
     private func isPressed(_ control: Control) -> Bool {
@@ -255,7 +317,15 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     // MARK: - Mouse
 
     override func pixelMouseDown(at point: CGPoint, event: NSEvent) -> Bool {
-        guard let control = Layout.control(at: point) else { return false }
+        let control = isShaded ? ShadeLayout.mainControl(at: point) : Layout.control(at: point)
+        guard let control else {
+            // Double-clicking the title bar toggles shade mode; in shade mode it's all title bar.
+            if event.clickCount == 2 && (isShaded || Layout.titleBar.contains(point)) {
+                toggleShade(nil)
+                return true
+            }
+            return false
+        }
         switch control {
         case .volume, .balance, .position:
             beginSliderDrag(control, at: point)
@@ -308,7 +378,8 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         switch control {
         case .volume: return .volume
         case .balance: return .balance
-        default: return .position
+        default:
+            return isShaded ? SliderGeometry(track: ShadeLayout.mainPosition, thumbWidth: ShadeLayout.thumb.width) : .position
         }
     }
 
@@ -373,6 +444,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
             Menus.context().popUp(positioning: nil, at: below, in: self)
         case .title(.close): NSApp.terminate(nil)
         case .title(.minimize): window?.miniaturize(nil)
+        case .title(.shade): toggleShade(nil)
         case .transport(.previous): previousTrack(nil)
         case .transport(.play): play(nil)
         case .transport(.pause): pause(nil)
@@ -384,13 +456,17 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         case .toggle(.equalizer): windowGroup?.toggle(.equalizer)
         case .toggle(.playlist): windowGroup?.toggle(.playlist)
         case .about: NSApp.orderFrontStandardAboutPanel(nil)
-        default: break  // Shade mode arrives in Phase 4.
+        default: break
         }
     }
 
     // MARK: - Menu actions
 
     @objc func openFiles(_ sender: Any?) { onOpen?() }
+
+    @objc func toggleShade(_ sender: Any?) {
+        if let window { windowGroup?.toggleShade(window) }
+    }
     @objc func previousTrack(_ sender: Any?) { controller.previous() }
     @objc func nextTrack(_ sender: Any?) { controller.next() }
     @objc func pause(_ sender: Any?) { engine.pause() }
@@ -468,6 +544,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         switch item.action {
         case #selector(toggleShuffle(_:)): item.state = controller.shuffle ? .on : .off
         case #selector(toggleRepeat(_:)): item.state = controller.repeats ? .on : .off
+        case #selector(toggleShade(_:)): item.state = isShaded ? .on : .off
         case #selector(togglePeaks(_:)): item.state = preferences.showPeaks ? .on : .off
         case #selector(setVisMode(_:)): item.state = selected == preferences.visMode.rawValue ? .on : .off
         case #selector(setBarFalloff(_:)): item.state = selected == preferences.barFalloff.rawValue ? .on : .off

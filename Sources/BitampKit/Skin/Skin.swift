@@ -47,6 +47,23 @@ enum SkinElement: Hashable {
     case playlistScrollThumb(pressed: Bool)              // PLAYLIST_SCROLL_HANDLE(_SELECTED)
     case playlistCloseButton(pressed: Bool)              // PLAYLIST_CLOSE_SELECTED
 
+    // Shade mode: each window collapsed to a 14-pixel strip
+    case mainShadeBackground(active: Bool)               // MAIN_SHADE_BACKGROUND(_SELECTED)
+    case mainUnshadeButton(pressed: Bool)                // MAIN_SHADE_BUTTON_SELECTED(_DEPRESSED)
+    case mainShadePosition                               // MAIN_SHADE_POSITION_BACKGROUND
+    case mainShadeThumb(ShadeThumb)                      // MAIN_SHADE_POSITION_THUMB(_LEFT/_RIGHT)
+    case eqShadeButton(pressed: Bool)                    // the equalizer's shade button, in normal mode
+    case eqShadeBackground(active: Bool)                 // EQ_SHADE_BACKGROUND(_SELECTED)
+    case eqUnshadeButton(pressed: Bool)                  // EQ_MAXIMIZE_BUTTON_ACTIVE
+    case eqShadeCloseButton(pressed: Bool)               // EQ_SHADE_CLOSE_BUTTON(_ACTIVE)
+    case eqShadeVolumeThumb(ShadeThumb)                  // EQ_SHADE_VOLUME_SLIDER_LEFT/CENTER/RIGHT
+    case eqShadeBalanceThumb(ShadeThumb)                 // EQ_SHADE_BALANCE_SLIDER_LEFT/CENTER/RIGHT
+    case playlistShadeButton(pressed: Bool)              // PLAYLIST_COLLAPSE_SELECTED, in normal mode
+    case playlistShadeLeft(active: Bool)                 // PLAYLIST_SHADE_BACKGROUND_LEFT
+    case playlistShadeTile                               // PLAYLIST_SHADE_BACKGROUND
+    case playlistShadeRight(active: Bool)                // PLAYLIST_SHADE_BACKGROUND_RIGHT(_SELECTED)
+    case playlistUnshadeButton(pressed: Bool)            // PLAYLIST_EXPAND_SELECTED
+
     static let sliderLevels = 28
     static let blankDigit = 10
 }
@@ -71,6 +88,15 @@ struct PlaylistColors {
     var current: CGColor
     var normalBackground: CGColor
     var selectedBackground: CGColor
+}
+
+/// Small shade-mode thumbs come in three looks, for the left, middle and right of their track.
+enum ShadeThumb: Hashable {
+    case left, center, right
+
+    init(_ value: Double) {
+        self = value < 1.0 / 3 ? .left : value < 2.0 / 3 ? .center : .right
+    }
 }
 
 enum EQButton: Hashable {

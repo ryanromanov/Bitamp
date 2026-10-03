@@ -715,7 +715,7 @@ import Testing
             "monoster": CGSize(width: 56, height: 24), "volume": CGSize(width: 68, height: 433),
             "balance": CGSize(width: 47, height: 433), "posbar": CGSize(width: 307, height: 10),
             "shufrep": CGSize(width: 92, height: 85), "eqmain": CGSize(width: 275, height: 315),
-            "pledit": CGSize(width: 280, height: 186),
+            "pledit": CGSize(width: 280, height: 186), "eq_ex": CGSize(width: 275, height: 56),
         ]
         var elements: [SkinElement] = [.mainBackground, .positionBackground, .eqBackground, .eqGraphBackground,
                                        .eqPreampLine, .playlistLeftTile, .playlistRightTile, .playlistBottomLeft,
@@ -733,7 +733,18 @@ import Testing
                 elements += [EQButton.on, .auto, .presets].map { .eqButton($0, on: on, pressed: flag) }
             }
         }
-        elements += (0..<SkinElement.sliderLevels).flatMap {
+        elements += [.mainShadePosition, .playlistShadeTile, .eqShadeButton(pressed: true),
+                     .eqUnshadeButton(pressed: true), .eqShadeCloseButton(pressed: true),
+                     .playlistShadeButton(pressed: true), .playlistUnshadeButton(pressed: true)]
+        for flag in [false, true] {
+            elements += [.mainShadeBackground(active: flag), .mainUnshadeButton(pressed: flag),
+                         .eqShadeBackground(active: flag), .playlistShadeLeft(active: flag),
+                         .playlistShadeRight(active: flag)]
+        }
+        for thumb in [ShadeThumb.left, .center, .right] {
+            elements += [.mainShadeThumb(thumb), .eqShadeVolumeThumb(thumb), .eqShadeBalanceThumb(thumb)]
+        }
+                elements += (0..<SkinElement.sliderLevels).flatMap {
             [.volumeBackground(level: $0), .balanceBackground(level: $0), .eqSliderBackground(level: $0)]
         }
         for element in elements {
@@ -750,5 +761,52 @@ import Testing
         for character in PixelFont.glyphs.keys {
             #expect(WszSkin.textPosition(character) != nil, "No text.bmp cell for \(character)")
         }
+    }
+}
+
+@Suite struct ShadeTests {
+    @Test func mainShadeControls() {
+        let strip = CGRect(x: 0, y: 0, width: 275, height: ShadeLayout.height)
+        for button in TransportButton.allCases {
+            let rect = ShadeLayout.mainTransport(button)
+            #expect(strip.contains(rect))
+            #expect(ShadeLayout.mainControl(at: CGPoint(x: rect.midX, y: rect.midY)) == .transport(button))
+        }
+        for (a, b) in zip(TransportButton.allCases, TransportButton.allCases.dropFirst()) {
+            #expect(!ShadeLayout.mainTransport(a).intersects(ShadeLayout.mainTransport(b)))
+        }
+        #expect(ShadeLayout.mainControl(at: CGPoint(x: 258, y: 7)) == .title(.shade))
+        #expect(ShadeLayout.mainControl(at: CGPoint(x: 230, y: 7)) == .position)
+        #expect(ShadeLayout.mainControl(at: CGPoint(x: 90, y: 7)) == .visualizer)
+        #expect(ShadeLayout.mainControl(at: CGPoint(x: 140, y: 7)) == .timeDisplay)
+        #expect(ShadeLayout.mainControl(at: CGPoint(x: 40, y: 7)) == nil)  // Drag area.
+    }
+
+    @Test func thumbLooks() {
+        #expect(ShadeThumb(0) == .left)
+        #expect(ShadeThumb(0.5) == .center)
+        #expect(ShadeThumb(1) == .right)
+    }
+
+    @Test func playlistShadeButtonsSitInTheRightCorner() {
+        let width = PlaylistLayout.width
+        #expect(!ShadeLayout.playlistUnshade(width: width).intersects(ShadeLayout.playlistClose(width: width)))
+        #expect(!ShadeLayout.playlistShadeButton(width: width).intersects(PlaylistLayout.close(in: CGSize(width: width, height: 232))))
+        #expect(ShadeLayout.playlistClose(width: width).maxX <= width)
+        #expect(ShadeLayout.playlistTitle(width: width).maxX <= ShadeLayout.playlistTime(width: width).x)
+    }
+
+    @Test func defaultShadeSpritesHaveTheRightSizes() {
+        let skin = DefaultSkin()
+        func size(_ element: SkinElement) -> CGSize {
+            let image = skin.image(for: element)
+            return CGSize(width: image.width, height: image.height)
+        }
+        #expect(size(.mainShadeBackground(active: true)) == CGSize(width: 275, height: 14))
+        #expect(size(.eqShadeBackground(active: false)) == CGSize(width: 275, height: 14))
+        #expect(size(.playlistShadeLeft(active: true)) == CGSize(width: 25, height: 14))
+        #expect(size(.playlistShadeRight(active: true)) == CGSize(width: 50, height: 14))
+        #expect(size(.mainShadeThumb(.center)) == ShadeLayout.thumb)
+        #expect(size(.mainShadePosition) == ShadeLayout.mainPosition.size)
     }
 }
