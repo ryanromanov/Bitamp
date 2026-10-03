@@ -12,6 +12,7 @@ struct SnapshotTests {
     let folder = URL(fileURLWithPath: ProcessInfo.processInfo.environment["BITAMP_SNAPSHOTS"] ?? "/tmp")
 
     func save(_ view: NSView, _ name: String) throws {
+        (view as? SkinnedView)?.drawsAsActive = true
         let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: rep)
         let png = try #require(rep.representation(using: .png, properties: [:]))
@@ -33,15 +34,30 @@ struct SnapshotTests {
 
     @Test func windows() throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        var skins: [(String, Skin)] = [("default", DefaultSkin())]
+        var skins: [(String, Skin)] = [("default", DefaultSkin()), ("millennium", DefaultSkin(theme: .millennium))]
         if let path = ProcessInfo.processInfo.environment["BITAMP_SNAPSHOT_SKIN"] {
             skins.append(("wsz", try WszSkin(url: URL(fileURLWithPath: path))))
+        }
+        // The built-in skins as .wsz files too, to check them in other players.
+        for theme in SkinTheme.builtIn {
+            try WszWriter.write(DefaultSkin(theme: theme), to: folder.appendingPathComponent("\(theme.name).wsz"))
         }
         for (name, skin) in skins {
             let controller = controller()
             try save(MainView(controller: controller, preferences: preferences(), skin: skin), "\(name)-main")
             try save(EqualizerView(controller: controller, skin: skin, scale: 2), "\(name)-eq")
             try save(PlaylistView(controller: controller, preferences: preferences(), skin: skin), "\(name)-playlist")
+
+            // The shade strips.
+            let views: [(String, SkinnedView)] = [
+                ("main", MainView(controller: controller, preferences: preferences(), skin: skin)),
+                ("eq", EqualizerView(controller: controller, skin: skin, scale: 2)),
+                ("playlist", PlaylistView(controller: controller, preferences: preferences(), skin: skin)),
+            ]
+            for (window, view) in views {
+                view.setShaded(true)
+                try save(view, "\(name)-\(window)-shade")
+            }
         }
     }
 }

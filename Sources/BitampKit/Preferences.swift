@@ -133,7 +133,8 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.windowShadows) }
     }
 
-    /// The installed skin in use, by name; nil for the default skin.
+    /// The skin in use: "builtin:<id>" for a built-in skin, an installed skin's name, or nil
+    /// for the default.
     var skinName: String? {
         get { defaults.string(forKey: Key.skinName) }
         set { defaults.set(newValue, forKey: Key.skinName) }

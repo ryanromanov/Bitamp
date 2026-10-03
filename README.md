@@ -11,7 +11,7 @@ Bitamp isn't affiliated with or endorsed by Winamp or Nullsoft. Its default skin
 ## Features
 
 - Main window, 10-band equalizer and playlist, which snap together and move as a group
-- Classic `.wsz` skins: drop one on the window or use Skins ▸ Install Skin…
+- Two built-in skins, Bitamp Default and the glossy Bitamp Millennium, plus classic `.wsz` skins: drop one on the window or use Skins ▸ Install Skin…. Skins ▸ Export Current Skin… saves any skin as a `.wsz`.
 - Shade mode for each window (double-click a title bar), and window sizes from 1× to 4×
 - Spectrum and oscilloscope visualizer, shuffle and repeat, `.m3u` playlists
 

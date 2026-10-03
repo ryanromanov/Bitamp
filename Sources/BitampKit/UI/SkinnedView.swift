@@ -52,8 +52,11 @@ class SkinnedView: NSView {
         CGSize(width: canvas.width, height: canvas.height)
     }
 
+    /// Draw as the active window regardless of focus, for snapshots.
+    var drawsAsActive = false
+
     var isActive: Bool {
-        window?.isKeyWindow ?? false
+        drawsAsActive || (window?.isKeyWindow ?? false)
     }
 
     /// Collapsed to a 14-pixel strip. Subclasses draw and hit-test differently while shaded.
