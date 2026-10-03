@@ -85,16 +85,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Skins
 
     private func savedSkin() -> Skin {
+        if let theme = SkinTheme.builtIn(named: preferences.skinName) { return DefaultSkin(theme: theme) }
         guard let name = preferences.skinName, let url = SkinLibrary.url(named: name),
               let skin = try? WszSkin(url: url)
         else { return DefaultSkin() }
         return skin
     }
 
+    private var currentSkinName: String {
+        if let theme = SkinTheme.builtIn(named: preferences.skinName) { return theme.name }
+        return preferences.skinName ?? SkinTheme.classic.name
+    }
+
     private func apply(_ skin: Skin, named name: String?) {
         preferences.skinName = name
         for view in views { view.skin = skin }
-        mainView?.flash("SKIN: \(name ?? "BITAMP DEFAULT")", for: 2)
+        mainView?.flash("SKIN: \(currentSkinName)", for: 2)
     }
 
     private func installSkin(_ url: URL) {
@@ -108,10 +114,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func chooseSkin(_ sender: NSMenuItem) {
-        guard let url = sender.representedObject as? URL else {
-            apply(DefaultSkin(), named: nil)
+        if let saved = sender.representedObject as? String, let theme = SkinTheme.builtIn(named: saved) {
+            apply(DefaultSkin(theme: theme), named: theme.id == SkinTheme.classic.id ? nil : saved)
             return
         }
+        guard let url = sender.representedObject as? URL else { return }
         do {
             apply(try WszSkin(url: url), named: url.deletingPathExtension().lastPathComponent)
         } catch {
@@ -127,6 +134,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         installSkin(url)
     }
 
+    /// Saves the current skin as a classic .wsz, for other players or for sharing.
+    @objc private func exportSkin(_ sender: Any?) {
+        guard let skin = views.first?.skin else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "wsz")].compactMap { $0 }
+        panel.nameFieldStringValue = "\(currentSkinName).wsz"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try WszWriter.write(skin, to: url)
+            mainView?.flash("SKIN EXPORTED", for: 2)
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
     @objc private func showSkinsFolder(_ sender: Any?) {
         try? FileManager.default.createDirectory(at: SkinLibrary.folder, withIntermediateDirectories: true)
         NSWorkspace.shared.open(SkinLibrary.folder)
@@ -136,9 +158,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func rebuildSkinsMenu() {
         skinsMenu.removeAllItems()
         let current = preferences.skinName
-        let standard = Menus.item("Bitamp Default", #selector(chooseSkin(_:)))
-        standard.state = current == nil ? .on : .off
-        skinsMenu.addItem(standard)
+        let currentBuiltIn = SkinTheme.builtIn(named: current)
+        for theme in SkinTheme.builtIn {
+            let item = Menus.item(theme.name, #selector(chooseSkin(_:)))
+            item.representedObject = SkinTheme.builtInPrefix + theme.id
+            item.state = currentBuiltIn?.id == theme.id ? .on : .off
+            skinsMenu.addItem(item)
+        }
         let installed = SkinLibrary.installed()
         if !installed.isEmpty { skinsMenu.addItem(.separator()) }
         for url in installed {
@@ -150,6 +176,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         skinsMenu.addItem(.separator())
         skinsMenu.addItem(Menus.item("Install Skin…", #selector(installSkinFromPanel(_:))))
+        skinsMenu.addItem(Menus.item("Export Current Skin…", #selector(exportSkin(_:))))
         skinsMenu.addItem(Menus.item("Show Skins Folder", #selector(showSkinsFolder(_:))))
         for item in skinsMenu.items { item.target = self }
     }

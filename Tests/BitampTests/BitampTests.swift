@@ -866,3 +866,80 @@ import Testing
         #expect(ListFont.accentRows + 9 == ListFont.lineHeight)
     }
 }
+
+@Suite struct ThemeAndExportTests {
+    /// RGBA bytes of an image, for exact comparisons.
+    func bytes(_ image: CGImage) -> [UInt8] {
+        var buffer = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let context = CGContext(data: &buffer, width: image.width, height: image.height, bitsPerComponent: 8,
+                                bytesPerRow: image.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return buffer
+    }
+
+    func rgbBytes(_ color: CGColor) -> [Int] {
+        (color.components ?? []).prefix(3).map { Int(($0 * 255).rounded()) }
+    }
+
+    @Test(arguments: [SkinTheme.classic, .millennium].map(\.name))
+    func everyThemeDrawsEverySpriteAtItsSize(name: String) {
+        let theme = name == SkinTheme.millennium.name ? SkinTheme.millennium : .classic
+        let skin = DefaultSkin(theme: theme)
+        for element in WszWriter.elements {
+            guard let (_, rect) = WszSkin.source(for: element) else { continue }
+            let image = skin.image(for: element)
+            #expect(image.width == Int(rect.width) && image.height == Int(rect.height), "\(element) in \(name)")
+        }
+        #expect(skin.visColors.count == 24)
+        #expect(skin.eqGraphColors.count == 19)
+    }
+
+    @Test func exportedSkinLoadsBackIdentically() throws {
+        let skin = DefaultSkin(theme: .millennium)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Millennium-\(UUID().uuidString).wsz")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try WszWriter.write(skin, to: url)
+
+        // Load it with a fallback that would show up as a mismatch if it were ever used.
+        let loaded = try WszSkin(url: url, fallback: DefaultSkin(theme: .classic))
+        var mismatches: [String] = []
+        for element in WszWriter.elements + (0...SkinElement.blankDigit).map(SkinElement.digit) + [.minus] {
+            if bytes(loaded.image(for: element)) != bytes(WszWriter.flattened(element, from: skin)) {
+                mismatches.append("\(element)")
+            }
+        }
+        // Two classic-format limits: in titlebar.bmp the active and inactive shade strips share
+        // a row (y 29 + 14 overlaps y 42), and pledit.bmp has only one shaded-playlist left
+        // piece, so the inactive one comes back as the active one.
+        #expect(Set(mismatches) == ["mainShadeBackground(active: false)", "playlistShadeLeft(active: false)"],
+                "Sprites that changed in the round trip: \(mismatches)")
+        let inactiveStrip = bytes(loaded.image(for: .mainShadeBackground(active: false)))
+        let expectedStrip = bytes(WszWriter.flattened(.mainShadeBackground(active: false), from: skin))
+        let rowBytes = 275 * 4
+        #expect(inactiveStrip[rowBytes...] == expectedStrip[rowBytes...], "Only the shared top row should differ")
+        #expect(bytes(loaded.image(for: .playlistShadeLeft(active: false)))
+                == bytes(WszWriter.flattened(.playlistShadeLeft(active: true), from: skin)))
+
+        #expect(loaded.visColors.map(rgbBytes) == skin.visColors.map(rgbBytes))
+        #expect(loaded.eqGraphColors.map(rgbBytes) == skin.eqGraphColors.map(rgbBytes))
+        #expect(rgbBytes(loaded.playlistColors.normal) == rgbBytes(skin.playlistColors.normal))
+        #expect(rgbBytes(loaded.playlistColors.selectedBackground) == rgbBytes(skin.playlistColors.selectedBackground))
+    }
+
+    @Test func exportedFilesAreTheClassicSet() {
+        let names = Set(WszWriter.files(for: DefaultSkin()).keys)
+        #expect(names == Set(WszWriter.sheetSizes.keys.map { "\($0).bmp" } + ["viscolor.txt", "pledit.txt"]))
+    }
+}
+
+@Suite struct BuiltInSkinTests {
+    @Test func savedNamesMapToBuiltIns() {
+        #expect(SkinTheme.builtIn(named: nil)?.id == "default")  // Nothing saved yet.
+        #expect(SkinTheme.builtIn(named: "builtin:millennium")?.id == "millennium")
+        #expect(SkinTheme.builtIn(named: "builtin:default")?.id == "default")
+        #expect(SkinTheme.builtIn(named: "TopazAmp1-2") == nil)  // An installed .wsz.
+        #expect(SkinTheme.builtIn(named: "builtin:nope") == nil)
+        #expect(Set(SkinTheme.builtIn.map(\.id)).count == SkinTheme.builtIn.count)
+    }
+}
