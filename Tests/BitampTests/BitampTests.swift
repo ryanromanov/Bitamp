@@ -385,3 +385,256 @@ import Testing
         #expect(Falloff.slow.peakHoldFrames > Falloff.fast.peakHoldFrames)
     }
 }
+
+@Suite struct DockingTests {
+    let main = CGRect(x: 100, y: 500, width: 550, height: 232)
+
+    @Test func snapsBelowAndAligned() {
+        // 6 points below and 4 to the right of a flush stack under the main window.
+        let near = CGRect(x: 104, y: 500 - 232 - 6, width: 550, height: 232)
+        #expect(Docking.snap(near, to: [main]) == CGPoint(x: 100, y: 500 - 232))
+    }
+
+    @Test func leavesFarWindowsAlone() {
+        let far = CGRect(x: 400, y: 100, width: 550, height: 232)
+        #expect(Docking.snap(far, to: [main]) == far.origin)
+    }
+
+    @Test func snapsToScreenEdges() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let nearCorner = CGRect(x: 7, y: 895 - 232, width: 550, height: 232)
+        #expect(Docking.snap(nearCorner, to: [], within: screen) == CGPoint(x: 0, y: 900 - 232))
+    }
+
+    @Test func dockedFollowsChains() {
+        let equalizer = CGRect(x: 100, y: 268, width: 550, height: 232)    // under main
+        let playlist = CGRect(x: 100, y: 36, width: 550, height: 232)      // under the equalizer
+        let loose = CGRect(x: 900, y: 500, width: 550, height: 232)
+        let sideways = CGRect(x: 650, y: 600, width: 550, height: 232)     // right of main
+        #expect(Docking.docked(to: main, among: [playlist, loose, equalizer, sideways]) == [0, 2, 3])
+    }
+
+    @Test func cornersDoNotDock() {
+        let diagonal = CGRect(x: 650, y: 268, width: 550, height: 232)
+        #expect(!Docking.touching(main, diagonal))
+    }
+}
+
+@Suite struct QueueEditingTests {
+    let urls = (0..<6).map { URL(fileURLWithPath: "/music/\($0).mp3") }
+
+    func queue(at index: Int = 0) -> PlayQueue {
+        var queue = PlayQueue(seed: 9)
+        queue.replace(with: urls)
+        queue.select(index)
+        return queue
+    }
+
+    @Test func removingOthersKeepsCurrent() {
+        var q = queue(at: 3)
+        q.remove([0, 5])
+        #expect(q.items == [urls[1], urls[2], urls[3], urls[4]])
+        #expect(q.current == urls[3])
+        #expect(q.playingIndex == 2)
+    }
+
+    @Test func removingCurrentPlaysWhatFollowedNext() {
+        var q = queue(at: 2)
+        q.remove([2])
+        #expect(q.playingIndex == nil)
+        #expect(q.next() == urls[3])  // Not urls[4]: nothing is skipped.
+        #expect(q.playingIndex == 2)
+    }
+
+    @Test func removingCurrentAtTheEnd() {
+        var q = queue(at: 5)
+        q.remove([5])
+        #expect(q.next() == nil)
+    }
+
+    @Test func movingABlock() {
+        var q = queue(at: 0)
+        let moved = q.move([1, 2], by: 2)
+        #expect(moved == [3, 4])
+        #expect(q.items == [urls[0], urls[3], urls[4], urls[1], urls[2], urls[5]])
+        #expect(q.current == urls[0])
+    }
+
+    @Test func movingStopsAtTheEnds() {
+        var q = queue()
+        #expect(q.move([4, 5], by: 3) == [4, 5])
+        #expect(q.move([0], by: -1) == [0])
+        #expect(q.items == urls)
+    }
+
+    @Test func insertKeepsCurrent() {
+        var q = queue(at: 1)
+        let extra = [URL(fileURLWithPath: "/music/new.mp3")]
+        q.insert(extra, at: 0)
+        #expect(q.items.first == extra[0])
+        #expect(q.current == urls[1])
+        #expect(q.next() == urls[2])
+    }
+
+    @Test func sortReverseAndRandomize() {
+        var q = queue(at: 4)
+        q.reverse()
+        #expect(q.items == urls.reversed())
+        #expect(q.current == urls[4])
+        q.sort { $0.lastPathComponent }
+        #expect(q.items == urls)
+        q.randomize()
+        #expect(Set(q.items) == Set(urls))
+        #expect(q.current == urls[4])
+    }
+
+    @Test func shuffledEditsKeepPlayOrder() {
+        var q = PlayQueue(seed: 5)
+        q.setShuffled(true)
+        q.replace(with: urls)
+        let upcoming = q.order.dropFirst().map { q.items[$0] }
+        q.reverse()
+        #expect(q.order.dropFirst().map { q.items[$0] } == upcoming)
+    }
+
+    @Test func removeAll() {
+        var q = queue(at: 2)
+        q.removeAll()
+        #expect(q.isEmpty)
+        #expect(q.current == nil)
+        #expect(q.next() == nil)
+    }
+}
+
+@Suite struct M3UTests {
+    @Test func parsesAbsoluteRelativeAndWindowsPaths() {
+        let base = URL(fileURLWithPath: "/Users/me/Music/Lists")
+        let text = """
+        #EXTM3U
+        #EXTINF:215,Artist - Song
+        /Volumes/Disk/song.mp3
+
+        ../Album/02 Two.flac\r
+        Album\\03 Three.m4a
+        file:///tmp/four.wav
+        http://example.com/stream
+        """
+        let urls = M3U.parse(text, relativeTo: base).map(\.path)
+        #expect(urls == [
+            "/Volumes/Disk/song.mp3",
+            "/Users/me/Music/Album/02 Two.flac",
+            "/Users/me/Music/Lists/Album/03 Three.m4a",
+            "/tmp/four.wav",
+        ])
+    }
+
+    @Test func writesExtendedM3U() {
+        let text = M3U.write([
+            M3U.Entry(url: URL(fileURLWithPath: "/a/One.mp3"), title: "X - One", duration: 61.4),
+            M3U.Entry(url: URL(fileURLWithPath: "/a/Two.mp3"), title: nil, duration: nil),
+        ])
+        #expect(text == "#EXTM3U\n#EXTINF:61,X - One\n/a/One.mp3\n#EXTINF:-1,Two\n/a/Two.mp3\n")
+    }
+
+    @Test func roundTripsThroughExpand() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let songs = ["b.mp3", "a.m4a"].map { folder.appendingPathComponent($0) }
+        songs.forEach { FileManager.default.createFile(atPath: $0.path, contents: Data()) }
+        let list = folder.appendingPathComponent("list.m3u8")
+        let missing = folder.appendingPathComponent("gone.mp3")
+        try M3U.write((songs + [missing]).map { M3U.Entry(url: $0) }).write(to: list, atomically: true, encoding: .utf8)
+        // Playlist order is kept, and missing files are dropped.
+        #expect(AudioFiles.expand([list]).map(\.lastPathComponent) == ["b.mp3", "a.m4a"])
+    }
+}
+
+@Suite struct EqualizerTests {
+    let geometry = VerticalSliderGeometry(track: EQLayout.band(0), thumbHeight: EQLayout.thumb.height)
+
+    @Test func sliderEnds() {
+        #expect(geometry.thumbY(for: 12) == EQLayout.band(0).minY)
+        #expect(geometry.thumbY(for: -12) == EQLayout.band(0).maxY - EQLayout.thumb.height)
+        #expect(geometry.decibels(forThumbY: EQLayout.band(0).minY) == 12)
+        #expect(geometry.decibels(forThumbY: EQLayout.band(0).maxY) == -12)
+    }
+
+    @Test func middleSnapsToFlat() {
+        #expect(geometry.decibels(forThumbY: geometry.thumbY(for: 0)) == 0)
+        #expect(geometry.decibels(forThumbY: geometry.thumbY(for: 0.4)) == 0)
+    }
+
+    @Test func curvePassesThroughBands() {
+        let bands: [Float] = [6, 3, 0, -3, -6, 0, 6, 12, 0, -12]
+        let curve = EqualizerView.curve(bands, width: 10)
+        for (a, b) in zip(curve, bands) { #expect(abs(a - b) < 0.001) }
+        #expect(EqualizerView.curve(bands, width: 113).allSatisfy { EqualizerSettings.range.contains($0) })
+    }
+
+    @Test func settingsClampAndPresetsAreValid() {
+        let wild = EqualizerSettings(enabled: true, preamp: 40, bands: [20, -20])
+        #expect(wild.clamped.preamp == 12)
+        #expect(wild.clamped.bands == [12, -12, 0, 0, 0, 0, 0, 0, 0, 0])
+        for preset in EqualizerPreset.builtIn {
+            #expect(preset.bands.count == 10, "\(preset.name)")
+            #expect(preset.apply(to: .flat) == EqualizerSettings(enabled: true, preamp: preset.preamp, bands: preset.bands))
+        }
+        #expect(Set(EqualizerPreset.builtIn.map(\.name)).count == EqualizerPreset.builtIn.count)
+    }
+
+    @Test func controlsHitTestAndDoNotOverlap() {
+        let all = EQLayout.Control.all
+        for control in all {
+            #expect(EQLayout.control(at: CGPoint(x: control.rect.midX, y: control.rect.midY)) == control)
+        }
+        for (i, a) in all.enumerated() {
+            for b in all[(i + 1)...] { #expect(!a.rect.intersects(b.rect), "\(a) overlaps \(b)") }
+        }
+    }
+}
+
+@Suite struct PlaylistLayoutTests {
+    @Test func heightSnapsToTileSteps() {
+        #expect(PlaylistLayout.snappedHeight(50) == 116)
+        #expect(PlaylistLayout.snappedHeight(130) == 116)
+        #expect(PlaylistLayout.snappedHeight(131) == 145)
+        #expect(PlaylistLayout.snappedHeight(232) == 232)
+    }
+
+    @Test(arguments: [116.0, 232, 406])
+    func controlsAtAnyHeight(height: Double) {
+        let size = CGSize(width: PlaylistLayout.width, height: height)
+        for button in PlaylistLayout.Button.allCases {
+            let rect = PlaylistLayout.rect(button, in: size)
+            #expect(PlaylistLayout.control(at: CGPoint(x: rect.midX, y: rect.midY), in: size) == .button(button))
+        }
+        for button in TransportButton.allCases {
+            let rect = PlaylistLayout.rect(button, in: size)
+            #expect(PlaylistLayout.control(at: CGPoint(x: rect.midX, y: rect.midY), in: size) == .transport(button))
+        }
+        let list = PlaylistLayout.list(in: size)
+        #expect(PlaylistLayout.control(at: CGPoint(x: list.midX, y: list.midY), in: size) == .list)
+        #expect(PlaylistLayout.control(at: CGPoint(x: 268, y: 5), in: size) == .close)
+        #expect(PlaylistLayout.control(at: CGPoint(x: 100, y: 10), in: size) == .titleBar)
+        #expect(PlaylistLayout.control(at: CGPoint(x: 270, y: height - 3), in: size) == .resizeGrip)
+    }
+
+    @Test func newSpriteSizes() {
+        let skin = DefaultSkin()
+        func size(_ element: SkinElement) -> CGSize {
+            let image = skin.image(for: element)
+            return CGSize(width: image.width, height: image.height)
+        }
+        #expect(size(.eqBackground) == EQLayout.size)
+        #expect(size(.eqSliderBackground(level: 0)) == EQLayout.preamp.size)
+        #expect(size(.eqGraphBackground) == EQLayout.graph.size)
+        for button in [EQButton.on, .auto, .presets] {
+            #expect(size(.eqButton(button, on: true, pressed: false)) == EQLayout.button(button).size)
+        }
+        #expect(size(.playlistBottomLeft).width + size(.playlistBottomRight).width == PlaylistLayout.width)
+        #expect(size(.playlistLeftTile) == CGSize(width: PlaylistLayout.left, height: PlaylistLayout.heightStep))
+        #expect(size(.playlistRightTile) == CGSize(width: PlaylistLayout.right, height: PlaylistLayout.heightStep))
+        #expect(skin.eqGraphColors.count == 19)
+    }
+}

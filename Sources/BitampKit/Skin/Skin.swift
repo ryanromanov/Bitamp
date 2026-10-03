@@ -24,6 +24,29 @@ enum SkinElement: Hashable {
     case digit(Int)                                      // DIGIT_0…9; 10 is a blank digit
     case minus                                           // MINUS_SIGN
 
+    // Equalizer window
+    case eqBackground                                    // EQ_WINDOW_BACKGROUND
+    case eqTitleBar(active: Bool)                        // EQ_TITLE_BAR(_SELECTED)
+    case eqCloseButton(pressed: Bool)                    // EQ_CLOSE_BUTTON(_ACTIVE)
+    case eqButton(EQButton, on: Bool, pressed: Bool)     // EQ_ON_BUTTON, EQ_AUTO_BUTTON, EQ_PRESETS_BUTTON
+    case eqSliderBackground(level: Int)                  // one of EQ_SLIDER_BACKGROUND's 28 frames; 0 is -12 dB
+    case eqSliderThumb(pressed: Bool)                    // EQ_SLIDER_THUMB(_SELECTED)
+    case eqGraphBackground                               // EQ_GRAPH_BACKGROUND
+    case eqPreampLine                                    // EQ_PREAMP_LINE
+
+    // Playlist window, drawn from tiles so it can grow
+    case playlistTopLeft(active: Bool)                   // PLAYLIST_TOP_LEFT_CORNER(_SELECTED)
+    case playlistTitle(active: Bool)                     // PLAYLIST_TITLE_BAR(_SELECTED)
+    case playlistTopTile(active: Bool)                   // PLAYLIST_TOP_TILE(_SELECTED)
+    case playlistTopRight(active: Bool)                  // PLAYLIST_TOP_RIGHT_CORNER(_SELECTED)
+    case playlistLeftTile                                // PLAYLIST_LEFT_TILE
+    case playlistRightTile                               // PLAYLIST_RIGHT_TILE
+    case playlistBottomLeft                              // PLAYLIST_BOTTOM_LEFT_CORNER
+    case playlistBottomRight                             // PLAYLIST_BOTTOM_RIGHT_CORNER
+    case playlistBottomTile                              // PLAYLIST_BOTTOM_TILE
+    case playlistScrollThumb(pressed: Bool)              // PLAYLIST_SCROLL_HANDLE(_SELECTED)
+    case playlistCloseButton(pressed: Bool)              // PLAYLIST_CLOSE_SELECTED
+
     static let sliderLevels = 28
     static let blankDigit = 10
 }
@@ -37,4 +60,19 @@ protocol Skin: AnyObject {
     /// 24 visualizer colors in `viscolor.txt` order: background, grid dots,
     /// 16 spectrum colors from top to bottom, 5 oscilloscope colors, peak dots.
     var visColors: [CGColor] { get }
+    /// 19 colors for the equalizer graph, top (+12 dB) to bottom (-12 dB).
+    var eqGraphColors: [CGColor] { get }
+    var playlistColors: PlaylistColors { get }
+}
+
+/// The playlist's text colors, as in a skin's `pledit.txt`.
+struct PlaylistColors {
+    var normal: CGColor
+    var current: CGColor
+    var normalBackground: CGColor
+    var selectedBackground: CGColor
+}
+
+enum EQButton: Hashable {
+    case on, auto, presets
 }

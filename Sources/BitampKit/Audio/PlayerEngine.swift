@@ -38,6 +38,10 @@ final class PlayerEngine {
         didSet { output.pan = Float(balance) }
     }
 
+    var equalizerSettings = EqualizerSettings.flat {
+        didSet { applyEqualizer() }
+    }
+
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
     private let equalizer = AVAudioUnitEQ(numberOfBands: 10)
@@ -66,6 +70,15 @@ final class PlayerEngine {
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.configurationChanged() }
+        }
+    }
+
+    private func applyEqualizer() {
+        let settings = equalizerSettings.clamped
+        equalizer.bypass = !settings.enabled
+        equalizer.globalGain = settings.preamp
+        for (band, gain) in zip(equalizer.bands, settings.bands) {
+            band.gain = gain
         }
     }
 
@@ -197,25 +210,11 @@ final class PlayerEngine {
 
     private func loadMetadata(for url: URL) {
         Task {
-            let asset = AVURLAsset(url: url)
-            var title: String?
-            var artist: String?
-            for item in (try? await asset.load(.commonMetadata)) ?? [] {
-                switch item.commonKey {
-                case .commonKeyTitle?: title = try? await item.load(.stringValue)
-                case .commonKeyArtist?: artist = try? await item.load(.stringValue)
-                default: break
-                }
-            }
-            var kbps: Int?
-            if let audioTrack = try? await asset.loadTracks(withMediaType: .audio).first,
-               let rate = try? await audioTrack.load(.estimatedDataRate), rate > 0 {
-                kbps = Int((rate / 1000).rounded())
-            }
+            let metadata = await TrackMetadata.load(from: url)
             guard var track = self.track, track.url == url else { return }
-            if let title, !title.isEmpty { track.title = title }
-            if let artist, !artist.isEmpty { track.artist = artist }
-            if let kbps { track.kbps = kbps }
+            if let title = metadata.title { track.title = title }
+            if let artist = metadata.artist { track.artist = artist }
+            if let kbps = metadata.kbps { track.kbps = kbps }
             self.track = track
         }
     }

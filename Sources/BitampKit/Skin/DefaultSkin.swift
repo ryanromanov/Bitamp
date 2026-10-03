@@ -3,11 +3,21 @@ import CoreGraphics
 /// Bitamp's built-in look: original pixel art drawn in code, rendered once per sprite and cached.
 final class DefaultSkin: Skin {
     let visColors: [CGColor]
+    let eqGraphColors: [CGColor]
+    let playlistColors = PlaylistColors(
+        normal: Palette.lcdOn, current: rgb(0xffffff),
+        normalBackground: Palette.lcd, selectedBackground: rgb(0x1d3566))
     private var cache: [SkinElement: CGImage] = [:]
     private var glyphs: [Character: CGImage] = [:]
 
     init() {
         visColors = Self.makeVisColors()
+        eqGraphColors = (0..<19).map { row in
+            let t = Double(row) / 18
+            return t < 0.5
+                ? mix(rgb(0xff5a3c), rgb(0xe8d03a), t * 2)
+                : mix(rgb(0xe8d03a), rgb(0x2fc8a0), (t - 0.5) * 2)
+        }
     }
 
     func image(for element: SkinElement) -> CGImage {
@@ -29,7 +39,7 @@ final class DefaultSkin: Skin {
     private func render(_ element: SkinElement) -> CGImage {
         switch element {
         case .mainBackground: return background()
-        case .titleBar(let active): return titleBar(active: active)
+        case .titleBar(let active): return titleBar("BITAMP", active: active, ridgesEnd: 240)
         case .titleButton(let button, let pressed): return titleButton(button, pressed: pressed)
         case .transport(let button, let pressed): return transportButton(button, pressed: pressed)
         case .playStatus(let status): return playStatus(status)
@@ -46,6 +56,41 @@ final class DefaultSkin: Skin {
         case .minus:
             let c = Canvas(Layout.minus.size)
             c.fill(0, 0, c.width, c.height, Palette.lcdOn)
+            return c.image()
+
+        case .eqBackground: return eqBackground()
+        case .eqTitleBar(let active): return titleBar("BITAMP EQUALIZER", active: active, ridgesEnd: 259)
+        case .eqCloseButton(let pressed), .playlistCloseButton(let pressed): return titleButton(.close, pressed: pressed)
+        case .eqButton(let button, let on, let pressed): return eqButton(button, on: on, pressed: pressed)
+        case .eqSliderBackground(let level): return eqSliderBackground(level)
+        case .eqSliderThumb(let pressed):
+            let c = Canvas(EQLayout.thumb)
+            thumb(c, pressed: pressed, grips: [])
+            c.fill(2, 5, 7, 1, Palette.faceDark)
+            c.fill(2, 6, 7, 1, Palette.faceLight)
+            return c.image()
+        case .eqGraphBackground: return eqGraphBackground()
+        case .eqPreampLine:
+            let c = Canvas(Int(EQLayout.graph.width), 1)
+            for x in stride(from: 0, to: c.width, by: 2) { c.fill(x, 0, 1, 1, Palette.amberDim) }
+            return c.image()
+
+        case .playlistTopLeft(let active): return playlistTop(width: 25, active: active, leftEdge: true)
+        case .playlistTopTile(let active): return playlistTop(width: 25, active: active)
+        case .playlistTopRight(let active): return playlistTop(width: 25, active: active, rightEdge: true)
+        case .playlistTitle(let active): return playlistTitle(active: active)
+        case .playlistLeftTile: return playlistSide(width: Int(PlaylistLayout.left), left: true)
+        case .playlistRightTile: return playlistSide(width: Int(PlaylistLayout.right), left: false)
+        case .playlistBottomLeft: return playlistBottomLeft()
+        case .playlistBottomRight: return playlistBottomRight()
+        case .playlistBottomTile: return playlistBottom(width: 25)
+        case .playlistScrollThumb(let pressed):
+            let c = Canvas(PlaylistLayout.scrollThumb)
+            thumb(c, pressed: pressed, grips: [])
+            for y in [6, 8, 10] {
+                c.fill(2, y, 4, 1, Palette.faceDark)
+                c.fill(2, y + 1, 4, 1, Palette.faceLight)
+            }
             return c.image()
         }
     }
@@ -88,24 +133,26 @@ final class DefaultSkin: Skin {
         c.fill(x, y, w, h, Palette.lcd)
     }
 
-    private func titleBar(active: Bool) -> CGImage {
+    /// A 275×14 title bar: centered name between ridges that run from x 18 to `ridgesEnd`.
+    private func titleBar(_ name: String, active: Bool, ridgesEnd: Int) -> CGImage {
         let c = Canvas(Layout.titleBar.size)
         c.fill(0, 0, c.width, c.height, Palette.title)
         c.bevel(0, 0, c.width, c.height, light: Palette.faceLight, dark: Palette.faceDark)
 
-        let name = "BITAMP"
         let textWidth = PixelFont.width(of: name) - 1
         let textX = (c.width - textWidth) / 2
-        let ridgeLight = active ? Palette.amber : Palette.faceLight
-        let ridgeDark = active ? Palette.amberDim : Palette.faceDark
-        for (start, end) in [(18, textX - 6), (textX + textWidth + 6, 240)] {
-            for y in [4, 7, 10] {
-                c.fill(start, y, end - start, 1, ridgeLight)
-                c.fill(start, y + 1, end - start, 1, ridgeDark)
-            }
+        for (start, end) in [(18, textX - 6), (textX + textWidth + 6, ridgesEnd)] {
+            ridges(c, start, end, rows: [4, 7, 10], active: active)
         }
         c.text(name, textX, 4, active ? Palette.amber : Palette.label)
         return c.image()
+    }
+
+    private func ridges(_ c: Canvas, _ start: Int, _ end: Int, rows: [Int], active: Bool) {
+        for y in rows {
+            c.fill(start, y, end - start, 1, active ? Palette.amber : Palette.faceLight)
+            c.fill(start, y + 1, end - start, 1, active ? Palette.amberDim : Palette.faceDark)
+        }
     }
 
     private func titleButton(_ button: TitleButton, pressed: Bool) -> CGImage {
@@ -271,6 +318,177 @@ final class DefaultSkin: Skin {
             c.fill(x, 3, 1, c.height - 6, Palette.faceDark)
             c.fill(x + 1, 3, 1, c.height - 6, Palette.faceLight)
         }
+    }
+
+    // MARK: - Equalizer
+
+    private func eqBackground() -> CGImage {
+        let c = Canvas(EQLayout.size)
+        c.fill(0, 0, c.width, c.height, Palette.face)
+        c.bevel(0, 0, c.width, c.height, light: Palette.faceLight, dark: Palette.faceDark)
+        let graph = EQLayout.graph
+        inset(c, Int(graph.minX), Int(graph.minY), Int(graph.width), Int(graph.height))
+
+        // A dotted 0 dB line behind the band sliders.
+        let zeroY = Int(EQLayout.preamp.minY) + Int(EQLayout.preamp.height) / 2
+        for x in stride(from: 76, to: 256, by: 2) { c.fill(x, zeroY, 1, 1, Palette.faceLight) }
+
+        func rightAligned(_ text: String, _ y: Int) {
+            c.text(text, 75 - (PixelFont.width(of: text) - 1), y, Palette.label)
+        }
+        rightAligned("+12", Int(EQLayout.preamp.minY) + 3)
+        rightAligned("0", zeroY - 2)
+        rightAligned("-12", Int(EQLayout.preamp.maxY) - 8)
+
+        func centered(_ text: String, under rect: CGRect) {
+            c.text(text, Int(rect.midX) - (PixelFont.width(of: text) - 1) / 2, EQLayout.labelY, Palette.label)
+        }
+        centered("PRE", under: EQLayout.preamp)
+        for (index, label) in EqualizerLabels.bands.enumerated() {
+            centered(label, under: EQLayout.band(index))
+        }
+        return c.image()
+    }
+
+    private func eqButton(_ button: EQButton, on: Bool, pressed: Bool) -> CGImage {
+        let c = Canvas(EQLayout.button(button).size)
+        raised(c, pressed: pressed)
+        let o = pressed ? 1 : 0
+        let textY = (c.height - 5) / 2 + o
+        switch button {
+        case .on, .auto:
+            c.fill(4 + o, (c.height - 3) / 2 + o, 3, 3, on ? Palette.amber : Palette.amberDim)
+            c.text(button == .on ? "ON" : "AUTO", 9 + o, textY, on ? Palette.icon : Palette.label)
+        case .presets:
+            let text = "PRESETS"
+            c.text(text, (c.width - PixelFont.width(of: text) + 1) / 2 + o, textY, Palette.label)
+        }
+        return c.image()
+    }
+
+    /// A vertical groove, lit from the middle (0 dB) to the slider's value.
+    private func eqSliderBackground(_ level: Int) -> CGImage {
+        let c = Canvas(EQLayout.preamp.size)
+        groove(c, 4, 0, 6, c.height)
+        let last = SkinElement.sliderLevels - 1
+        let t = Double(level) / Double(last)  // 0 is -12 dB, 1 is +12 dB.
+        let middle = c.height / 2
+        let travel = c.height - Int(EQLayout.thumb.height)
+        let y = Int(EQLayout.thumb.height) / 2 + Int((Double(travel) * (1 - t)).rounded())
+        let color = levelColor(abs(t - 0.5) * 2)
+        c.fill(5, min(y, middle), 4, abs(y - middle) + 1, color)
+        return c.image()
+    }
+
+    private func eqGraphBackground() -> CGImage {
+        let c = Canvas(EQLayout.graph.size)
+        c.fill(0, 0, c.width, c.height, Palette.lcd)
+        for x in stride(from: 0, to: c.width, by: 2) { c.fill(x, c.height / 2, 1, 1, Palette.lcdGhost) }
+        return c.image()
+    }
+
+    // MARK: - Playlist
+
+    private func playlistTop(width: Int, active: Bool, leftEdge: Bool = false, rightEdge: Bool = false) -> CGImage {
+        let c = Canvas(width, Int(PlaylistLayout.top))
+        c.fill(0, 0, width, c.height, Palette.title)
+        c.fill(0, 0, width, 1, Palette.faceLight)
+        c.fill(0, c.height - 1, width, 1, Palette.faceDark)
+        if leftEdge { c.fill(0, 0, 1, c.height, Palette.faceLight) }
+        if rightEdge { c.fill(width - 1, 0, 1, c.height, Palette.faceDark) }
+        // The top-right corner leaves room for the close button.
+        ridges(c, leftEdge ? 6 : 0, rightEdge ? 12 : width, rows: [5, 8, 11], active: active)
+        return c.image()
+    }
+
+    private func playlistTitle(active: Bool) -> CGImage {
+        let c = Canvas(100, Int(PlaylistLayout.top))
+        c.fill(0, 0, c.width, c.height, Palette.title)
+        c.fill(0, 0, c.width, 1, Palette.faceLight)
+        c.fill(0, c.height - 1, c.width, 1, Palette.faceDark)
+        let name = "PLAYLIST"
+        let textWidth = PixelFont.width(of: name) - 1
+        let textX = (c.width - textWidth) / 2
+        ridges(c, 0, textX - 6, rows: [5, 8, 11], active: active)
+        ridges(c, textX + textWidth + 6, c.width, rows: [5, 8, 11], active: active)
+        c.text(name, textX, 6, active ? Palette.amber : Palette.label)
+        return c.image()
+    }
+
+    private func playlistSide(width: Int, left: Bool) -> CGImage {
+        let c = Canvas(width, Int(PlaylistLayout.heightStep))
+        c.fill(0, 0, width, c.height, Palette.face)
+        if left {
+            c.fill(0, 0, 1, c.height, Palette.faceLight)
+            c.fill(width - 1, 0, 1, c.height, Palette.faceDark)
+        } else {
+            c.fill(0, 0, 1, c.height, Palette.faceLight)
+            c.fill(width - 1, 0, 1, c.height, Palette.faceDark)
+            c.fill(5, 0, 8, c.height, Palette.groove)
+            c.fill(4, 0, 1, c.height, Palette.faceDark)
+            c.fill(13, 0, 1, c.height, Palette.faceLight)
+        }
+        return c.image()
+    }
+
+    private func playlistBottom(width: Int) -> CGImage {
+        let c = Canvas(width, Int(PlaylistLayout.bottom))
+        c.fill(0, 0, width, c.height, Palette.face)
+        c.fill(0, 0, width, 1, Palette.faceLight)
+        c.fill(0, c.height - 1, width, 1, Palette.faceDark)
+        return c.image()
+    }
+
+    private func playlistBottomLeft() -> CGImage {
+        let c = Canvas(125, Int(PlaylistLayout.bottom))
+        c.fill(0, 0, c.width, c.height, Palette.face)
+        c.fill(0, 0, c.width, 1, Palette.faceLight)
+        c.fill(0, 0, 1, c.height, Palette.faceLight)
+        c.fill(0, c.height - 1, c.width, 1, Palette.faceDark)
+        for (x, label) in [(14, "ADD"), (43, "REM"), (72, "SEL"), (101, "MISC")] {
+            playlistButton(c, x, 8, label)
+        }
+        return c.image()
+    }
+
+    private func playlistBottomRight() -> CGImage {
+        let c = Canvas(150, Int(PlaylistLayout.bottom))
+        c.fill(0, 0, c.width, c.height, Palette.face)
+        c.fill(0, 0, c.width, 1, Palette.faceLight)
+        c.fill(0, c.height - 1, c.width, 1, Palette.faceDark)
+        c.fill(c.width - 1, 0, 1, c.height, Palette.faceDark)
+
+        // Running time, mini transport and mini time.
+        inset(c, 5, 8, 72, 9)
+        let ink = Palette.label
+        let y = 22
+        c.fill(6, y + 1, 1, 5, ink)                                  // Previous
+        for i in 0..<3 { c.fill(7 + i, y + 3 - i, 1, 1 + 2 * i, ink) }
+        for i in 0..<3 { c.fill(16 + i, y + 1 + i, 1, 5 - 2 * i, ink) } // Play
+        c.fill(24, y + 1, 2, 5, ink); c.fill(27, y + 1, 2, 5, ink)      // Pause
+        c.fill(33, y + 1, 5, 5, ink)                                  // Stop
+        for i in 0..<3 { c.fill(42 + i, y + 1 + i, 1, 5 - 2 * i, ink) } // Next
+        c.fill(45, y + 1, 1, 5, ink)
+        for i in 0..<3 { c.fill(54 - i, y + 1 + i, 1 + 2 * i, 1, ink) } // Eject
+        c.fill(52, y + 5, 5, 1, ink)
+        inset(c, 67, 22, 32, 8)
+
+        playlistButton(c, 106, 8, "LIST")
+
+        // Resize grip.
+        for i in 0..<4 {
+            let x = 136 + i * 3
+            c.fill(x, 34 - i * 3 - 1, 1, 1, Palette.faceLight)
+            c.fill(x + 1, 34 - i * 3, 1, 1, Palette.faceDark)
+            for j in 0..<i { c.fill(x - (j + 1) * 3, 34 - i * 3 + (j + 1) * 3 - 1, 1, 1, Palette.faceLight) }
+        }
+        return c.image()
+    }
+
+    private func playlistButton(_ c: Canvas, _ x: Int, _ y: Int, _ label: String) {
+        c.fill(x, y, 22, 18, Palette.faceButton)
+        c.bevel(x, y, 22, 18, light: Palette.faceLight, dark: Palette.faceDark)
+        c.text(label, x + (22 - PixelFont.width(of: label) + 1) / 2, y + 7, Palette.label)
     }
 
     // MARK: - Display

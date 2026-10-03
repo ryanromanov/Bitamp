@@ -12,10 +12,12 @@ Needs macOS 13+ and the Xcode Command Line Tools (`xcode-select --install`). The
 
 ```sh
 swift build            # debug build
-swift test             # run tests
+scripts/test.sh        # run tests (wraps swift test; see below)
 scripts/bundle.sh      # release build → Bitamp.app
 open Bitamp.app
 ```
+
+`scripts/test.sh` works around a Command Line Tools bug: an incremental test rebuild can fail with "plugin for module 'TestingMacros' not found". The script clears the stale module cache and retries.
 
 ## License
 

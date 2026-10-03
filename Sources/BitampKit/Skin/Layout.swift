@@ -98,3 +98,129 @@ enum Control: Hashable {
         }
     }
 }
+
+/// Equalizer window geometry in 1× pixels.
+enum EQLayout {
+    static let size = CGSize(width: 275, height: 116)
+    static let titleBar = CGRect(x: 0, y: 0, width: 275, height: 14)
+    static let close = CGRect(x: 264, y: 3, width: 9, height: 9)
+    static let graph = CGRect(x: 86, y: 17, width: 113, height: 19)
+    static let preamp = CGRect(x: 21, y: 38, width: 14, height: 63)
+    static let thumb = CGSize(width: 11, height: 11)
+    static let labelY = 104
+
+    static func band(_ index: Int) -> CGRect {
+        CGRect(x: 78 + 18 * index, y: 38, width: 14, height: 63)
+    }
+
+    static func button(_ button: EQButton) -> CGRect {
+        switch button {
+        case .on: return CGRect(x: 14, y: 18, width: 26, height: 12)
+        case .auto: return CGRect(x: 40, y: 18, width: 32, height: 12)
+        case .presets: return CGRect(x: 217, y: 18, width: 44, height: 12)
+        }
+    }
+
+    enum Control: Hashable {
+        case close, button(EQButton), preamp, band(Int)
+
+        static let all: [Control] = [.close, .button(.on), .button(.auto), .button(.presets), .preamp]
+            + (0..<EqualizerSettings.bandCount).map(Control.band)
+
+        var rect: CGRect {
+            switch self {
+            case .close: return EQLayout.close
+            case .button(let button): return EQLayout.button(button)
+            case .preamp: return EQLayout.preamp
+            case .band(let index): return EQLayout.band(index)
+            }
+        }
+    }
+
+    static func control(at point: CGPoint) -> Control? {
+        Control.all.first { $0.rect.contains(point) }
+    }
+}
+
+/// Playlist window geometry in 1× pixels. The window is 275 wide and grows in 29-pixel
+/// steps from 116 tall, so the side tiles always fit exactly.
+enum PlaylistLayout {
+    static let width: CGFloat = 275
+    static let minHeight: CGFloat = 116
+    static let heightStep: CGFloat = 29
+    static let defaultHeight: CGFloat = 232
+    static let top: CGFloat = 20
+    static let bottom: CGFloat = 38
+    static let left: CGFloat = 12
+    static let right: CGFloat = 20
+    static let rowHeight: CGFloat = 8
+    static let scrollThumb = CGSize(width: 8, height: 18)
+
+    static func snappedHeight(_ height: CGFloat) -> CGFloat {
+        minHeight + max(0, ((height - minHeight) / heightStep).rounded()) * heightStep
+    }
+
+    static func list(in size: CGSize) -> CGRect {
+        CGRect(x: left, y: top, width: size.width - left - right, height: size.height - top - bottom)
+    }
+
+    static func scrollTrack(in size: CGSize) -> CGRect {
+        CGRect(x: size.width - 15, y: top, width: 8, height: size.height - top - bottom)
+    }
+
+    static func close(in size: CGSize) -> CGRect {
+        CGRect(x: size.width - 11, y: 3, width: 9, height: 9)
+    }
+
+    static func titleBar(in size: CGSize) -> CGRect {
+        CGRect(x: 0, y: 0, width: size.width, height: top)
+    }
+
+    static func resizeGrip(in size: CGSize) -> CGRect {
+        CGRect(x: size.width - 20, y: size.height - 20, width: 20, height: 20)
+    }
+
+    /// Where the selected/total running time is printed.
+    static func runningTime(in size: CGSize) -> CGPoint {
+        CGPoint(x: size.width - 143, y: size.height - 28)
+    }
+
+    static func miniTime(in size: CGSize) -> CGPoint {
+        CGPoint(x: size.width - 82, y: size.height - 15)
+    }
+
+    enum Button: CaseIterable {
+        case add, remove, select, misc, list
+    }
+
+    static func rect(_ button: Button, in size: CGSize) -> CGRect {
+        let y = size.height - 30
+        switch button {
+        case .add: return CGRect(x: 14, y: y, width: 22, height: 18)
+        case .remove: return CGRect(x: 43, y: y, width: 22, height: 18)
+        case .select: return CGRect(x: 72, y: y, width: 22, height: 18)
+        case .misc: return CGRect(x: 101, y: y, width: 22, height: 18)
+        case .list: return CGRect(x: size.width - 44, y: y, width: 22, height: 18)
+        }
+    }
+
+    static func rect(_ button: TransportButton, in size: CGSize) -> CGRect {
+        let offsets: [TransportButton: CGFloat] = [.previous: 0, .play: 9, .pause: 18, .stop: 27, .next: 36, .eject: 46]
+        return CGRect(x: size.width - 144 + offsets[button]!, y: size.height - 16, width: 8, height: 8)
+    }
+
+    enum Control: Hashable {
+        case close, titleBar, list, scrollbar, button(Button), transport(TransportButton), resizeGrip
+    }
+
+    static func control(at point: CGPoint, in size: CGSize) -> Control? {
+        if close(in: size).contains(point) { return .close }
+        if titleBar(in: size).contains(point) { return .titleBar }
+        if list(in: size).contains(point) { return .list }
+        if scrollTrack(in: size).contains(point) { return .scrollbar }
+        for button in Button.allCases where rect(button, in: size).contains(point) { return .button(button) }
+        for button in TransportButton.allCases where rect(button, in: size).contains(point) { return .transport(button) }
+        if resizeGrip(in: size).contains(point) { return .resizeGrip }
+        return nil
+    }
+}

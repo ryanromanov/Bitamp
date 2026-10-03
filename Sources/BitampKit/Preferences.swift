@@ -104,6 +104,30 @@ final class Preferences {
         set { defaults.set(newValue.rawValue, forKey: Key.oscilloscopeStyle) }
     }
 
+    var equalizer: EqualizerSettings {
+        get { decoded(Key.equalizer) ?? .flat }
+        set { encode(newValue, Key.equalizer) }
+    }
+
+    var customPresets: [EqualizerPreset] {
+        get { decoded(Key.customPresets) ?? [] }
+        set { encode(newValue, Key.customPresets) }
+    }
+
+    /// The current track's index in the saved queue.
+    var queueIndex: Int? {
+        get { defaults.object(forKey: Key.queueIndex) as? Int }
+        set { defaults.set(newValue, forKey: Key.queueIndex) }
+    }
+
+    private func decoded<T: Decodable>(_ key: String) -> T? {
+        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+    }
+
+    private func encode<T: Encodable>(_ value: T, _ key: String) {
+        defaults.set(try? JSONEncoder().encode(value), forKey: key)
+    }
+
     private func value<T: RawRepresentable>(_ key: String) -> T? where T.RawValue == String {
         defaults.string(forKey: key).flatMap(T.init(rawValue:))
     }
@@ -119,5 +143,8 @@ final class Preferences {
         static let barFalloff = "visualizerBarFalloff"
         static let peakFalloff = "visualizerPeakFalloff"
         static let oscilloscopeStyle = "oscilloscopeStyle"
+        static let equalizer = "equalizer"
+        static let customPresets = "equalizerPresets"
+        static let queueIndex = "queueIndex"
     }
 }

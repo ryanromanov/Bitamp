@@ -1,23 +1,16 @@
 import AppKit
 
-/// The main window's only view. Composes the skin into a 275×116 bitmap each frame,
-/// then scales it up with nearest-neighbor filtering. All hit-testing is in 1× pixels.
+/// The main window: transport, time, visualizer and marquee.
 ///
-/// It's also the first responder for the Playback and Visualization menus.
-final class MainView: NSView, NSMenuItemValidation {
-    static let scale: CGFloat = 2
-    static let framesPerSecond = 30.0
-
+/// It's also the first responder for the Playback and Visualization menus, from any
+/// Bitamp window, because the other windows never become main.
+final class MainView: SkinnedView, NSMenuItemValidation {
     let controller: PlaybackController
     let preferences: Preferences
-    var skin: Skin
     /// Shows the open panel.
     var onOpen: (() -> Void)?
 
     private var engine: PlayerEngine { controller.engine }
-    private let canvas = Canvas(Layout.size)
-    private var timer: Timer?
-    private var frameCount = 0
     private var marquee = Marquee(visibleWidth: Int(Layout.marquee.width))
 
     // Mouse tracking.
@@ -32,45 +25,26 @@ final class MainView: NSView, NSMenuItemValidation {
     init(controller: PlaybackController, preferences: Preferences, skin: Skin) {
         self.controller = controller
         self.preferences = preferences
-        self.skin = skin
-        super.init(frame: NSRect(origin: .zero, size: NSSize(
-            width: Layout.size.width * Self.scale, height: Layout.size.height * Self.scale)))
+        super.init(pixelSize: Layout.size, skin: skin)
         registerForDraggedTypes([.fileURL])
         applyFalloff()
+        announce = { [weak self] message in self?.marquee.message = message }
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
     }
 
-    override var isOpaque: Bool { true }
-    override var acceptsFirstResponder: Bool { true }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    func flash(_ message: String) {
-        marquee.flash(message, for: 3)
+    func flash(_ message: String, for seconds: TimeInterval = 3) {
+        marquee.flash(message, for: seconds)
     }
 
     // MARK: - Frame loop
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        timer?.invalidate()
-        timer = nil
-        guard window != nil else { return }
-        let timer = Timer(timeInterval: 1 / Self.framesPerSecond, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
-    }
-
-    private func tick() {
-        frameCount += 1
+    override func tick() {
         marquee.setText(titleText)
         marquee.tick()
         engine.analyzer.advance()
-        needsDisplay = true
     }
 
     private var titleText: String {
@@ -84,16 +58,9 @@ final class MainView: NSView, NSMenuItemValidation {
 
     // MARK: - Drawing
 
-    override func draw(_ dirtyRect: NSRect) {
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
-        context.interpolationQuality = .none
-        context.draw(renderFrame(), in: bounds)
-    }
-
-    private func renderFrame() -> CGImage {
-        let c = canvas
+    override func render(into c: Canvas) {
         c.draw(skin.image(for: .mainBackground), 0, 0)
-        c.draw(skin.image(for: .titleBar(active: window?.isKeyWindow ?? false)), 0, 0)
+        c.draw(skin.image(for: .titleBar(active: isActive)), 0, 0)
         for button in TitleButton.allCases {
             c.draw(skin.image(for: .titleButton(button, pressed: isPressed(.title(button)))), at: button.rect.origin)
         }
@@ -112,7 +79,6 @@ final class MainView: NSView, NSMenuItemValidation {
             c.draw(image, at: button.rect.origin)
         }
         c.draw(skin.image(for: .about(pressed: isPressed(.about))), at: Layout.about.origin)
-        return c.image()
     }
 
     private func isPressed(_ control: Control) -> Bool {
@@ -123,7 +89,8 @@ final class MainView: NSView, NSMenuItemValidation {
         switch button {
         case .shuffle: return controller.shuffle
         case .repeatTrack: return controller.repeats
-        case .equalizer, .playlist: return false
+        case .equalizer: return windowGroup?.isVisible(.equalizer) ?? false
+        case .playlist: return windowGroup?.isVisible(.playlist) ?? false
         }
     }
 
@@ -220,27 +187,16 @@ final class MainView: NSView, NSMenuItemValidation {
         c.context.saveGState()
         c.context.clip(to: rect)
         if let overlay = marquee.overlay() {
-            drawText(c, overlay, x, y)
+            drawPixelText(c, overlay, x, y)
         } else if marquee.scrolls {
             let loop = marquee.loop
             let start = x - marquee.offset
-            drawText(c, loop, start, y)
-            drawText(c, loop, start + PixelFont.width(of: loop), y)
+            drawPixelText(c, loop, start, y)
+            drawPixelText(c, loop, start + PixelFont.width(of: loop), y)
         } else {
-            drawText(c, marquee.text, x, y)
+            drawPixelText(c, marquee.text, x, y)
         }
         c.context.restoreGState()
-    }
-
-    private func drawText(_ c: Canvas, _ text: String, _ x: Int, _ y: Int) {
-        let limit = Int(Layout.size.width)
-        for (index, character) in PixelFont.normalize(text).enumerated() {
-            let glyphX = x + index * PixelFont.cellWidth
-            guard glyphX < limit else { break }
-            if glyphX > -PixelFont.cellWidth {
-                c.draw(skin.glyph(for: character), glyphX, y)
-            }
-        }
     }
 
     private func drawTrackInfo(_ c: Canvas) {
@@ -262,7 +218,7 @@ final class MainView: NSView, NSMenuItemValidation {
 
     private func drawRightAligned(_ c: Canvas, _ text: String, in rect: CGRect) {
         let width = PixelFont.width(of: text)
-        drawText(c, text, Int(rect.maxX) - width, Int(rect.minY))
+        drawPixelText(c, text, Int(rect.maxX) - width, Int(rect.minY))
     }
 
     private func drawSliders(_ c: Canvas) {
@@ -292,17 +248,8 @@ final class MainView: NSView, NSMenuItemValidation {
 
     // MARK: - Mouse
 
-    private func pixel(for event: NSEvent) -> CGPoint {
-        let point = convert(event.locationInWindow, from: nil)
-        return CGPoint(x: floor(point.x / Self.scale), y: floor((bounds.height - point.y) / Self.scale))
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        let point = pixel(for: event)
-        guard let control = Layout.control(at: point) else {
-            window?.performDrag(with: event)
-            return
-        }
+    override func pixelMouseDown(at point: CGPoint, event: NSEvent) -> Bool {
+        guard let control = Layout.control(at: point) else { return false }
         switch control {
         case .volume, .balance, .position:
             beginSliderDrag(control, at: point)
@@ -315,20 +262,18 @@ final class MainView: NSView, NSMenuItemValidation {
             pressed = control
             pressedInside = true
         }
-        needsDisplay = true
+        return true
     }
 
-    override func mouseDragged(with event: NSEvent) {
-        let point = pixel(for: event)
+    override func pixelMouseDragged(to point: CGPoint, event: NSEvent) {
         if slider != nil {
             updateSlider(at: point)
         } else if let pressed {
             pressedInside = pressed.rect.contains(point)
         }
-        needsDisplay = true
     }
 
-    override func mouseUp(with event: NSEvent) {
+    override func pixelMouseUp(at point: CGPoint, event: NSEvent) {
         if let slider {
             if slider.control == .position, let pendingSeek, let track = engine.track {
                 engine.seek(to: pendingSeek * track.duration)
@@ -341,7 +286,6 @@ final class MainView: NSView, NSMenuItemValidation {
             self.pressed = nil
             pressedInside = false
         }
-        needsDisplay = true
     }
 
     /// Right-clicking the visualizer shows its options; anywhere else, the main menu.
@@ -431,8 +375,10 @@ final class MainView: NSView, NSMenuItemValidation {
         case .transport(.eject): openFiles(nil)
         case .toggle(.shuffle): toggleShuffle(nil)
         case .toggle(.repeatTrack): toggleRepeat(nil)
+        case .toggle(.equalizer): windowGroup?.toggle(.equalizer)
+        case .toggle(.playlist): windowGroup?.toggle(.playlist)
         case .about: NSApp.orderFrontStandardAboutPanel(nil)
-        default: break  // Shade, EQ and playlist arrive in later phases.
+        default: break  // Shade mode arrives in Phase 4.
         }
     }
 
