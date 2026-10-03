@@ -1,5 +1,7 @@
 # Bitamp
 
+[![CI](https://github.com/ryanromanov/Bitamp/actions/workflows/ci.yml/badge.svg)](https://github.com/ryanromanov/Bitamp/actions/workflows/ci.yml)
+
 A small, open-source audio player for macOS with an old-school look: a tiny skinned window, a green LCD time display, a spectrum visualizer and chunky transport buttons, in the spirit of the classic desktop players from the late '90s.
 
 > Status: early development.

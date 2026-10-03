@@ -9,12 +9,21 @@ cd "$(dirname "$0")/.."
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT
 
+# Runs swift test, showing its output as it goes, and sets $status to its exit code.
 run() {
-    swift test "$@" 2>&1 | tee "$log"
+    status=0
+    swift test "$@" > "$log" 2>&1 &
+    pid=$!
+    tail -f -n +1 "$log" &
+    tail_pid=$!
+    wait "$pid" || status=$?
+    sleep 0.2
+    kill "$tail_pid" 2>/dev/null
+    wait "$tail_pid" 2>/dev/null
 }
 
 stale() {
-    grep -q "plugin for module 'TestingMacros' not found" "$log"
+    [ "$status" -ne 0 ] && grep -q "plugin for module 'TestingMacros' not found" "$log"
 }
 
 run "$@"
@@ -28,4 +37,4 @@ if stale; then
     rm -rf .build
     run "$@"
 fi
-! grep -qE "^error:|✘ Test run" "$log"
+exit "$status"

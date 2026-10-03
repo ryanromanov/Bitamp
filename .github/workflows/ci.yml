@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels its older run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: scripts/test.sh
+
+      - name: Bundle the app
+        run: scripts/bundle.sh
+
+      # Each run's app can be downloaded from the run page to try a change.
+      # It's ad-hoc signed: right-click it and choose Open the first time.
+      - name: Zip the app
+        run: ditto -c -k --keepParent Bitamp.app Bitamp.zip
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Bitamp-${{ github.sha }}
+          path: Bitamp.zip
+          retention-days: 14
