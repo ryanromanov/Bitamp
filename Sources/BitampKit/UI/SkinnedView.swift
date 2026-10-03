@@ -6,10 +6,12 @@ import AppKit
 /// Subclasses draw in `render(into:)`, can add native-resolution drawing (such as
 /// text) in `drawOverlay(in:)`, and handle the mouse in the `pixel…` methods.
 class SkinnedView: NSView {
-    static let scale: CGFloat = 2
     static let framesPerSecond = 30.0
+    static let scales: ClosedRange<Int> = 1...4
 
     var skin: Skin
+    /// Points per skin pixel. 2 is the normal size; on a Retina display every value is crisp.
+    private(set) var scale: CGFloat
     weak var windowGroup: WindowGroup?
     /// Shows a message in the main window's marquee, or nil to clear it.
     var announce: ((String?) -> Void)?
@@ -18,11 +20,24 @@ class SkinnedView: NSView {
     private var timer: Timer?
     private var draggingWindow = false
 
-    init(pixelSize: CGSize, skin: Skin) {
+    init(pixelSize: CGSize, skin: Skin, scale: CGFloat) {
         self.skin = skin
+        self.scale = scale
         canvas = Canvas(pixelSize)
         super.init(frame: NSRect(origin: .zero, size: NSSize(
-            width: pixelSize.width * Self.scale, height: pixelSize.height * Self.scale)))
+            width: pixelSize.width * scale, height: pixelSize.height * scale)))
+    }
+
+    /// Resizes the view, and its window, to draw at `scale` points per pixel.
+    func setScale(_ scale: CGFloat) {
+        let pixels = pixelSize
+        self.scale = scale
+        let size = NSSize(width: pixels.width * scale, height: pixels.height * scale)
+        if let window {
+            window.setContentSize(size)
+        } else {
+            setFrameSize(size)
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -41,9 +56,20 @@ class SkinnedView: NSView {
         window?.isKeyWindow ?? false
     }
 
+    /// The nearest valid size for this window, in skin pixels. Fixed-size windows override
+    /// this to return their size; the playlist snaps to its tile steps.
+    func normalizedPixelSize(_ proposed: CGSize) -> CGSize {
+        proposed
+    }
+
+    /// The size this view should be at its current scale.
+    var naturalSize: NSSize {
+        NSSize(width: pixelSize.width * scale, height: pixelSize.height * scale)
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        let pixels = CGSize(width: (newSize.width / Self.scale).rounded(), height: (newSize.height / Self.scale).rounded())
+        let pixels = normalizedPixelSize(CGSize(width: (newSize.width / scale).rounded(), height: (newSize.height / scale).rounded()))
         if pixels != pixelSize { canvas = Canvas(pixels) }
     }
 
@@ -87,8 +113,8 @@ class SkinnedView: NSView {
     /// A rect in skin pixels (top-left origin) as view coordinates.
     func viewRect(forPixels rect: CGRect) -> NSRect {
         NSRect(
-            x: rect.minX * Self.scale, y: bounds.height - rect.maxY * Self.scale,
-            width: rect.width * Self.scale, height: rect.height * Self.scale)
+            x: rect.minX * scale, y: bounds.height - rect.maxY * scale,
+            width: rect.width * scale, height: rect.height * scale)
     }
 
     /// Draws `text` in the pixel font, clipped to the canvas.
@@ -106,7 +132,7 @@ class SkinnedView: NSView {
 
     func pixel(for event: NSEvent) -> CGPoint {
         let point = convert(event.locationInWindow, from: nil)
-        return CGPoint(x: floor(point.x / Self.scale), y: floor((bounds.height - point.y) / Self.scale))
+        return CGPoint(x: floor(point.x / scale), y: floor((bounds.height - point.y) / scale))
     }
 
     /// Return false to start dragging the window instead.

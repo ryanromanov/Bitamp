@@ -8,7 +8,8 @@ enum Layout {
     static let titleBar = CGRect(x: 0, y: 0, width: 275, height: 14)
     static let playStatus = CGRect(x: 26, y: 28, width: 9, height: 9)
     static let timeDisplay = CGRect(x: 36, y: 26, width: 63, height: 13)
-    static let minus = CGRect(x: 37, y: 31, width: 6, height: 2)
+    /// A full digit cell, as in `nums_ex.bmp`; the sign itself is drawn inside it.
+    static let minus = CGRect(x: 36, y: 26, width: 9, height: 13)
     static let timeDigits: [CGPoint] = [48, 60, 78, 90].map { CGPoint(x: $0, y: 26) }
     static let visualizer = CGRect(x: 24, y: 43, width: 76, height: 16)
     static let marquee = CGRect(x: 111, y: 27, width: 154, height: 6)

@@ -51,6 +51,7 @@ final class Preferences {
         defaults.register(defaults: [
             Key.volume: 0.75,
             Key.showPeaks: true,
+            Key.scale: 2,
         ])
     }
 
@@ -120,6 +121,18 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.queueIndex) }
     }
 
+    /// Points per skin pixel, 1 to 4. 2 is the normal size.
+    var scale: Int {
+        get { min(max(defaults.integer(forKey: Key.scale), SkinnedView.scales.lowerBound), SkinnedView.scales.upperBound) }
+        set { defaults.set(newValue, forKey: Key.scale) }
+    }
+
+    /// The installed skin in use, by name; nil for the default skin.
+    var skinName: String? {
+        get { defaults.string(forKey: Key.skinName) }
+        set { defaults.set(newValue, forKey: Key.skinName) }
+    }
+
     private func decoded<T: Decodable>(_ key: String) -> T? {
         defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
     }
@@ -146,5 +159,7 @@ final class Preferences {
         static let equalizer = "equalizer"
         static let customPresets = "equalizerPresets"
         static let queueIndex = "queueIndex"
+        static let skinName = "skin"
+        static let scale = "scale"
     }
 }

@@ -55,7 +55,7 @@ final class DefaultSkin: Skin {
         case .digit(let digit): return self.digit(digit)
         case .minus:
             let c = Canvas(Layout.minus.size)
-            c.fill(0, 0, c.width, c.height, Palette.lcdOn)
+            c.fill(1, 5, 6, 2, Palette.lcdOn)
             return c.image()
 
         case .eqBackground: return eqBackground()

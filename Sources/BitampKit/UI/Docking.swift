@@ -109,17 +109,53 @@ final class WindowGroup {
 
     /// Restores saved frames and visibility. Panels with no saved frame stack under the
     /// main window in the classic order: equalizer, then playlist.
+    ///
+    /// Frames saved at another size are rescaled around the main window's top-left corner,
+    /// as `setScale` does, so the layout survives a size change between launches.
     func restore() {
+        guard let mainView = main.contentView as? SkinnedView else { return }
+        let savedMain = savedFrame(main)
+        // The size the frames were saved at, from the main window's saved width.
+        let savedScale = savedMain.map { $0.width / Layout.size.width } ?? mainView.scale
+        let ratio = mainView.scale / savedScale
+        if savedMain == nil { main.center() }
+        let anchor = savedMain.map { NSPoint(x: $0.minX, y: $0.maxY) } ?? NSPoint(x: main.frame.minX, y: main.frame.maxY)
+        place(main, topLeft: anchor, pixelHeight: nil)
+
         var below = main.frame.minY
         for panel in Panel.allCases {
             guard let window = panels[panel] else { continue }
-            if !window.setFrameUsingName(window.frameAutosaveName) {
-                window.setFrameOrigin(NSPoint(x: main.frame.minX, y: below - window.frame.height))
+            if let saved = savedFrame(window) {
+                place(window, topLeft: NSPoint(
+                    x: anchor.x + (saved.minX - anchor.x) * ratio,
+                    y: anchor.y + (saved.maxY - anchor.y) * ratio),
+                      pixelHeight: saved.height / savedScale)
+            } else {
+                place(window, topLeft: NSPoint(x: main.frame.minX, y: below), pixelHeight: nil)
             }
             below = window.frame.minY
             if defaults.bool(forKey: Self.visibilityKey(panel)) { window.orderFront(nil) }
         }
         keepOnScreen()
+    }
+
+    /// The frame AppKit autosaved. Read directly, because `setFrameUsingName` restores only
+    /// the position of a window that isn't user-resizable.
+    private func savedFrame(_ window: NSWindow) -> NSRect? {
+        guard let string = defaults.string(forKey: "NSWindow Frame \(window.frameAutosaveName)") else { return nil }
+        let numbers = string.split(separator: " ").prefix(4).compactMap { Double($0) }
+        guard numbers.count == 4, numbers[2] > 0, numbers[3] > 0 else { return nil }
+        return NSRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3])
+    }
+
+    /// Sizes a window for its view's scale (and, for the playlist, a height in skin pixels)
+    /// and puts its top-left corner at `topLeft`.
+    private func place(_ window: NSWindow, topLeft: NSPoint, pixelHeight: CGFloat?) {
+        guard let view = window.contentView as? SkinnedView else { return }
+        let pixels = view.normalizedPixelSize(CGSize(
+            width: view.pixelSize.width, height: (pixelHeight ?? view.pixelSize.height).rounded()))
+        window.setContentSize(NSSize(width: pixels.width * view.scale, height: pixels.height * view.scale))
+        window.setFrameOrigin(NSPoint(x: topLeft.x, y: topLeft.y - window.frame.height))
     }
 
     /// Moves the main window and whatever is docked to it up, if needed, so the group's
@@ -139,6 +175,23 @@ final class WindowGroup {
 
     private static func visibilityKey(_ panel: Panel) -> String {
         "\(panel.rawValue)Visible"
+    }
+
+    /// Resizes every window to `scale`, keeping the main window's top-left corner fixed
+    /// and every other window at the same relative place, so docked windows stay docked.
+    func setScale(_ scale: CGFloat) {
+        guard let current = (main.contentView as? SkinnedView)?.scale, current != scale else { return }
+        let ratio = scale / current
+        let anchor = NSPoint(x: main.frame.minX, y: main.frame.maxY)
+        for window in windows {
+            guard let view = window.contentView as? SkinnedView else { continue }
+            let offset = (x: window.frame.minX - anchor.x, y: window.frame.maxY - anchor.y)
+            view.setScale(scale)
+            window.setFrameOrigin(NSPoint(
+                x: anchor.x + offset.x * ratio,
+                y: anchor.y + offset.y * ratio - window.frame.height))
+        }
+        keepOnScreen()
     }
 
     // MARK: - Dragging

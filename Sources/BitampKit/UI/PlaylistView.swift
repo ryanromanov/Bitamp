@@ -6,7 +6,6 @@ import UniformTypeIdentifiers
 /// The frame is skin pixels like the other windows, but track names are drawn with a real
 /// font at full resolution, so any title is readable, including non-Latin ones.
 final class PlaylistView: SkinnedView {
-    static let font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
 
     let controller: PlaybackController
     let preferences: Preferences
@@ -36,7 +35,9 @@ final class PlaylistView: SkinnedView {
     init(controller: PlaybackController, preferences: Preferences, skin: Skin) {
         self.controller = controller
         self.preferences = preferences
-        super.init(pixelSize: CGSize(width: PlaylistLayout.width, height: PlaylistLayout.defaultHeight), skin: skin)
+        super.init(
+            pixelSize: CGSize(width: PlaylistLayout.width, height: PlaylistLayout.defaultHeight),
+            skin: skin, scale: CGFloat(preferences.scale))
         registerForDraggedTypes([.fileURL])
     }
 
@@ -44,7 +45,13 @@ final class PlaylistView: SkinnedView {
         fatalError("init(coder:) is not supported")
     }
 
+    override func normalizedPixelSize(_ proposed: CGSize) -> CGSize {
+        CGSize(width: PlaylistLayout.width, height: PlaylistLayout.snappedHeight(proposed.height))
+    }
+
     private var queue: PlayQueue { controller.queue }
+    /// 11 points at the normal 2× size, scaled with the window.
+    private var font: NSFont { NSFont.monospacedDigitSystemFont(ofSize: 5.5 * scale, weight: .regular) }
     private var listRect: CGRect { PlaylistLayout.list(in: pixelSize) }
     private var visibleRows: Int { max(1, Int(listRect.height / PlaylistLayout.rowHeight)) }
     private var maxScrollRow: Int { max(0, queue.count - visibleRows) }
@@ -158,16 +165,16 @@ final class PlaylistView: SkinnedView {
         for row in visibleRange {
             let url = queue.items[row]
             let color = NSColor(cgColor: row == playing ? colors.current : colors.normal) ?? .green
-            let attributes: [NSAttributedString.Key: Any] = [.font: Self.font, .foregroundColor: color]
-            let rect = viewRect(forPixels: rowRect(row)).insetBy(dx: 4, dy: 0)
-            let textY = rect.minY + (rect.height - Self.font.boundingRectForFont.height) / 2 + 1
+            let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+            let rect = viewRect(forPixels: rowRect(row)).insetBy(dx: 2 * scale, dy: 0)
+            let textY = rect.minY + (rect.height - font.boundingRectForFont.height) / 2 + scale / 2
 
             var nameWidth = rect.width
             if let duration = controller.info.duration(for: url) {
                 let time = NSAttributedString(string: TimeFormat.clock(duration), attributes: attributes)
                 let timeWidth = time.size().width
                 time.draw(at: NSPoint(x: rect.maxX - timeWidth, y: textY))
-                nameWidth -= timeWidth + 8
+                nameWidth -= timeWidth + 4 * scale
             }
             let style = NSMutableParagraphStyle()
             style.lineBreakMode = .byTruncatingTail
@@ -259,8 +266,8 @@ final class PlaylistView: SkinnedView {
             scrollRow = Int((t * CGFloat(maxScrollRow)).rounded())
         case .resize(let startHeight, let startMouseY):
             guard let window else { return }
-            let proposed = (startHeight + startMouseY - NSEvent.mouseLocation.y) / Self.scale
-            let height = PlaylistLayout.snappedHeight(proposed) * Self.scale
+            let proposed = (startHeight + startMouseY - NSEvent.mouseLocation.y) / scale
+            let height = PlaylistLayout.snappedHeight(proposed) * scale
             guard height != window.frame.height else { return }
             var frame = window.frame
             frame.origin.y = frame.maxY - height
@@ -287,7 +294,7 @@ final class PlaylistView: SkinnedView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        let rows = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY / (PlaylistLayout.rowHeight * Self.scale) : event.scrollingDeltaY
+        let rows = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY / (PlaylistLayout.rowHeight * scale) : event.scrollingDeltaY
         scrollAccumulator -= rows
         let whole = Int(scrollAccumulator.rounded(.towardZero))
         scrollAccumulator -= CGFloat(whole)
@@ -510,7 +517,7 @@ final class PlaylistView: SkinnedView {
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
         let point = convert(sender.draggingLocation, from: nil)
-        let pixelY = (bounds.height - point.y) / Self.scale
+        let pixelY = (bounds.height - point.y) / scale
         let row = scrollRow + Int(((pixelY - listRect.minY) / PlaylistLayout.rowHeight).rounded())
         dropIndex = min(max(row, scrollRow), min(queue.count, scrollRow + visibleRows))
         return .copy

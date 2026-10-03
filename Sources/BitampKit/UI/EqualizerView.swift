@@ -31,13 +31,17 @@ final class EqualizerView: SkinnedView {
     /// The slider being dragged, and where on its thumb it was grabbed.
     private var slider: (control: EQLayout.Control, grab: CGFloat)?
 
-    init(controller: PlaybackController, skin: Skin) {
+    init(controller: PlaybackController, skin: Skin, scale: CGFloat) {
         self.controller = controller
-        super.init(pixelSize: EQLayout.size, skin: skin)
+        super.init(pixelSize: EQLayout.size, skin: skin, scale: scale)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
+    }
+
+    override func normalizedPixelSize(_ proposed: CGSize) -> CGSize {
+        EQLayout.size
     }
 
     private var settings: EqualizerSettings {

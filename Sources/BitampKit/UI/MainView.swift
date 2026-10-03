@@ -9,6 +9,8 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     let preferences: Preferences
     /// Shows the open panel.
     var onOpen: (() -> Void)?
+    /// Installs and applies a dropped `.wsz` skin.
+    var onSkinDropped: ((URL) -> Void)?
 
     private var engine: PlayerEngine { controller.engine }
     private var marquee = Marquee(visibleWidth: Int(Layout.marquee.width))
@@ -25,7 +27,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     init(controller: PlaybackController, preferences: Preferences, skin: Skin) {
         self.controller = controller
         self.preferences = preferences
-        super.init(pixelSize: Layout.size, skin: skin)
+        super.init(pixelSize: Layout.size, skin: skin, scale: CGFloat(preferences.scale))
         registerForDraggedTypes([.fileURL])
         applyFalloff()
         announce = { [weak self] message in self?.marquee.message = message }
@@ -33,6 +35,10 @@ final class MainView: SkinnedView, NSMenuItemValidation {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) is not supported")
+    }
+
+    override func normalizedPixelSize(_ proposed: CGSize) -> CGSize {
+        Layout.size
     }
 
     func flash(_ message: String, for seconds: TimeInterval = 3) {
@@ -363,7 +369,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         switch control {
         case .title(.options):
             let button = TitleButton.options.rect
-            let below = NSPoint(x: button.minX * Self.scale, y: bounds.height - button.maxY * Self.scale)
+            let below = NSPoint(x: button.minX * scale, y: bounds.height - button.maxY * scale)
             Menus.context().popUp(positioning: nil, at: below, in: self)
         case .title(.close): NSApp.terminate(nil)
         case .title(.minimize): window?.miniaturize(nil)
@@ -509,6 +515,10 @@ final class MainView: SkinnedView, NSMenuItemValidation {
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
         // This runs repeatedly during a drag, so only scan dropped folders once.
+        if droppedURLs(sender).contains(where: SkinLibrary.isSkin) {
+            marquee.message = "DROP TO LOAD SKIN"
+            return .copy
+        }
         let changeCount = sender.draggingPasteboard.changeCount
         if dropFileCount?.changeCount != changeCount {
             dropFileCount = (changeCount, AudioFiles.expand(droppedURLs(sender)).count)
@@ -530,6 +540,10 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         marquee.message = nil
         let urls = droppedURLs(sender)
+        if let skin = urls.first(where: SkinLibrary.isSkin) {
+            onSkinDropped?(skin)
+            return true
+        }
         if NSEvent.modifierFlags.contains(.shift) {
             controller.enqueue(urls)
         } else {

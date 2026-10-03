@@ -1,4 +1,5 @@
 import AVFoundation
+import ImageIO
 import Foundation
 import Testing
 @testable import BitampKit
@@ -636,5 +637,118 @@ import Testing
         #expect(size(.playlistLeftTile) == CGSize(width: PlaylistLayout.left, height: PlaylistLayout.heightStep))
         #expect(size(.playlistRightTile) == CGSize(width: PlaylistLayout.right, height: PlaylistLayout.heightStep))
         #expect(skin.eqGraphColors.count == 19)
+    }
+}
+
+@Suite struct SkinLoadingTests {
+    /// A solid-color bitmap encoded as BMP.
+    func bmp(width: Int, height: Int, color: UInt32) throws -> Data {
+        let canvas = Canvas(width, height)
+        canvas.fill(0, 0, width, height, rgb(color))
+        let data = NSMutableData()
+        let destination = try #require(CGImageDestinationCreateWithData(data, "com.microsoft.bmp" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, canvas.image(), nil)
+        #expect(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+
+    /// Zips `files` with the system zip tool (deflated, in a subfolder like many skins).
+    func makeSkin(_ files: [String: Data]) throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let inner = folder.appendingPathComponent("MySkin")
+        try FileManager.default.createDirectory(at: inner, withIntermediateDirectories: true)
+        for (name, data) in files { try data.write(to: inner.appendingPathComponent(name)) }
+        let zip = folder.appendingPathComponent("MySkin.wsz")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        process.currentDirectoryURL = folder
+        process.arguments = ["-qr", zip.path, "MySkin"]
+        try process.run()
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0)
+        return zip
+    }
+
+    @Test func zipReaderInflatesEntries() throws {
+        let text = String(repeating: "Bitamp skins are zips of bitmaps. ", count: 200)
+        let url = try makeSkin(["notes.txt": Data(text.utf8)])
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let archive = try ZipArchive(url: url)
+        let entry = try #require(archive.entries.first { $0.path.hasSuffix("notes.txt") })
+        #expect(entry.method == 8)  // Deflated, so this exercises decompression.
+        #expect(try archive.contents(of: entry) == Data(text.utf8))
+    }
+
+    @Test func rejectsNonZips() {
+        #expect(throws: ZipArchive.ZipError.self) { try ZipArchive(data: Data("not a zip".utf8)) }
+    }
+
+    @Test func cutsSpritesAndFallsBack() throws {
+        let url = try makeSkin([
+            "MAIN.BMP": try bmp(width: 275, height: 116, color: 0x112233),  // Upper case, as some skins have.
+            "cbuttons.bmp": try bmp(width: 136, height: 36, color: 0x445566),
+            "viscolor.txt": Data((0..<24).map { "\($0),\($0),\($0), // color \($0)" }.joined(separator: "\r\n").utf8),
+            "pledit.txt": Data("[Text]\nNormal=#00FF00\nCurrent=#FFFFFF\nNormalBG=#000000\nSelectedBG=#0000C6\nFont=Arial\n".utf8),
+        ])
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let fallback = DefaultSkin()
+        let skin = try WszSkin(url: url, fallback: fallback)
+        #expect(skin.name == "MySkin")
+
+        let background = skin.image(for: .mainBackground)
+        #expect(background.width == 275 && background.height == 116)
+        let play = skin.image(for: .transport(.play, pressed: true))
+        #expect(play.width == 23 && play.height == 18)
+        // No posbar.bmp: the default skin's sprite stands in.
+        #expect(skin.image(for: .positionBackground) === fallback.image(for: .positionBackground))
+
+        #expect(skin.visColors.count == 24)
+        #expect(skin.visColors[5].components?.prefix(3).map { ($0 * 255).rounded() } == [5, 5, 5])
+        #expect(skin.playlistColors.selectedBackground.components?.prefix(3).map { ($0 * 255).rounded() } == [0, 0, 198])
+    }
+
+    @Test func spriteMapStaysInsideClassicSheets() {
+        // The classic sheet sizes; every mapped sprite must fit inside its sheet.
+        let sheets: [String: CGSize] = [
+            "main": CGSize(width: 275, height: 116), "titlebar": CGSize(width: 344, height: 87),
+            "cbuttons": CGSize(width: 136, height: 36), "playpaus": CGSize(width: 42, height: 9),
+            "monoster": CGSize(width: 56, height: 24), "volume": CGSize(width: 68, height: 433),
+            "balance": CGSize(width: 47, height: 433), "posbar": CGSize(width: 307, height: 10),
+            "shufrep": CGSize(width: 92, height: 85), "eqmain": CGSize(width: 275, height: 315),
+            "pledit": CGSize(width: 280, height: 186),
+        ]
+        var elements: [SkinElement] = [.mainBackground, .positionBackground, .eqBackground, .eqGraphBackground,
+                                       .eqPreampLine, .playlistLeftTile, .playlistRightTile, .playlistBottomLeft,
+                                       .playlistBottomRight, .playlistBottomTile]
+        for flag in [false, true] {
+            elements += [.titleBar(active: flag), .mono(active: flag), .stereo(active: flag),
+                         .volumeThumb(pressed: flag), .balanceThumb(pressed: flag), .positionThumb(pressed: flag),
+                         .eqTitleBar(active: flag), .eqSliderThumb(pressed: flag), .playlistTopLeft(active: flag),
+                         .playlistTitle(active: flag), .playlistTopTile(active: flag), .playlistTopRight(active: flag),
+                         .playlistScrollThumb(pressed: flag)]
+            elements += TitleButton.allCases.map { .titleButton($0, pressed: flag) }
+            elements += TransportButton.allCases.map { .transport($0, pressed: flag) }
+            for on in [false, true] {
+                elements += ToggleButton.allCases.map { .toggle($0, on: on, pressed: flag) }
+                elements += [EQButton.on, .auto, .presets].map { .eqButton($0, on: on, pressed: flag) }
+            }
+        }
+        elements += (0..<SkinElement.sliderLevels).flatMap {
+            [.volumeBackground(level: $0), .balanceBackground(level: $0), .eqSliderBackground(level: $0)]
+        }
+        for element in elements {
+            guard let (sheet, rect) = WszSkin.source(for: element) else {
+                Issue.record("No sprite for \(element)")
+                continue
+            }
+            let size = sheets[sheet]!
+            #expect(rect.maxX <= size.width && rect.maxY <= size.height, "\(element) is outside \(sheet).bmp")
+        }
+    }
+
+    @Test func textMapCoversTheFont() {
+        for character in PixelFont.glyphs.keys {
+            #expect(WszSkin.textPosition(character) != nil, "No text.bmp cell for \(character)")
+        }
     }
 }
