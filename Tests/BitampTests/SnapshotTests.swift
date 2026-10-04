@@ -34,7 +34,7 @@ struct SnapshotTests {
 
     @Test func windows() throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        var skins: [(String, Skin)] = [("default", DefaultSkin()), ("millennium", DefaultSkin(theme: .millennium))]
+        var skins: [(String, Skin)] = [("default", DefaultSkin()), ("millennium", DefaultSkin(theme: .millennium)), ("orb", DefaultSkin(theme: .orb))]
         if let path = ProcessInfo.processInfo.environment["BITAMP_SNAPSHOT_SKIN"] {
             skins.append(("wsz", try WszSkin(url: URL(fileURLWithPath: path))))
         }

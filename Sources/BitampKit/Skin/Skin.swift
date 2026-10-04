@@ -80,6 +80,12 @@ protocol Skin: AnyObject {
     /// 19 colors for the equalizer graph, top (+12 dB) to bottom (-12 dB).
     var eqGraphColors: [CGColor] { get }
     var playlistColors: PlaylistColors { get }
+    /// Art for a freeform Orb main window, or nil for the classic one.
+    var orb: OrbArt? { get }
+}
+
+extension Skin {
+    var orb: OrbArt? { nil }
 }
 
 /// The playlist's text colors, as in a skin's `pledit.txt`.

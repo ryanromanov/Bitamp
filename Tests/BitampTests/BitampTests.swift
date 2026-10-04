@@ -52,15 +52,15 @@ import Testing
 @Suite struct SliderTests {
     @Test func thumbTravel() {
         let volume = SliderGeometry.volume
-        #expect(volume.thumbX(for: 0) == Layout.volume.minX)
-        #expect(volume.thumbX(for: 1) == Layout.volume.maxX - Layout.sliderThumb.width)
-        #expect(volume.thumbX(for: 2) == volume.thumbX(for: 1))
+        #expect(volume.thumbStart(for: 0) == Layout.volume.minX)
+        #expect(volume.thumbStart(for: 1) == Layout.volume.maxX - Layout.sliderThumb.width)
+        #expect(volume.thumbStart(for: 2) == volume.thumbStart(for: 1))
     }
 
     @Test func roundTrip() {
         let position = SliderGeometry.position
         for value in stride(from: 0.0, through: 1.0, by: 0.1) {
-            let back = position.value(forThumbX: position.thumbX(for: value))
+            let back = position.value(forThumbStart: position.thumbStart(for: value))
             #expect(abs(back - value) <= 1 / Double(position.travel))
         }
     }
@@ -941,5 +941,93 @@ import Testing
         #expect(SkinTheme.builtIn(named: "TopazAmp1-2") == nil)  // An installed .wsz.
         #expect(SkinTheme.builtIn(named: "builtin:nope") == nil)
         #expect(Set(SkinTheme.builtIn.map(\.id)).count == SkinTheme.builtIn.count)
+    }
+}
+
+@Suite struct OrbTests {
+    @Test func verticalSliderRunsBottomToTop() {
+        let volume = SliderGeometry(track: OrbLayout.volume, thumbWidth: OrbLayout.volumeThumb.height, vertical: true)
+        #expect(volume.thumbStart(for: 1) == OrbLayout.volume.minY)
+        #expect(volume.thumbStart(for: 0) == OrbLayout.volume.maxY - OrbLayout.volumeThumb.height)
+        for value in stride(from: 0.0, through: 1.0, by: 0.1) {
+            let back = volume.value(forThumbStart: volume.thumbStart(for: value))
+            #expect(abs(back - value) <= 1 / Double(volume.travel))
+        }
+        #expect(volume.along(CGPoint(x: 3, y: 40)) == 40)
+    }
+
+    @Test func roundButtonsHitAsCircles() {
+        let play = OrbLayout.orbCenter
+        #expect(OrbLayout.control(at: play) == .transport(.play))
+        // The corner of the play button's square is outside its circle, on the ring.
+        let corner = OrbLayout.rect(of: .play).origin
+        #expect(OrbLayout.control(at: CGPoint(x: corner.x + 1, y: corner.y + 1)) == nil)
+        for button in TransportButton.allCases {
+            #expect(OrbLayout.control(at: OrbLayout.center(of: button)) == .transport(button))
+        }
+        for button in OrbLayout.toggles {
+            let rect = OrbLayout.rect(of: button)
+            #expect(OrbLayout.control(at: CGPoint(x: rect.midX, y: rect.midY)) == .toggle(button))
+        }
+        for button in TitleButton.allCases {
+            let rect = OrbLayout.titleButton(button)
+            #expect(OrbLayout.control(at: CGPoint(x: rect.midX, y: rect.midY)) == .title(button))
+        }
+    }
+
+    @Test func everyControlIsOnTheShape() {
+        for control in [Control.volume, .position, .timeDisplay, .visualizer]
+            + TitleButton.allCases.map(Control.title) + TransportButton.allCases.map(Control.transport)
+            + OrbLayout.toggles.map(Control.toggle) {
+            let rect = OrbLayout.rect(of: control)
+            #expect(OrbLayout.contains(CGPoint(x: rect.midX, y: rect.midY)), "\(control)")
+        }
+        // The corners of the bounding box are transparent.
+        #expect(!OrbLayout.contains(.zero))
+        #expect(!OrbLayout.contains(CGPoint(x: OrbLayout.size.width - 1, y: OrbLayout.size.height - 1)))
+    }
+
+    /// The alpha of a pixel, top-left origin.
+    func alpha(_ image: CGImage, _ x: Int, _ y: Int) -> UInt8 {
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(image, in: CGRect(x: -x, y: -(image.height - 1 - y), width: image.width, height: image.height))
+        return pixel[3]
+    }
+
+    @Test func artMatchesTheShape() {
+        let image = OrbArt(theme: .orb).background(active: true)
+        #expect(CGSize(width: image.width, height: image.height) == OrbLayout.size)
+        for (x, y) in [(0, 0), (317, 115), (150, 112), (300, 2)] {
+            #expect(alpha(image, x, y) == 0, "(\(x), \(y)) should be clear")
+            #expect(!OrbLayout.contains(CGPoint(x: x, y: y)))
+        }
+        for (x, y) in [(58, 58), (200, 60), (200, 10), (200, 105)] {
+            #expect(alpha(image, x, y) == 255, "(\(x), \(y)) should be opaque")
+            #expect(OrbLayout.contains(CGPoint(x: x, y: y)))
+        }
+    }
+
+    @MainActor @Test func switchingSkinsResizesTheMainWindow() {
+        let preferences = Preferences(defaults: UserDefaults(suiteName: "BitampOrb-\(UUID().uuidString)")!)
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences)
+        let view = MainView(controller: controller, preferences: preferences, skin: DefaultSkin())
+        #expect(view.pixelSize == Layout.size)
+        view.skin = DefaultSkin(theme: .orb)
+        #expect(view.pixelSize == OrbLayout.size)
+        #expect(view.frame.size == NSSize(width: OrbLayout.size.width * view.scale, height: OrbLayout.size.height * view.scale))
+        #expect(view.isShapedWindow)
+        view.skin = DefaultSkin(theme: .millennium)
+        #expect(view.pixelSize == Layout.size)
+        #expect(!view.isShapedWindow)
+    }
+
+    @Test func onlyTheOrbThemeHasOrbArt() {
+        #expect(DefaultSkin(theme: .orb).orb != nil)
+        #expect(DefaultSkin(theme: .millennium).orb == nil)
+        #expect(DefaultSkin().orb == nil)
+        #expect(SkinTheme.builtIn(named: "builtin:orb")?.mainShape == .orb)
     }
 }

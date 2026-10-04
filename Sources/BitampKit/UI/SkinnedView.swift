@@ -9,7 +9,9 @@ class SkinnedView: NSView {
     static let framesPerSecond = 30.0
     static let scales: ClosedRange<Int> = 1...4
 
-    var skin: Skin
+    var skin: Skin {
+        didSet { skinDidChange() }
+    }
     /// Points per skin pixel. 2 is the normal size; on a Retina display every value is crisp.
     private(set) var scale: CGFloat
     weak var windowGroup: WindowGroup?
@@ -44,7 +46,40 @@ class SkinnedView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
-    override var isOpaque: Bool { true }
+    override var isOpaque: Bool { !isShapedWindow }
+
+    /// Whether the art has transparent pixels around a shape, so the window takes that shape.
+    var isShapedWindow: Bool { false }
+    private var shadowIsStale = false
+
+    /// Makes the window transparent around a shaped skin, or opaque again.
+    func updateWindowShape() {
+        guard let window else { return }
+        window.isOpaque = !isShapedWindow
+        window.backgroundColor = isShapedWindow ? .clear : .black
+        shadowIsStale = true
+        needsDisplay = true
+    }
+
+    /// Called after `skin` changes. Subclasses that change size with the skin resize here.
+    func skinDidChange() {
+        updateWindowShape()
+        needsDisplay = true
+    }
+
+    /// Resizes the window to the size `normalizedPixelSize` asks for, such as after a skin
+    /// change, keeping its top-left corner in place.
+    func resizeKeepingTopLeft() {
+        let pixels = normalizedPixelSize(pixelSize)
+        let size = NSSize(width: pixels.width * scale, height: pixels.height * scale)
+        guard let window else {
+            setFrameSize(size)
+            return
+        }
+        let top = window.frame.maxY
+        window.setContentSize(size)
+        window.setFrameOrigin(NSPoint(x: window.frame.minX, y: top - window.frame.height))
+    }
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -77,6 +112,7 @@ class SkinnedView: NSView {
         } else {
             setFrameSize(size)
         }
+        updateWindowShape()
     }
 
     /// The nearest valid size for this window, in skin pixels. Fixed-size windows override
@@ -103,6 +139,7 @@ class SkinnedView: NSView {
         timer?.invalidate()
         timer = nil
         guard window != nil else { return }
+        updateWindowShape()
         let timer = Timer(timeInterval: 1 / Self.framesPerSecond, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.frameTick() }
         }
@@ -127,10 +164,20 @@ class SkinnedView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
+        if isShapedWindow {
+            // Start from clear pixels, so the window shows through around the shape.
+            canvas.context.clear(CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height))
+            context.clear(bounds)
+        }
         render(into: canvas)
         context.interpolationQuality = .none
         context.draw(canvas.image(), in: bounds)
         drawOverlay(in: context)
+        if shadowIsStale {
+            // The shadow follows the window's pixels, so redo it once they're drawn.
+            shadowIsStale = false
+            DispatchQueue.main.async { [weak self] in self?.window?.invalidateShadow() }
+        }
     }
 
     /// A rect in skin pixels (top-left origin) as view coordinates.

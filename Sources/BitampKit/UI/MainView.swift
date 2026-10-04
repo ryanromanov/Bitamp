@@ -1,6 +1,7 @@
 import AppKit
 
-/// The main window: transport, time, visualizer and marquee.
+/// The main window: transport, time, visualizer and marquee. Skins with Orb art get the
+/// freeform Orb layout instead of the classic one.
 ///
 /// It's also the first responder for the Playback and Visualization menus, from any
 /// Bitamp window, because the other windows never become main.
@@ -27,7 +28,8 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     init(controller: PlaybackController, preferences: Preferences, skin: Skin) {
         self.controller = controller
         self.preferences = preferences
-        super.init(pixelSize: Layout.size, skin: skin, scale: CGFloat(preferences.scale))
+        super.init(pixelSize: skin.orb == nil ? Layout.size : OrbLayout.size, skin: skin, scale: CGFloat(preferences.scale))
+        marquee.visibleWidth = Int(marqueeRect.width)
         registerForDraggedTypes([.fileURL])
         applyFalloff()
         announce = { [weak self] message in self?.marquee.message = message }
@@ -38,7 +40,25 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     }
 
     override func normalizedPixelSize(_ proposed: CGSize) -> CGSize {
-        isShaded ? CGSize(width: Layout.size.width, height: ShadeLayout.height) : Layout.size
+        if isShaded { return CGSize(width: Layout.size.width, height: ShadeLayout.height) }
+        return skin.orb == nil ? Layout.size : OrbLayout.size
+    }
+
+    /// The Orb's art, unless it's collapsed to the classic shade strip.
+    private var orb: OrbArt? {
+        isShaded ? nil : skin.orb
+    }
+
+    override var isShapedWindow: Bool { orb != nil }
+
+    override func skinDidChange() {
+        marquee.visibleWidth = Int(marqueeRect.width)
+        if normalizedPixelSize(pixelSize) != pixelSize { resizeKeepingTopLeft() }
+        super.skinDidChange()
+    }
+
+    private var marqueeRect: CGRect {
+        skin.orb == nil ? Layout.marquee : OrbLayout.marquee
     }
 
     func flash(_ message: String, for seconds: TimeInterval = 3) {
@@ -69,15 +89,19 @@ final class MainView: SkinnedView, NSMenuItemValidation {
             renderShade(c)
             return
         }
+        if let orb {
+            renderOrb(orb, c)
+            return
+        }
         c.draw(skin.image(for: .mainBackground), 0, 0)
         c.draw(skin.image(for: .titleBar(active: isActive)), 0, 0)
         for button in TitleButton.allCases {
             c.draw(skin.image(for: .titleButton(button, pressed: isPressed(.title(button)))), at: button.rect.origin)
         }
 
-        drawTime(c)
-        drawVisualizer(c)
-        drawMarquee(c)
+        drawTime(c, status: Layout.playStatus.origin, minus: Layout.minus.origin, digits: Layout.timeDigits)
+        drawVisualizer(c, in: Layout.visualizer)
+        drawMarquee(c, in: Layout.marquee)
         drawTrackInfo(c)
         drawSliders(c)
 
@@ -89,6 +113,52 @@ final class MainView: SkinnedView, NSMenuItemValidation {
             c.draw(image, at: button.rect.origin)
         }
         c.draw(skin.image(for: .about(pressed: isPressed(.about))), at: Layout.about.origin)
+    }
+
+    private func renderOrb(_ orb: OrbArt, _ c: Canvas) {
+        c.draw(orb.background(active: isActive), 0, 0)
+        for button in TitleButton.allCases {
+            c.draw(orb.titleButton(button, pressed: isPressed(.title(button))), at: OrbLayout.titleButton(button).origin)
+        }
+        drawTime(c, status: OrbLayout.playStatus, minus: OrbLayout.minus, digits: OrbLayout.timeDigits)
+        drawVisualizer(c, in: OrbLayout.visualizer)
+        drawMarquee(c, in: OrbLayout.marquee)
+
+        // Bitrate, sample rate and channels, one per line beside the time.
+        if let track = engine.track {
+            let khz = Int((track.sampleRate / 1000).rounded())
+            let lines = [track.kbps.map { "\($0) KBPS" } ?? "", "\(khz) KHZ", track.channels == 1 ? "MONO" : "STEREO"]
+            for (index, line) in lines.enumerated() {
+                drawPixelText(c, line, Int(OrbLayout.info.x), Int(OrbLayout.info.y) + index * OrbLayout.infoLineHeight)
+            }
+        }
+
+        // Seek: a filled groove up to the thumb.
+        let groove = OrbLayout.positionGroove
+        if canSeek, let track = engine.track {
+            let progress = pendingSeek ?? engine.currentTime / track.duration
+            let x = Int(geometry(for: .position).thumbStart(for: progress))
+            c.fill(Int(groove.minX), Int(groove.minY), x - Int(groove.minX), Int(groove.height), orb.fill)
+            c.fill(Int(groove.minX), Int(groove.minY), x - Int(groove.minX), 1, orb.fillShine)
+            c.draw(orb.positionThumb(pressed: pendingSeek != nil), x, Int(OrbLayout.position.minY) + 1)
+        }
+
+        // Volume: filled from the bottom up to the thumb.
+        let volumeGroove = OrbLayout.volumeGroove
+        let y = Int(geometry(for: .volume).thumbStart(for: controller.volume))
+        let thumbBottom = y + Int(OrbLayout.volumeThumb.height)
+        let filled = Int(volumeGroove.maxY) - thumbBottom
+        c.fill(Int(volumeGroove.minX), thumbBottom, Int(volumeGroove.width), filled, orb.fill)
+        c.fill(Int(volumeGroove.minX), thumbBottom, 1, filled, orb.fillShine)
+        c.draw(orb.volumeThumb(pressed: slider?.control == .volume), Int(OrbLayout.volume.minX), y)
+
+        for button in TransportButton.allCases {
+            c.draw(orb.transport(button, pressed: isPressed(.transport(button))), at: OrbLayout.rect(of: button).origin)
+        }
+        for button in OrbLayout.toggles {
+            let image = orb.toggle(button, on: isOn(button), pressed: isPressed(.toggle(button)))
+            c.draw(image, at: OrbLayout.rect(of: button).origin)
+        }
     }
 
     /// The 14-pixel strip: mini visualizer, time, transport and position.
@@ -106,7 +176,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         c.draw(skin.image(for: .mainShadePosition), at: ShadeLayout.mainPosition.origin)
         if canSeek, let track = engine.track {
             let progress = pendingSeek ?? engine.currentTime / track.duration
-            let x = geometry(for: .position).thumbX(for: progress)
+            let x = geometry(for: .position).thumbStart(for: progress)
             c.draw(skin.image(for: .mainShadeThumb(ShadeThumb(progress))), Int(x), Int(ShadeLayout.mainPosition.minY))
         }
     }
@@ -162,19 +232,19 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         }
     }
 
-    private func drawTime(_ c: Canvas) {
+    private func drawTime(_ c: Canvas, status statusOrigin: CGPoint, minus: CGPoint, digits: [CGPoint]) {
         let status: PlayStatus
         switch engine.state {
         case .playing: status = .playing
         case .paused: status = .paused
         case .stopped: status = .stopped
         }
-        c.draw(skin.image(for: .playStatus(status)), at: Layout.playStatus.origin)
+        c.draw(skin.image(for: .playStatus(status)), at: statusOrigin)
 
         // Blank while stopped, and blinking while paused.
         let blinkOff = engine.state == .paused && frameCount / 15 % 2 == 1
         guard let track = engine.track, engine.state != .stopped, !blinkOff else {
-            for point in Layout.timeDigits {
+            for point in digits {
                 c.draw(skin.image(for: .digit(SkinElement.blankDigit)), at: point)
             }
             return
@@ -183,9 +253,9 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         let showRemaining = preferences.showRemaining
         let shown = showRemaining ? max(0, track.duration - elapsed) : elapsed
         if showRemaining {
-            c.draw(skin.image(for: .minus), at: Layout.minus.origin)
+            c.draw(skin.image(for: .minus), at: minus)
         }
-        for (digit, point) in zip(TimeFormat.lcdDigits(shown), Layout.timeDigits) {
+        for (digit, point) in zip(TimeFormat.lcdDigits(shown), digits) {
             c.draw(skin.image(for: .digit(digit)), at: point)
         }
     }
@@ -196,8 +266,9 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         return engine.currentTime
     }
 
-    private func drawVisualizer(_ c: Canvas) {
-        let rect = Layout.visualizer
+    /// The analyzer or oscilloscope in `rect`, which is 16 pixels tall; wider rects get
+    /// wider bars and a stretched waveform.
+    private func drawVisualizer(_ c: Canvas, in rect: CGRect) {
         let (x0, y0) = (Int(rect.minX), Int(rect.minY))
         let colors = skin.visColors
         c.fill(rect, colors[0])
@@ -214,22 +285,25 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         switch mode {
         case .spectrum:
             let showPeaks = preferences.showPeaks
+            let step = (Int(rect.width) + 1) / SpectrumAnalyzer.barCount
             for i in 0..<SpectrumAnalyzer.barCount {
-                let x = x0 + i * 4
+                let x = x0 + i * step
                 let bar = Int((analyzer.bars[i] * Float(height)).rounded())
                 for row in (height - bar)..<height {
-                    c.fill(x, y0 + row, 3, 1, colors[2 + row])
+                    c.fill(x, y0 + row, step - 1, 1, colors[2 + row])
                 }
                 let peak = Int((analyzer.peaks[i] * Float(height)).rounded())
                 if showPeaks && peak > 0 {
-                    c.fill(x, y0 + height - peak, 3, 1, colors[23])
+                    c.fill(x, y0 + height - peak, step - 1, 1, colors[23])
                 }
             }
         case .oscilloscope:
             let middle = height / 2
             let style = preferences.oscilloscopeStyle
             var previous: Int?
-            for (x, sample) in analyzer.waveform.enumerated() {
+            let waveform = analyzer.waveform
+            for x in 0..<Int(rect.width) {
+                let sample = waveform[x * waveform.count / Int(rect.width)]
                 // Dots skip every other column; packed tighter they'd read as a line.
                 if style == .dots && x % 2 == 1 { continue }
                 let y = min(max(middle - Int((sample * Float(middle)).rounded()), 0), height - 1)
@@ -249,8 +323,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         }
     }
 
-    private func drawMarquee(_ c: Canvas) {
-        let rect = Layout.marquee
+    private func drawMarquee(_ c: Canvas, in rect: CGRect) {
         let (x, y) = (Int(rect.minX), Int(rect.minY))
         c.context.saveGState()
         c.context.clip(to: rect)
@@ -294,18 +367,18 @@ final class MainView: SkinnedView, NSMenuItemValidation {
 
         let volumeLevel = Int((controller.volume * lastLevel).rounded())
         c.draw(skin.image(for: .volumeBackground(level: volumeLevel)), at: Layout.volume.origin)
-        let volumeX = SliderGeometry.volume.thumbX(for: controller.volume)
+        let volumeX = SliderGeometry.volume.thumbStart(for: controller.volume)
         c.draw(skin.image(for: .volumeThumb(pressed: slider?.control == .volume)), Int(volumeX), Int(Layout.volume.minY) + 1)
 
         let balanceLevel = Int((abs(controller.balance) * lastLevel).rounded())
         c.draw(skin.image(for: .balanceBackground(level: balanceLevel)), at: Layout.balance.origin)
-        let balanceX = SliderGeometry.balance.thumbX(for: BalanceMapping.slider(fromBalance: controller.balance))
+        let balanceX = SliderGeometry.balance.thumbStart(for: BalanceMapping.slider(fromBalance: controller.balance))
         c.draw(skin.image(for: .balanceThumb(pressed: slider?.control == .balance)), Int(balanceX), Int(Layout.balance.minY) + 1)
 
         c.draw(skin.image(for: .positionBackground), at: Layout.position.origin)
         if canSeek, let track = engine.track {
             let progress = pendingSeek ?? engine.currentTime / track.duration
-            let x = SliderGeometry.position.thumbX(for: progress)
+            let x = SliderGeometry.position.thumbStart(for: progress)
             c.draw(skin.image(for: .positionThumb(pressed: pendingSeek != nil)), Int(x), Int(Layout.position.minY))
         }
     }
@@ -317,10 +390,10 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     // MARK: - Mouse
 
     override func pixelMouseDown(at point: CGPoint, event: NSEvent) -> Bool {
-        let control = isShaded ? ShadeLayout.mainControl(at: point) : Layout.control(at: point)
-        guard let control else {
+        guard let control = control(at: point) else {
             // Double-clicking the title bar toggles shade mode; in shade mode it's all title bar.
-            if event.clickCount == 2 && (isShaded || Layout.titleBar.contains(point)) {
+            let titleBar = skin.orb == nil ? Layout.titleBar : OrbLayout.titleBar
+            if event.clickCount == 2 && (isShaded || titleBar.contains(point)) {
                 toggleShade(nil)
                 return true
             }
@@ -345,7 +418,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         if slider != nil {
             updateSlider(at: point)
         } else if let pressed {
-            pressedInside = pressed.rect.contains(point)
+            pressedInside = control(at: point) == pressed
         }
     }
 
@@ -366,7 +439,12 @@ final class MainView: SkinnedView, NSMenuItemValidation {
 
     /// Right-clicking the visualizer shows its options; anywhere else, the main menu.
     override func menu(for event: NSEvent) -> NSMenu? {
-        Layout.control(at: pixel(for: event)) == .visualizer ? Menus.visualization() : Menus.context()
+        control(at: pixel(for: event)) == .visualizer ? Menus.visualization() : Menus.context()
+    }
+
+    private func control(at point: CGPoint) -> Control? {
+        if isShaded { return ShadeLayout.mainControl(at: point) }
+        return orb == nil ? Layout.control(at: point) : OrbLayout.control(at: point)
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -375,6 +453,15 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     }
 
     private func geometry(for control: Control) -> SliderGeometry {
+        if orb != nil {
+            switch control {
+            case .volume:
+                return SliderGeometry(track: OrbLayout.volume, thumbWidth: OrbLayout.volumeThumb.height, vertical: true)
+            case .position:
+                return SliderGeometry(track: OrbLayout.position, thumbWidth: OrbLayout.positionThumb.width)
+            default: break
+            }
+        }
         switch control {
         case .volume: return .volume
         case .balance: return .balance
@@ -396,10 +483,11 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     private func beginSliderDrag(_ control: Control, at point: CGPoint) {
         if control == .position && !canSeek { return }
         let geometry = geometry(for: control)
-        let thumbX = geometry.thumbX(for: sliderValue(for: control))
+        let thumbStart = geometry.thumbStart(for: sliderValue(for: control))
+        let along = geometry.along(point)
         // Grab the thumb where it was clicked; a click on the track centers the thumb there.
-        let grab = (thumbX..<thumbX + geometry.thumbWidth).contains(point.x)
-            ? point.x - thumbX
+        let grab = (thumbStart..<thumbStart + geometry.thumbWidth).contains(along)
+            ? along - thumbStart
             : (geometry.thumbWidth / 2).rounded(.down)
         slider = (control, grab)
         updateSlider(at: point)
@@ -407,7 +495,8 @@ final class MainView: SkinnedView, NSMenuItemValidation {
 
     private func updateSlider(at point: CGPoint) {
         guard let slider else { return }
-        let value = geometry(for: slider.control).value(forThumbX: point.x - slider.grab)
+        let geometry = geometry(for: slider.control)
+        let value = geometry.value(forThumbStart: geometry.along(point) - slider.grab)
         switch slider.control {
         case .volume:
             controller.volume = value
@@ -439,7 +528,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     private func perform(_ control: Control) {
         switch control {
         case .title(.options):
-            let button = TitleButton.options.rect
+            let button = orb == nil ? TitleButton.options.rect : OrbLayout.titleButton(.options)
             let below = NSPoint(x: button.minX * scale, y: bounds.height - button.maxY * scale)
             Menus.context().popUp(positioning: nil, at: below, in: self)
         case .title(.close): NSApp.terminate(nil)

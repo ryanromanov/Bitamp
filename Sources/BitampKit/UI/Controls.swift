@@ -1,23 +1,33 @@
 import CoreGraphics
 
-/// Maps a horizontal slider's thumb position to a 0...1 value and back.
+/// Maps a slider's thumb position to a 0...1 value and back. Horizontal sliders run left
+/// to right; vertical ones run bottom to top.
 struct SliderGeometry {
     let track: CGRect
+    /// The thumb's length along the track.
     let thumbWidth: CGFloat
+    var vertical = false
 
     static let volume = SliderGeometry(track: Layout.volume, thumbWidth: Layout.sliderThumb.width)
     static let balance = SliderGeometry(track: Layout.balance, thumbWidth: Layout.sliderThumb.width)
     static let position = SliderGeometry(track: Layout.position, thumbWidth: Layout.positionThumb.width)
 
-    var travel: CGFloat { track.width - thumbWidth }
+    var travel: CGFloat { (vertical ? track.height : track.width) - thumbWidth }
 
-    /// The thumb's left edge for `value`, on whole pixels.
-    func thumbX(for value: Double) -> CGFloat {
-        track.minX + (travel * CGFloat(min(max(value, 0), 1))).rounded()
+    /// The thumb's left edge, or top edge if vertical, for `value`, on whole pixels.
+    func thumbStart(for value: Double) -> CGFloat {
+        let offset = (travel * CGFloat(min(max(value, 0), 1))).rounded()
+        return vertical ? track.minY + travel - offset : track.minX + offset
     }
 
-    func value(forThumbX x: CGFloat) -> Double {
-        Double(min(max((x - track.minX) / travel, 0), 1))
+    func value(forThumbStart start: CGFloat) -> Double {
+        let offset = vertical ? track.minY + travel - start : start - track.minX
+        return Double(min(max(offset / travel, 0), 1))
+    }
+
+    /// `point`'s coordinate along the track.
+    func along(_ point: CGPoint) -> CGFloat {
+        vertical ? point.y : point.x
     }
 }
 

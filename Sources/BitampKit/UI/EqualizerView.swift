@@ -90,9 +90,9 @@ final class EqualizerView: SkinnedView {
         let balance = BalanceMapping.slider(fromBalance: controller.balance)
         let y = Int(ShadeLayout.eqVolume.minY)
         c.draw(skin.image(for: .eqShadeVolumeThumb(ShadeThumb(volume))),
-               Int(ShadeSlider.volume.geometry.thumbX(for: volume)), y)
+               Int(ShadeSlider.volume.geometry.thumbStart(for: volume)), y)
         c.draw(skin.image(for: .eqShadeBalanceThumb(ShadeThumb(balance))),
-               Int(ShadeSlider.balance.geometry.thumbX(for: balance)), y)
+               Int(ShadeSlider.balance.geometry.thumbStart(for: balance)), y)
     }
 
     private func isPressed(_ control: EQLayout.Control) -> Bool {
@@ -202,7 +202,7 @@ final class EqualizerView: SkinnedView {
 
     private func updateShadeSlider(at point: CGPoint) {
         guard let shadeSlider else { return }
-        let value = shadeSlider.geometry.value(forThumbX: point.x - 1)
+        let value = shadeSlider.geometry.value(forThumbStart: point.x - 1)
         switch shadeSlider {
         case .volume:
             controller.volume = value
