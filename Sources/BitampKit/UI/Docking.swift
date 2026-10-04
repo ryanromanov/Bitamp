@@ -120,8 +120,13 @@ final class WindowGroup {
         guard let mainView = main.contentView as? SkinnedView else { return }
         restoreShade()
         let savedMain = savedFrame(main)
-        // The size the frames were saved at, from the main window's saved width.
-        let savedScale = savedMain.map { $0.width / Layout.size.width } ?? mainView.scale
+        // The size the frames were saved at, from the main window's saved width. The skin and
+        // shade state are restored by now, so the main view is already its saved width in pixels.
+        // Rounded, since a frame saved with another skin's width gives an in-between ratio.
+        let savedScale = savedMain.map { frame in
+            min(max((frame.width / mainView.pixelSize.width).rounded(), CGFloat(SkinnedView.scales.lowerBound)),
+                CGFloat(SkinnedView.scales.upperBound))
+        } ?? mainView.scale
         let ratio = mainView.scale / savedScale
         if savedMain == nil { main.center() }
         let anchor = savedMain.map { NSPoint(x: $0.minX, y: $0.maxY) } ?? NSPoint(x: main.frame.minX, y: main.frame.maxY)

@@ -4,7 +4,7 @@ import Foundation
 struct Marquee {
     static let separator = "  ***  "
 
-    let visibleWidth: Int
+    var visibleWidth: Int
     private(set) var text = ""
     /// How many pixels the looped text has scrolled left.
     private(set) var offset = 0

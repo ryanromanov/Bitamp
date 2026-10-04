@@ -24,6 +24,13 @@ struct SkinTheme {
         case gel(top: CGColor, bottom: CGColor, pressedTop: CGColor, pressedBottom: CGColor, edge: CGColor)
     }
 
+    enum MainShape {
+        /// The classic 275×116 main window, drawn from sprites.
+        case classic
+        /// The round Orb main window; see `OrbLayout`.
+        case orb
+    }
+
     /// Saved in preferences to remember the choice, as "builtin:<id>".
     var id: String
     var name: String
@@ -72,9 +79,10 @@ struct SkinTheme {
     var graph: (top: CGColor, middle: CGColor, bottom: CGColor)
     var playlistCurrent: CGColor
     var playlistSelected: CGColor
+    var mainShape: MainShape = .classic
 
     /// The skins built into Bitamp, in menu order.
-    static let builtIn: [SkinTheme] = [.classic, .millennium]
+    static let builtIn: [SkinTheme] = [.classic, .millennium, .orb]
 
     static let builtInPrefix = "builtin:"
 
@@ -119,4 +127,13 @@ struct SkinTheme {
         visGrid: rgb(0x0f2347), spectrum: (rgb(0xeafcff), rgb(0x5fd0ff), rgb(0x1648b8)), peak: rgb(0xffffff),
         graph: (rgb(0xeafcff), rgb(0x5fd0ff), rgb(0x2a63d4)),
         playlistCurrent: rgb(0xffffff), playlistSelected: rgb(0x1e4fa3))
+
+    /// Millennium's colors with a freeform main window: a big play orb and a rounded body.
+    static let orb: SkinTheme = {
+        var theme = millennium
+        theme.id = "orb"
+        theme.name = "Bitamp Orb"
+        theme.mainShape = .orb
+        return theme
+    }()
 }

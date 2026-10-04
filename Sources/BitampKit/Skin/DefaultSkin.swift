@@ -7,6 +7,7 @@ final class DefaultSkin: Skin {
     let visColors: [CGColor]
     let eqGraphColors: [CGColor]
     let playlistColors: PlaylistColors
+    let orb: OrbArt?
     private var cache: [SkinElement: CGImage] = [:]
     private var glyphs: [Character: CGImage] = [:]
 
@@ -22,6 +23,7 @@ final class DefaultSkin: Skin {
         playlistColors = PlaylistColors(
             normal: theme.lcdOn, current: theme.playlistCurrent,
             normalBackground: theme.lcd, selectedBackground: theme.playlistSelected)
+        orb = theme.mainShape == .orb ? OrbArt(theme: theme) : nil
     }
 
     func image(for element: SkinElement) -> CGImage {
