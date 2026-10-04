@@ -75,6 +75,11 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.repeats) }
     }
 
+    var chiptune: Bool {
+        get { defaults.bool(forKey: Key.chiptune) }
+        set { defaults.set(newValue, forKey: Key.chiptune) }
+    }
+
     var showRemaining: Bool {
         get { defaults.bool(forKey: Key.showRemaining) }
         set { defaults.set(newValue, forKey: Key.showRemaining) }
@@ -157,6 +162,7 @@ final class Preferences {
         static let balance = "balance"
         static let shuffle = "shuffle"
         static let repeats = "repeat"
+        static let chiptune = "chiptune"
         static let showRemaining = "showRemainingTime"
         static let visMode = "visualizerMode"
         static let showPeaks = "visualizerPeaks"

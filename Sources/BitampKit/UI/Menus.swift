@@ -14,6 +14,7 @@ enum Menus {
             .separator(),
             item("Shuffle", #selector(MainView.toggleShuffle(_:)), "s"),
             item("Repeat", #selector(MainView.toggleRepeat(_:)), "r"),
+            item("Chiptune", #selector(MainView.toggleChiptune(_:)), "t"),
         ])
     }
 

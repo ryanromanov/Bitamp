@@ -579,6 +579,11 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         marquee.flash("REPEAT: \(controller.repeats ? "ON" : "OFF")", for: 1)
     }
 
+    @objc func toggleChiptune(_ sender: Any?) {
+        controller.chiptune.toggle()
+        marquee.flash("CHIPTUNE: \(controller.chiptune ? "ON" : "OFF")", for: 1.5)
+    }
+
     @objc func setVisMode(_ sender: NSMenuItem) {
         guard let mode = choice(VisMode.self, sender) else { return }
         preferences.visMode = mode
@@ -633,6 +638,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         switch item.action {
         case #selector(toggleShuffle(_:)): item.state = controller.shuffle ? .on : .off
         case #selector(toggleRepeat(_:)): item.state = controller.repeats ? .on : .off
+        case #selector(toggleChiptune(_:)): item.state = controller.chiptune ? .on : .off
         case #selector(toggleShade(_:)): item.state = isShaded ? .on : .off
         case #selector(togglePeaks(_:)): item.state = preferences.showPeaks ? .on : .off
         case #selector(setVisMode(_:)): item.state = selected == preferences.visMode.rawValue ? .on : .off
@@ -661,6 +667,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         case "b": nextTrack(nil)
         case "s": toggleShuffle(nil)
         case "r": toggleRepeat(nil)
+        case "t": toggleChiptune(nil)
         default:
             switch event.specialKey {
             case .leftArrow?: engine.seek(to: engine.currentTime - 5)

@@ -19,6 +19,7 @@ final class PlaybackController {
         engine.volume = preferences.volume
         engine.balance = preferences.balance
         engine.equalizerSettings = preferences.equalizer
+        engine.chiptune = preferences.chiptune
         engine.onTrackEnd = { [weak self] in self?.trackEnded() }
     }
 
@@ -51,6 +52,14 @@ final class PlaybackController {
         set {
             queue.repeats = newValue
             preferences.repeats = newValue
+        }
+    }
+
+    var chiptune: Bool {
+        get { engine.chiptune }
+        set {
+            engine.chiptune = newValue
+            preferences.chiptune = newValue
         }
     }
 
