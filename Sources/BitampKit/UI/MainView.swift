@@ -579,9 +579,21 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         marquee.flash("REPEAT: \(controller.repeats ? "ON" : "OFF")", for: 1)
     }
 
-    @objc func toggleChiptune(_ sender: Any?) {
-        controller.chiptune.toggle()
-        marquee.flash("CHIPTUNE: \(controller.chiptune ? "ON" : "OFF")", for: 1.5)
+    @objc func setRetroSound(_ sender: NSMenuItem) {
+        guard let sound = choice(RetroSound.self, sender) else { return }
+        applyRetroSound(sound)
+    }
+
+    /// Steps through off, crush and chiptune; the T key.
+    @objc func cycleRetroSound(_ sender: Any?) {
+        let all = RetroSound.allCases
+        applyRetroSound(all[(all.firstIndex(of: controller.retroSound)! + 1) % all.count])
+    }
+
+    private func applyRetroSound(_ sound: RetroSound) {
+        controller.retroSound = sound
+        let names: [RetroSound: String] = [.off: "OFF", .crush: "8-BIT CRUSH", .chiptune: "CHIPTUNE (EXPERIMENTAL)"]
+        marquee.flash("RETRO SOUND: \(names[sound]!)", for: 1.5)
     }
 
     @objc func setVisMode(_ sender: NSMenuItem) {
@@ -638,7 +650,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         switch item.action {
         case #selector(toggleShuffle(_:)): item.state = controller.shuffle ? .on : .off
         case #selector(toggleRepeat(_:)): item.state = controller.repeats ? .on : .off
-        case #selector(toggleChiptune(_:)): item.state = controller.chiptune ? .on : .off
+        case #selector(setRetroSound(_:)): item.state = selected == controller.retroSound.rawValue ? .on : .off
         case #selector(toggleShade(_:)): item.state = isShaded ? .on : .off
         case #selector(togglePeaks(_:)): item.state = preferences.showPeaks ? .on : .off
         case #selector(setVisMode(_:)): item.state = selected == preferences.visMode.rawValue ? .on : .off
@@ -667,7 +679,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         case "b": nextTrack(nil)
         case "s": toggleShuffle(nil)
         case "r": toggleRepeat(nil)
-        case "t": toggleChiptune(nil)
+        case "t": cycleRetroSound(nil)
         default:
             switch event.specialKey {
             case .leftArrow?: engine.seek(to: engine.currentTime - 5)

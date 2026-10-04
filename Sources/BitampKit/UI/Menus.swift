@@ -14,7 +14,11 @@ enum Menus {
             .separator(),
             item("Shuffle", #selector(MainView.toggleShuffle(_:)), "s"),
             item("Repeat", #selector(MainView.toggleRepeat(_:)), "r"),
-            item("Chiptune", #selector(MainView.toggleChiptune(_:)), "t"),
+            submenu(menu("Retro Sound", [
+                choice("Off", #selector(MainView.setRetroSound(_:)), RetroSound.off),
+                choice("8-Bit Crush", #selector(MainView.setRetroSound(_:)), RetroSound.crush),
+                choice("Chiptune (Experimental)", #selector(MainView.setRetroSound(_:)), RetroSound.chiptune),
+            ])),
         ])
     }
 

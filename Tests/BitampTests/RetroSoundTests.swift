@@ -2,7 +2,7 @@ import AVFoundation
 import Testing
 @testable import BitampKit
 
-@Suite struct ChiptuneTests {
+@Suite struct RetroSoundTests {
     static let sampleRate = 44_100.0
 
     /// A tone with a few harmonics, like an instrument, as mono samples.
@@ -111,7 +111,7 @@ import Testing
 
     /// Runs a tone through player → chip offline and returns the chip's output, left channel.
     @MainActor
-    func render(chiptune: Bool) throws -> (input: [Float], output: [Float]) {
+    func render(_ sound: RetroSound) throws -> (input: [Float], output: [Float]) {
         let format = AVAudioFormat(standardFormatWithSampleRate: Self.sampleRate, channels: 2)!
         let input = Self.tone([(69, 0.3), (45, 0.3)], seconds: 1)
         let source = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(input.count)))
@@ -122,13 +122,13 @@ import Testing
 
         let engine = AVAudioEngine()
         let player = AVAudioPlayerNode()
-        let chip = ChipAudioUnit.makeNode()
+        let chip = RetroAudioUnit.makeNode()
         engine.attach(player)
         engine.attach(chip)
         engine.connect(player, to: chip, format: format)
         engine.connect(chip, to: engine.mainMixerNode, format: format)
         try engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 1_024)
-        (chip.auAudioUnit as! ChipAudioUnit).kernel.enabled = chiptune
+        (chip.auAudioUnit as! RetroAudioUnit).kernel.mode = sound
         try engine.start()
         player.scheduleBuffer(source)
         player.play()
@@ -145,17 +145,37 @@ import Testing
     }
 
     @MainActor @Test func offPassesTheMusicThrough() throws {
-        let (input, output) = try render(chiptune: false)
+        let (input, output) = try render(.off)
         let difference = zip(input, output).map { abs($0 - $1) }.max() ?? 1
         #expect(difference < 1e-4)
     }
 
     @MainActor @Test func onReplacesTheMusicWithTheChip() throws {
-        let (input, output) = try render(chiptune: true)
+        let (input, output) = try render(.chiptune)
         // After the fade and the first notes, the output is the chip's square-ish waves.
         let tail = Array(output.suffix(22_050))
         #expect(tail.contains { abs($0) > 0.05 })
         let difference = zip(input.suffix(22_050), tail).map { abs($0 - $1) }.max() ?? 0
         #expect(difference > 0.1)
+    }
+
+    @MainActor @Test func crushKeepsTheSongButCoarsensIt() throws {
+        let (input, output) = try render(.crush)
+        let a = Array(input.suffix(22_050)), b = Array(output.suffix(22_050))
+        // Still the same music: closely correlated with the input…
+        let dot = zip(a, b).map { $0 * $1 }.reduce(0, +)
+        let correlation = dot / (sqrt(a.map { $0 * $0 }.reduce(0, +)) * sqrt(b.map { $0 * $0 }.reduce(0, +)))
+        #expect(correlation > 0.9)
+        // …but not the same samples.
+        #expect(zip(a, b).map { abs($0 - $1) }.max()! > 0.002)
+    }
+
+    @Test func crusherRoundsToEightBits() {
+        let crusher = BitCrusher()
+        crusher.prepare(sampleRate: Self.sampleRate)
+        var last: Float = 0
+        for _ in 0..<2_000 { last = crusher.process(0.3, channel: 0) }
+        // 0.3 of 128 steps rounds to 38.
+        #expect(abs(last - 38 / 128) < 1e-4)
     }
 }

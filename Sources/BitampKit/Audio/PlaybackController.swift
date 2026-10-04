@@ -19,7 +19,7 @@ final class PlaybackController {
         engine.volume = preferences.volume
         engine.balance = preferences.balance
         engine.equalizerSettings = preferences.equalizer
-        engine.chiptune = preferences.chiptune
+        engine.retroSound = preferences.retroSound
         engine.onTrackEnd = { [weak self] in self?.trackEnded() }
     }
 
@@ -55,11 +55,11 @@ final class PlaybackController {
         }
     }
 
-    var chiptune: Bool {
-        get { engine.chiptune }
+    var retroSound: RetroSound {
+        get { engine.retroSound }
         set {
-            engine.chiptune = newValue
-            preferences.chiptune = newValue
+            engine.retroSound = newValue
+            preferences.retroSound = newValue
         }
     }
 
