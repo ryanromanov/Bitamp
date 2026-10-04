@@ -20,20 +20,43 @@ import Testing
         return samples
     }
 
+    /// A sine whose pitch wavers around `note` by `depth` semitones, `rate` times a second.
+    static func vibrato(_ note: Int, depth: Double, rate: Double, seconds: Double) -> [Float] {
+        var phase = 0.0
+        return (0..<Int(seconds * sampleRate)).map { i in
+            let pitch = Double(note) + depth * sin(2 * Double.pi * rate * Double(i) / sampleRate)
+            phase += 440 * pow(2, (pitch - 69) / 12) / sampleRate
+            return 0.3 * Float(sin(2 * Double.pi * phase))
+        }
+    }
+
     /// Feeds `samples` hop by hop, as the audio unit does, and returns the last frame.
     static func transcribe(_ samples: [Float]) -> ChipTranscriber.Frame {
+        transcribe(left: samples, right: samples).last ?? ChipTranscriber.Frame()
+    }
+
+    /// Feeds a stereo signal hop by hop and returns every frame.
+    static func transcribe(left: [Float], right: [Float]) -> [ChipTranscriber.Frame] {
         let transcriber = ChipTranscriber()
         transcriber.prepare(sampleRate: sampleRate)
-        samples.withUnsafeBufferPointer { buffer in
-            var start = 0
-            while start + ChipTranscriber.hop <= buffer.count {
-                transcriber.push(buffer.baseAddress! + start, count: ChipTranscriber.hop)
-                transcriber.analyze()
-                start += ChipTranscriber.hop
+        var frames: [ChipTranscriber.Frame] = []
+        left.withUnsafeBufferPointer { left in
+            right.withUnsafeBufferPointer { right in
+                var start = 0
+                while start + ChipTranscriber.hop <= left.count {
+                    transcriber.push(left: left.baseAddress! + start, right: right.baseAddress! + start,
+                                     count: ChipTranscriber.hop)
+                    transcriber.analyze()
+                    frames.append(transcriber.frame)
+                    start += ChipTranscriber.hop
+                }
             }
         }
-        return transcriber.frame
+        return frames
     }
+
+    /// The hop at `seconds`.
+    static func hop(at seconds: Double) -> Int { Int(seconds * sampleRate) / ChipTranscriber.hop }
 
     @Test func hearsTheLeadAndTheBass() {
         // A4 over A2: the lead is also the bass's fourth harmonic, so it has to survive the
@@ -44,17 +67,61 @@ import Testing
         #expect(frame.lead.level > 0)
     }
 
-    @Test func hearsAChordAsLeadAndHarmony() {
-        // C5 and E5 over C3.
-        let frame = Self.transcribe(Self.tone([(72, 0.3), (76, 0.25), (48, 0.3)], seconds: 0.5))
-        #expect(Set([frame.lead.note, frame.harmony.note]) == [72, 76])
-        #expect(frame.bass.note == 48)
+    @Test func hearsTheCenterAsLeadAndTheSidesAsAChord() {
+        // A centered C5 melody over an A minor chord panned to the sides: A3 and E4 on the
+        // left, C4 on the right.
+        let melody = Self.tone([(72, 0.3)], seconds: 1)
+        let left = Self.tone([(57, 0.2), (64, 0.2)], seconds: 1)
+        let right = Self.tone([(60, 0.2)], seconds: 1)
+        let frames = Self.transcribe(left: zip(melody, left).map { $0 + $1 }, right: zip(melody, right).map { $0 + $1 })
+        let frame = frames.last!
+        #expect(frame.lead.note == 72)
+        #expect(frame.chord.first == 57)
+        #expect(frame.chord.second == 60)
+        #expect(frame.chord.third == 64)
+        #expect(frame.chord.level > 0)
+    }
+
+    @Test func aCenteredToneAloneHasNoChord() {
+        // Nothing at the sides: the arpeggio stays quiet rather than guess.
+        let frame = Self.transcribe(left: Self.tone([(72, 0.3)], seconds: 1), right: Self.tone([(72, 0.3)], seconds: 1))
+        #expect(frame.last!.lead.note == 72)
+        #expect(frame.last!.chord.count == 0)
+    }
+
+    @Test func vibratoStaysOnOneNote() {
+        // A sung A4 wavering half a semitone either way, five and a half times a second.
+        let samples = Self.vibrato(69, depth: 0.5, rate: 5.5, seconds: 2)
+        let frames = Self.transcribe(left: samples, right: samples)
+        let settled = frames[Self.hop(at: 0.3)...]
+        #expect(settled.allSatisfy { $0.lead.note == 69 })
+        #expect(settled.filter(\.onset).isEmpty)
+    }
+
+    @Test func aBriefOctaveSlipIsFoldedBackButALeapIsBelieved() {
+        // A4, a 30 ms blip an octave up, A4 again, then a long A5.
+        let samples = Self.tone([(69, 0.3)], seconds: 0.5) + Self.tone([(81, 0.3)], seconds: 0.03)
+            + Self.tone([(69, 0.3)], seconds: 0.5) + Self.tone([(81, 0.3)], seconds: 0.6)
+        let frames = Self.transcribe(left: samples, right: samples)
+        let notes = frames[Self.hop(at: 0.3)..<Self.hop(at: 1.0)].map(\.lead.note)
+        #expect(notes.allSatisfy { $0 == 69 })
+        #expect(frames.last!.lead.note == 81)
+    }
+
+    @Test func aRepeatedNoteIsHeardAgain() {
+        // The same A4 twice with a breath between: the second starts with an onset.
+        let samples = Self.tone([(69, 0.3)], seconds: 0.4) + [Float](repeating: 0, count: 2_000)
+            + Self.tone([(69, 0.3)], seconds: 0.4)
+        let frames = Self.transcribe(left: samples, right: samples)
+        let onsets = frames[Self.hop(at: 0.2)...].filter(\.onset)
+        #expect(onsets.count == 1)
+        #expect(onsets.allSatisfy { $0.lead.note == 69 })
     }
 
     @Test func silenceIsSilent() {
         let frame = Self.transcribe([Float](repeating: 0, count: 22_050))
         #expect(frame.lead.note == nil)
-        #expect(frame.harmony.note == nil)
+        #expect(frame.chord.count == 0)
         #expect(frame.bass.note == nil)
         #expect(frame.drum == nil)
     }
@@ -94,6 +161,49 @@ import Testing
         let rising = zip(samples, samples.dropFirst()).filter { $0 <= 0 && $1 > 0 }.count
         #expect(abs(rising - 440) <= 2)
         #expect(samples.allSatisfy { abs($0) <= 1 })
+    }
+
+    @Test func theArpeggioCyclesThroughTheChord() {
+        let synth = ChipSynth()
+        synth.prepare(sampleRate: Self.sampleRate)
+        var frame = ChipTranscriber.Frame()
+        frame.chord = .init(first: 81, second: 93, third: nil, level: 15)
+        synth.play(frame)
+        let step = Int(ChipSynth.arpeggioStep * Self.sampleRate)
+        var samples = [Float](repeating: 0, count: step * 6)
+        samples.withUnsafeMutableBufferPointer { synth.render(into: $0.baseAddress!, count: $0.count) }
+        // Each step plays one note: about 20 cycles of A5, then about 40 of A6, and again.
+        let cycles = (0..<6).map { i in
+            let part = samples[i * step..<(i + 1) * step]
+            return zip(part, part.dropFirst()).filter { $0 <= 0 && $1 > 0 }.count
+        }
+        let expected = cycles.indices.map { $0 % 2 == 0 ? 20 : 40 }
+        #expect(zip(cycles, expected).allSatisfy { abs($0 - $1) <= 2 })
+    }
+
+    @Test func anOnsetRestartsTheLead() {
+        let synth = ChipSynth()
+        synth.prepare(sampleRate: Self.sampleRate)
+        var frame = ChipTranscriber.Frame()
+        frame.lead = .init(note: 69, level: 15)
+        frame.onset = true
+        synth.play(frame)
+        var first = [Float](repeating: 0, count: 4_410)
+        first.withUnsafeMutableBufferPointer { synth.render(into: $0.baseAddress!, count: $0.count) }
+        // The same note again without an onset carries on; with one, it stops for a moment.
+        frame.onset = false
+        synth.play(frame)
+        var carried = [Float](repeating: 0, count: 100)
+        carried.withUnsafeMutableBufferPointer { synth.render(into: $0.baseAddress!, count: $0.count) }
+        frame.onset = true
+        synth.play(frame)
+        var restarted = [Float](repeating: 0, count: 400)
+        restarted.withUnsafeMutableBufferPointer { synth.render(into: $0.baseAddress!, count: $0.count) }
+        #expect(first.prefix(100).allSatisfy { $0 == 0 })
+        #expect(first.suffix(100).contains { $0 != 0 })
+        #expect(carried.allSatisfy { $0 != 0 })
+        #expect(restarted.prefix(100).allSatisfy { $0 == 0 })
+        #expect(restarted.suffix(100).contains { $0 != 0 })
     }
 
     @Test func voicesFadeAfterTheirNoteEnds() {

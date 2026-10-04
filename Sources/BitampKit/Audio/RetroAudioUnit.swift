@@ -41,7 +41,6 @@ final class RetroAudioUnit: AUAudioUnit {
         var chipMix: Float = 0
         var fadeStep: Float = 0.005
         var sinceHop = 0
-        var mono: UnsafeMutablePointer<Float> = .allocate(capacity: 1)
         var chip: UnsafeMutablePointer<Float> = .allocate(capacity: 1)
         var capacity = 1
 
@@ -52,37 +51,31 @@ final class RetroAudioUnit: AUAudioUnit {
             sinceHop = 0
             fadeStep = Float(1 / (0.02 * sampleRate))
             if maxFrames > capacity {
-                mono.deallocate()
                 chip.deallocate()
-                mono = .allocate(capacity: maxFrames)
                 chip = .allocate(capacity: maxFrames)
                 capacity = maxFrames
             }
         }
 
         deinit {
-            mono.deallocate()
             chip.deallocate()
         }
 
-        /// Mixes `channels` down for analysis, renders the chip, and writes the music, the
-        /// crushed music and the chip, blended by the fades, back over the channels.
+        /// Hands the first two channels to the transcriber (one channel counts as both), renders
+        /// the chip, and writes the music, the crushed music and the chip, blended by the
+        /// fades, back over the channels.
         func process(_ channels: UnsafeMutableAudioBufferListPointer, frames: Int) {
             let channelCount = channels.count
-            guard frames <= capacity, channelCount > 0 else { return }
-            mono.update(repeating: 0, count: frames)
-            for channel in channels {
-                guard let data = channel.mData?.assumingMemoryBound(to: Float.self) else { continue }
-                for i in 0..<frames { mono[i] += data[i] }
-            }
-            let gain = 1 / Float(channelCount)
-            for i in 0..<frames { mono[i] *= gain }
+            guard frames <= capacity, channelCount > 0,
+                  let left = channels[0].mData?.assumingMemoryBound(to: Float.self),
+                  let right = channels[min(1, channelCount - 1)].mData?.assumingMemoryBound(to: Float.self)
+            else { return }
 
             // Render in pieces that end on hop boundaries, so new notes start on time.
             var done = 0
             while done < frames {
                 let piece = min(frames - done, ChipTranscriber.hop - sinceHop)
-                transcriber.push(mono + done, count: piece)
+                transcriber.push(left: left + done, right: right + done, count: piece)
                 synth.render(into: chip + done, count: piece)
                 sinceHop += piece
                 done += piece
