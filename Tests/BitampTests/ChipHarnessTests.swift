@@ -6,23 +6,33 @@ import Testing
 /// Runs a real song through the chiptune mode offline, for tuning it: prints how busy each
 /// voice is and writes the chip version to a WAV file. Off by default; run with
 /// `BITAMP_CHIP_FILE=/path/to/song.mp3 BITAMP_CHIP_OUT=/some/folder scripts/test.sh --filter ChipHarness`.
+/// `BITAMP_CHIP_START` and `BITAMP_CHIP_SECONDS` pick the excerpt, in seconds (default 0 and
+/// 60), and `BITAMP_CHIP_NAME` names the WAV (default `chip.wav`).
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["BITAMP_CHIP_FILE"] != nil))
 struct ChipHarnessTests {
     @Test func analyzeSong() throws {
         let environment = ProcessInfo.processInfo.environment
         let file = try AVAudioFile(forReading: URL(fileURLWithPath: environment["BITAMP_CHIP_FILE"]!))
         let seconds = Double(environment["BITAMP_CHIP_SECONDS"] ?? "60")!
+        let startSeconds = Double(environment["BITAMP_CHIP_START"] ?? "0")!
         let format = file.processingFormat
-        let length = AVAudioFrameCount(min(Double(file.length), seconds * format.sampleRate))
+        let first = min(file.length, AVAudioFramePosition(startSeconds * format.sampleRate))
+        file.framePosition = first
+        let length = AVAudioFrameCount(min(Double(file.length - first), seconds * format.sampleRate))
         let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: length))
         try file.read(into: buffer, frameCount: length)
 
+        // Both channels as they are (a mono file plays as both), and their mix.
         let count = Int(buffer.frameLength)
+        let channels = Int(format.channelCount)
+        let left = Array(UnsafeBufferPointer(start: buffer.floatChannelData![0], count: count))
+        let right = Array(UnsafeBufferPointer(start: buffer.floatChannelData![min(1, channels - 1)], count: count))
         var mono = [Float](repeating: 0, count: count)
-        for channel in 0..<Int(format.channelCount) {
+        for channel in 0..<channels {
             let data = buffer.floatChannelData![channel]
-            for i in 0..<count { mono[i] += data[i] / Float(format.channelCount) }
+            for i in 0..<count { mono[i] += data[i] / Float(channels) }
         }
+        _ = (left, right)  // For stereo analysis.
 
         let transcriber = ChipTranscriber()
         transcriber.prepare(sampleRate: format.sampleRate)
@@ -76,7 +86,7 @@ struct ChipHarnessTests {
         print(String(format: "CHIP drums: %.1f/s (kick %d, snare %d, hat %d)", rate, kicks, snares, hats))
         if let out = environment["BITAMP_CHIP_OUT"] {
             let wavFormat = AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1)!
-            let url = URL(fileURLWithPath: out).appendingPathComponent("chip.wav")
+            let url = URL(fileURLWithPath: out).appendingPathComponent(environment["BITAMP_CHIP_NAME"] ?? "chip.wav")
             let wav = try AVAudioFile(forWriting: url, settings: wavFormat.settings)
             let outBuffer = try #require(AVAudioPCMBuffer(pcmFormat: wavFormat, frameCapacity: AVAudioFrameCount(count)))
             outBuffer.frameLength = AVAudioFrameCount(count)
