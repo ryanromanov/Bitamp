@@ -173,6 +173,11 @@ struct VocalLine {
     static let holdRange = 0.8
     static let bridgedTicks = 3
     static let shortestNote = 4
+    /// The lookahead `notes` needs past each stretch.
+    static let lookahead = 16
+
+    var holdRange = Self.holdRange
+    var shortestNote = Self.shortestNote
 
     private var current: Int?
     private var gap = 0
@@ -197,7 +202,7 @@ struct VocalLine {
                 continue
             }
             gap = 0
-            if let note = current, abs(pitch - Double(note)) < Self.holdRange {
+            if let note = current, abs(pitch - Double(note)) < holdRange {
                 raw.append(note)
             } else {
                 current = Int(pitch.rounded())
@@ -213,8 +218,8 @@ struct VocalLine {
                 replacement = nil
                 if note != nil && started {
                     var end = i
-                    while end < raw.count && end - i < Self.shortestNote && raw[end] == note { end += 1 }
-                    if end - i < Self.shortestNote && end < raw.count { replacement = .some(lastNote) }
+                    while end < raw.count && end - i < shortestNote && raw[end] == note { end += 1 }
+                    if end - i < shortestNote && end < raw.count { replacement = .some(lastNote) }
                 }
             }
             let out = replacement ?? note

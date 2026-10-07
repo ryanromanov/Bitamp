@@ -107,6 +107,8 @@ final class NoteTranscription: @unchecked Sendable {
     /// Basic Pitch's thresholds, adjustable for tuning experiments.
     var onsetThreshold = BasicPitch.onsetThreshold
     var frameThreshold = BasicPitch.frameThreshold
+    /// How full the arrangement is, adjustable for tuning experiments.
+    var style = ChipArranger.Style()
     private let reader: BasicPitchReader
     private let model: () -> BasicPitch?
     /// MSNet on the file at 44.1 kHz, for the vocal line; nil when MSNet is unavailable.
@@ -127,8 +129,8 @@ final class NoteTranscription: @unchecked Sendable {
     /// arrangement's state there, so the next segment can pick up seamlessly.
     private var lastEnd = -1
     private var carried: [Note] = []
-    private var arranger = ChipArranger()
-    private var vocalLine = VocalLine()
+    private lazy var arranger = ChipArranger(style: style)
+    private lazy var vocalLine = makeVocalLine()
 
     /// Seconds of audio transcribed, and how long it took, for measuring speed.
     private(set) var secondsTranscribed = 0.0
@@ -226,8 +228,8 @@ final class NoteTranscription: @unchecked Sendable {
         let continuing = windows.lowerBound == lastEnd
         if !continuing {
             carried = []
-            arranger = ChipArranger()
-            vocalLine = VocalLine()
+            arranger = ChipArranger(style: style)
+            vocalLine = makeVocalLine()
         }
 
         // The audio: window w starts `edgeFrames` hops before sample w * windowHop.
@@ -302,10 +304,17 @@ final class NoteTranscription: @unchecked Sendable {
         secondsSpent += Date().timeIntervalSince(began)
     }
 
+    private func makeVocalLine() -> VocalLine {
+        var line = VocalLine()
+        line.holdRange = style.vocalHoldRange
+        line.shortestNote = style.shortestVocalTicks
+        return line
+    }
+
     /// The vocal line's note at each tick of `ticks`, or nil without MSNet.
     private func vocalNotes(ticks: Range<Int>) throws -> [Int?]? {
         guard let vocalTracker else { return nil }
-        let lookahead = ticks.lowerBound..<(ticks.upperBound + 2 * VocalLine.shortestNote)
+        let lookahead = ticks.lowerBound..<(ticks.upperBound + VocalLine.lookahead)
         let pitches = try vocalTracker.pitches(ticks: lookahead)
         return vocalLine.notes(pitches, count: ticks.count)
     }
@@ -326,6 +335,23 @@ final class NoteTranscription: @unchecked Sendable {
 /// an old console might: the melody on the lead, the lowest note on the bass, and what's
 /// left of the chord as a fast arpeggio.
 struct ChipArranger {
+    /// What the arrangement plays besides the tune, for trying sparser covers.
+    struct Style {
+        /// Arpeggiate what's left of the chord.
+        var chord = true
+        /// While the vocal line sounds, keep the arranged lead, on the chord voice.
+        var accompanyVocal = true
+        /// Notes shorter than these never take the lead or the bass, in seconds.
+        var shortestLead = ChipArranger.shortestLead
+        var shortestBass = 0.0
+        /// How far the voice may wander, in semitones, and how few ticks it may hold a note,
+        /// before a new note starts.
+        var vocalHoldRange = VocalLine.holdRange
+        var shortestVocalTicks = VocalLine.shortestNote
+    }
+
+    var style = Style()
+
     /// Notes below E3 can be bass.
     static let bassTop = 52
     /// How loud, against the loudest note sounding, a note must be to take the lead.
@@ -391,7 +417,7 @@ struct ChipArranger {
         if let current = bass, sounding.contains(current), !sounding.contains(where: { starts($0) && $0.pitch < Self.bassTop }) {
             bass = current
         } else {
-            bass = sounding.filter { $0.pitch < Self.bassTop }.min { $0.pitch < $1.pitch }
+            bass = sounding.filter { $0.pitch < Self.bassTop && $0.end - $0.start >= style.shortestBass }.min { $0.pitch < $1.pitch }
         }
 
         // The lead follows the tune: the highest loud note long enough to be part of a
@@ -402,7 +428,7 @@ struct ChipArranger {
         let rest = sounding.filter { $0 != bass }
         let loudest = rest.map(\.amplitude).max() ?? 0
         let candidates = rest.filter {
-            $0.amplitude >= loudest * Self.leadShare && $0.end - $0.start >= Self.shortestLead
+            $0.amplitude >= loudest * Self.leadShare && $0.end - $0.start >= style.shortestLead
         }
         func fits(_ note: NoteTranscription.Note) -> Bool {
             guard let last = lastLead else { return true }
@@ -428,7 +454,7 @@ struct ChipArranger {
         }
         others.sort { $0.amplitude > $1.amplitude }
         var pitches: [Int] = []
-        for note in others where !pitches.contains(note.pitch) && pitches.count < Self.chordSize {
+        for note in others where style.chord && !pitches.contains(note.pitch) && pitches.count < Self.chordSize {
             pitches.append(note.pitch)
         }
         pitches.sort()
@@ -471,7 +497,11 @@ struct ChipArranger {
         var moment = arranged
         let ownLead = moment.lead, ownOnset = moment.onsets & ChipMoment.leadOnset != 0
         moment.onsets &= ~ChipMoment.leadOnset
-        if ownLead != 0 && ownLead != UInt8(note) {
+        if !style.accompanyVocal {
+            moment.chord = (0, 0, 0)
+            moment.chordLevel = 0
+            moment.onsets &= ~ChipMoment.chordOnset
+        } else if ownLead != 0 && ownLead != UInt8(note) {
             moment.chord = (ownLead, 0, 0)
             moment.chordLevel = UInt8(max(1, (Float(moment.leadLevel) * Self.displacedLeadScale).rounded()))
             if ownOnset { moment.onsets |= ChipMoment.chordOnset }
