@@ -260,10 +260,11 @@ final class SkinnedWindow: NSWindow {
             contentRect: NSRect(origin: .zero, size: view.frame.size),
             styleMask: [.borderless, .miniaturizable],
             backing: .buffered, defer: false)
-        contentView = view
         isOpaque = true
         hasShadow = false
         backgroundColor = .black
+        // After the defaults: a shaped view makes the window clear when it moves in.
+        contentView = view
         isReleasedWhenClosed = false
         title = "Bitamp"
         makeFirstResponder(view)
