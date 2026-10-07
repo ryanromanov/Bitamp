@@ -154,6 +154,35 @@ final class WindowGroup {
         setMainVisible(!isMainVisible)
     }
 
+    /// Puts the windows back in the classic stack: the equalizer, then the playlist, docked
+    /// under the main window with their left edges lined up. Windows that show stack first,
+    /// so a hidden one opens docked at the bottom rather than leaving a gap. With the main
+    /// window hidden, the others stack from where the top one is, and the main window
+    /// takes its place above them. Sizes and shade stay as they are.
+    func regroup() {
+        let order = Panel.allCases.filter(isVisible) + Panel.allCases.filter { !isVisible($0) }
+        let stack = order.compactMap { panels[$0] }
+        var top: NSPoint
+        if main.isVisible {
+            top = NSPoint(x: main.frame.minX, y: main.frame.minY)
+        } else {
+            let showing = stack.filter(\.isVisible)
+            guard let highest = showing.max(by: { $0.frame.maxY < $1.frame.maxY }) else { return }
+            top = NSPoint(x: highest.frame.minX, y: highest.frame.maxY)
+            main.setFrameOrigin(NSPoint(x: top.x, y: top.y))
+        }
+        for window in stack {
+            window.setFrameTopLeftPoint(top)
+            top.y = window.frame.minY
+        }
+        if !main.isVisible {
+            hiddenMainOffsets = Dictionary(uniqueKeysWithValues: order.compactMap { panel in
+                panels[panel].map { (panel, CGVector(dx: main.frame.minX - $0.frame.minX, dy: main.frame.minY - $0.frame.minY)) }
+            })
+        }
+        keepOnScreen()
+    }
+
     /// Moves the hidden main window back to where it was against the playlist (or else the
     /// equalizer), if that was docked to it when it hid.
     private func followDockedPanels() {
