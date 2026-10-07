@@ -50,18 +50,18 @@ struct ChipHarnessTests {
         // MSNet adds the vocal line unless a pitch track stands in for it or BITAMP_CHIP_VOCAL=0.
         let vocal = environment["BITAMP_CHIP_LEAD"] == nil && environment["BITAMP_CHIP_VOCAL"] != "0"
         let transcription = try NoteTranscription(url: url, score: score, vocalModel: { vocal ? MSNet.shared : nil })
-        // Arrangement styles to compare by ear: c (the default) as the app plays, a the full
-        // arrangement, b the full one but quiet behind the voice, d vocal and bass only, and
-        // e c with a steadier vocal line.
+        // Arrangement styles to compare by ear: e (the default) as the app plays, a the full
+        // arrangement, b the full one but quiet behind the voice, c e with the first, less
+        // steady vocal line, and d c with vocal and bass only.
         switch environment["BITAMP_CHIP_STYLE"] {
         case "a": transcription.style = .full
         case "b":
             transcription.style = .full
             transcription.style.accompanyVocal = false
-        case "d": transcription.style.shortestLead = .infinity
-        case "e":
-            transcription.style.vocalHoldRange = 1.0
-            transcription.style.shortestVocalTicks = 8
+        case "c", "d":
+            transcription.style.vocalHoldRange = VocalLine.holdRange
+            transcription.style.shortestVocalTicks = VocalLine.shortestNote
+            if environment["BITAMP_CHIP_STYLE"] == "d" { transcription.style.shortestLead = .infinity }
         default: break
         }
         if let onset = environment["BITAMP_CHIP_ONSET"].flatMap(Float.init) { transcription.onsetThreshold = onset }
