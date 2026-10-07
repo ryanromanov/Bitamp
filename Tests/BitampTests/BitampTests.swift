@@ -1068,6 +1068,21 @@ import Testing
         second.setMainVisible(false)
         #expect(second.isMainVisible)
 
+        // Hidden, the main window goes with the windows docked to it: move them, close them,
+        // and it comes back where it was against the playlist.
+        second.setVisible(.playlist, true)
+        second.setVisible(.equalizer, true)
+        let before = (main: main.frame.origin, playlist: playlist.frame.origin)
+        second.setMainVisible(false)
+        for window in [playlist, equalizer] {
+            window.setFrameOrigin(NSPoint(x: window.frame.minX + 120, y: window.frame.minY - 80))
+        }
+        second.setVisible(.playlist, false)
+        second.setVisible(.equalizer, false)
+        #expect(second.isMainVisible)
+        #expect(main.frame.minX - playlist.frame.minX == before.main.x - before.playlist.x)
+        #expect(main.frame.minY - playlist.frame.minY == before.main.y - before.playlist.y)
+
         // The playlist hands playback commands to the main view.
         #expect(playlist.supplementalTarget(forAction: #selector(MainView.play(_:)), sender: nil) as? MainView === mainView)
     }
