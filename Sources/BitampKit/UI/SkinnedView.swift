@@ -245,9 +245,12 @@ class SkinnedView: NSView {
 
 /// Bitamp's windows draw their own frames, so they're borderless but can still become key.
 /// Only the main window becomes main, which keeps the main view in the responder chain
-/// for menu commands while the equalizer or playlist has focus.
+/// for menu commands while the equalizer or playlist has focus. A hidden window can't be
+/// main, so the other windows also hand commands they don't handle to `actionFallback`.
 final class SkinnedWindow: NSWindow {
     private let becomesMain: Bool
+    /// Where commands this window's chain doesn't handle go: the main view.
+    weak var actionFallback: NSResponder?
     /// Names this window's saved frame and shade state. `WindowGroup` saves and restores
     /// frames itself rather than with AppKit's autosave, which rewrites a saved frame as soon
     /// as the window moves, even mid-restore.
@@ -272,6 +275,11 @@ final class SkinnedWindow: NSWindow {
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { becomesMain }
+
+    override func supplementalTarget(forAction action: Selector, sender: Any?) -> Any? {
+        if let actionFallback, actionFallback.responds(to: action) { return actionFallback }
+        return super.supplementalTarget(forAction: action, sender: sender)
+    }
 
     /// AppKit would nudge each window onto the screen by itself, which pulls docked
     /// windows apart. `WindowGroup` keeps the whole group on screen instead.
