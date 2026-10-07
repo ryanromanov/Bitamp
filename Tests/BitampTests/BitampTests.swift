@@ -1107,6 +1107,27 @@ import Testing
         #expect(playlist.supplementalTarget(forAction: #selector(MainView.play(_:)), sender: nil) as? MainView === mainView)
     }
 
+    /// Plain letters are shortcuts; with Option, Control or Command held they aren't.
+    @MainActor @Test func letterShortcutsIgnoreModifiedKeys() throws {
+        let preferences = Preferences(defaults: UserDefaults(suiteName: "BitampKeys-\(UUID().uuidString)")!)
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences)
+        let view = MainView(controller: controller, preferences: preferences, skin: DefaultSkin())
+        func press(_ modifiers: NSEvent.ModifierFlags) throws {
+            view.keyDown(with: try #require(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: 0,
+                context: nil, characters: "r", charactersIgnoringModifiers: "r", isARepeat: false, keyCode: 15)))
+        }
+        let repeats = controller.repeats
+        try press([])
+        #expect(controller.repeats == !repeats)
+        try press([.shift])
+        #expect(controller.repeats == repeats)
+        for modifiers: NSEvent.ModifierFlags in [.option, .control, .command] {
+            try press(modifiers)
+            #expect(controller.repeats == repeats, "\(modifiers)")
+        }
+    }
+
     @Test func onlyTheOrbThemeHasOrbArt() {
         #expect(DefaultSkin(theme: .orb).orb != nil)
         #expect(DefaultSkin(theme: .millennium).orb == nil)

@@ -681,8 +681,10 @@ final class MainView: SkinnedView, NSMenuItemValidation {
 
     override func keyDown(with event: NSEvent) {
         // The menu bar usually claims the letters first; this covers L, which is only in
-        // the right-click menu, and anything the menus didn't take.
-        switch event.charactersIgnoringModifiers?.lowercased() {
+        // the right-click menu, and anything the menus didn't take. Letters held with
+        // Option, Control or Command aren't these shortcuts (Option-R is Regroup Windows).
+        let modified = !event.modifierFlags.intersection([.option, .control, .command]).isEmpty
+        switch modified ? nil : event.charactersIgnoringModifiers?.lowercased() {
         case "l": openFiles(nil)
         case "z": previousTrack(nil)
         case "x": play(nil)
