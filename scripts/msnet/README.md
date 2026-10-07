@@ -69,7 +69,12 @@ under 4 ticks merge into the previous one.
    a scatter or as `upsample × (input == maxpool-upsampled)` masks before tracing. Check the
    Core ML output against PyTorch on the four clips. Bundle it with its MIT licence next to
    Basic Pitch's in `Resources/`, compiled and cached at runtime the same way.
-2. **CFP features in Swift (vDSP).** Port `feature_extraction` in `MSnet/cfp.py` for the vocal
+2. **CFP features in Swift (vDSP). Done (2026-10-07).** `Sources/BitampKit/Audio/CFP.swift`, with
+   `MSNet.swift` running the model. `dump-features.py SONG START SECONDS OUT.cfp` writes Python's
+   features and PyTorch's pitch bins; `BITAMP_CFP_DUMP=OUT.cfp scripts/test.sh --filter MSNetDumpTests`
+   compares. Shock the Monkey 45–65 s: features within 6e-8 of Python's, voicing and pitch
+   (within 40 cents) agree on 99% of frames. CFP takes 8 s for 20 s of audio in a debug build;
+   it's the slow part. Original plan: port `feature_extraction` in `MSnet/cfp.py` for the vocal
    settings: 44.1 kHz mono, hop 256 (5.8 ms), Blackman-Harris window of 2049, frequency
    resolution 2 Hz (so a 22,050-point FFT), gammas [0.24, 0.6, 1], 31–1250 Hz at
    60 bins per octave. Three channels: spectrum, generalized cepstrum, and their product,
