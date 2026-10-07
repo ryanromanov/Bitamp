@@ -66,6 +66,9 @@ enum Docking {
 /// The main window plus the equalizer and playlist. Dragging the main window carries
 /// whatever is docked to it; dragging another window moves it alone. Either way the
 /// moved window snaps to the rest and to the screen edges.
+///
+/// The main window can be hidden too, as in Winamp, leaving the playlist (with its own
+/// little transport buttons) or the equalizer; something always stays on screen.
 @MainActor
 final class WindowGroup {
     enum Panel: String, CaseIterable {
@@ -83,6 +86,7 @@ final class WindowGroup {
         self.defaults = defaults
         // All three windows show on first launch, like the classic layout.
         defaults.register(defaults: Dictionary(uniqueKeysWithValues: Panel.allCases.map { (Self.visibilityKey($0), true) }))
+        defaults.register(defaults: [Self.mainVisibilityKey: true])
     }
 
     private var windows: [NSWindow] {
@@ -104,11 +108,48 @@ final class WindowGroup {
             window.orderFront(nil)
         } else {
             window.orderOut(nil)
+            // Never leave nothing on screen.
+            if !main.isVisible && !anyPanelVisible { setMainVisible(true) }
         }
     }
 
     func toggle(_ panel: Panel) {
         setVisible(panel, !isVisible(panel))
+    }
+
+    private var anyPanelVisible: Bool {
+        Panel.allCases.contains(where: isVisible)
+    }
+
+    var isMainVisible: Bool { main.isVisible }
+
+    /// Whether the main window may be hidden now: only while another window shows.
+    var canHideMain: Bool { anyPanelVisible }
+
+    func setMainVisible(_ visible: Bool) {
+        guard visible || canHideMain else { return }
+        defaults.set(visible, forKey: Self.mainVisibilityKey)
+        if visible {
+            main.makeKeyAndOrderFront(nil)
+        } else {
+            main.orderOut(nil)
+            // Focus moves to the playlist, whose keys reach the main view, else the equalizer.
+            [Panel.playlist, .equalizer].compactMap { panels[$0] }.first(where: \.isVisible)?.makeKey()
+        }
+    }
+
+    func toggleMain() {
+        setMainVisible(!isMainVisible)
+    }
+
+    /// Brings the windows forward at launch, after `restore`: the main window unless it was
+    /// hidden when Bitamp quit and another window shows.
+    func showAtLaunch() {
+        if defaults.bool(forKey: Self.mainVisibilityKey) || !anyPanelVisible {
+            main.makeKeyAndOrderFront(nil)
+        } else {
+            setMainVisible(false)
+        }
     }
 
     /// Restores saved frames and visibility. Panels with no saved frame stack under the
@@ -201,6 +242,8 @@ final class WindowGroup {
     private static func visibilityKey(_ panel: Panel) -> String {
         "\(panel.rawValue)Visible"
     }
+
+    private static let mainVisibilityKey = "mainVisible"
 
     // MARK: - Shade mode
 

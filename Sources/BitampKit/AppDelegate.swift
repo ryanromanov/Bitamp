@@ -35,10 +35,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let main = SkinnedWindow(view: mainView, layoutName: "MainWindow", isMain: true)
-        let group = WindowGroup(main: main, panels: [
+        let panels: [WindowGroup.Panel: SkinnedWindow] = [
             .equalizer: SkinnedWindow(view: equalizerView, layoutName: "EqualizerWindow", isMain: false),
             .playlist: SkinnedWindow(view: playlistView, layoutName: "PlaylistWindow", isMain: false),
-        ])
+        ]
+        for window in panels.values { window.actionFallback = mainView }
+        let group = WindowGroup(main: main, panels: panels)
         views = [mainView, equalizerView, playlistView]
         for view in views {
             view.windowGroup = group
@@ -52,7 +54,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         windowGroup?.restore()
-        windowGroup?.main.makeKeyAndOrderFront(nil)
+        windowGroup?.showAtLaunch()
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -71,6 +73,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    /// Clicking the Dock icon brings back a hidden main window.
+    public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        windowGroup?.setMainVisible(true)
+        return false
     }
 
     @objc func openDocument(_ sender: Any?) {
@@ -203,6 +211,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowGroup?.main.miniaturize(sender)
     }
 
+    @objc private func toggleMainWindow(_ sender: Any?) {
+        windowGroup?.toggleMain()
+    }
+
     @objc private func toggleEqualizer(_ sender: Any?) {
         windowGroup?.toggle(.equalizer)
     }
@@ -228,7 +240,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             Menus.item("Select All", #selector(NSResponder.selectAll(_:)), "a", [.command]),
         ])
 
-        // The classic shortcuts: Alt+G for the equalizer and Alt+E for the playlist.
+        // The classic shortcuts: Alt+W for the main window, Alt+G for the equalizer and
+        // Alt+E for the playlist.
+        let mainWindow = Menus.item("Main Window", #selector(toggleMainWindow(_:)), "w", [.option])
         let equalizer = Menus.item("Equalizer", #selector(toggleEqualizer(_:)), "g", [.option])
         let playlist = Menus.item("Playlist", #selector(togglePlaylist(_:)), "e", [.option])
         let minimize = Menus.item("Minimize", #selector(minimize(_:)), "m", [.command])
@@ -243,9 +257,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let equalizerShade = Menus.item("Shade Equalizer", #selector(toggleEqualizerShade(_:)), "w", [.control, .option])
         let playlistShade = Menus.item("Shade Playlist", #selector(togglePlaylistShade(_:)), "w", [.control, .shift])
         let shadows = Menus.item("Window Shadows", #selector(toggleShadows(_:)))
-        for item in [equalizer, playlist, minimize, equalizerShade, playlistShade, shadows] { item.target = self }
+        for item in [mainWindow, equalizer, playlist, minimize, equalizerShade, playlistShade, shadows] { item.target = self }
         let windowMenu = Menus.menu("Window", [
-            equalizer, playlist, .separator(),
+            mainWindow, equalizer, playlist, .separator(),
             mainShade, equalizerShade, playlistShade, .separator(),
             Menus.submenu(Menus.menu("Size", sizes)), shadows, .separator(),
             minimize,
@@ -268,6 +282,9 @@ extension AppDelegate: NSMenuDelegate {
 extension AppDelegate: NSMenuItemValidation {
     public func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
+        case #selector(toggleMainWindow(_:)):
+            item.state = windowGroup?.isMainVisible == true ? .on : .off
+            return windowGroup.map { !$0.isMainVisible || $0.canHideMain } ?? false
         case #selector(toggleEqualizer(_:)): item.state = windowGroup?.isVisible(.equalizer) == true ? .on : .off
         case #selector(togglePlaylist(_:)): item.state = windowGroup?.isVisible(.playlist) == true ? .on : .off
         case #selector(setScale(_:)): item.state = item.tag == preferences.scale ? .on : .off

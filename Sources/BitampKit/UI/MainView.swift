@@ -661,7 +661,9 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         case #selector(toggleRepeat(_:)): item.state = controller.repeats ? .on : .off
         case #selector(setRetroSound(_:)): item.state = selected == controller.retroSound.rawValue ? .on : .off
         case #selector(setChipBlend(_:)): item.state = selected == controller.chipBlend.rawValue ? .on : .off
-        case #selector(toggleShade(_:)): item.state = isShaded ? .on : .off
+        case #selector(toggleShade(_:)):
+            item.state = isShaded ? .on : .off
+            return window?.isVisible == true
         case #selector(togglePeaks(_:)): item.state = preferences.showPeaks ? .on : .off
         case #selector(setVisMode(_:)): item.state = selected == preferences.visMode.rawValue ? .on : .off
         case #selector(setBarFalloff(_:)): item.state = selected == preferences.barFalloff.rawValue ? .on : .off

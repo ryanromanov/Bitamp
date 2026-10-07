@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import ImageIO
 import Foundation
@@ -1022,6 +1023,53 @@ import Testing
         view.skin = DefaultSkin(theme: .millennium)
         #expect(view.pixelSize == Layout.size)
         #expect(!view.isShapedWindow)
+    }
+
+    /// The main window hides and shows like Winamp's (Alt+W), something always stays on
+    /// screen, the choice survives a relaunch, and commands still reach the main view.
+    @MainActor @Test func mainWindowCanHide() {
+        _ = NSApplication.shared
+        let defaults = UserDefaults(suiteName: "BitampMainWindow-\(UUID().uuidString)")!
+        let preferences = Preferences(defaults: defaults)
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences)
+        let mainView = MainView(controller: controller, preferences: preferences, skin: DefaultSkin())
+        let playlist = SkinnedWindow(view: PlaylistView(controller: controller, preferences: preferences, skin: DefaultSkin()),
+                                     layoutName: "PlaylistWindow", isMain: false)
+        let equalizer = SkinnedWindow(view: EqualizerView(controller: controller, skin: DefaultSkin(), scale: 1),
+                                      layoutName: "EqualizerWindow", isMain: false)
+        playlist.actionFallback = mainView
+        let main = SkinnedWindow(view: mainView, layoutName: "MainWindow", isMain: true)
+        func group() -> WindowGroup {
+            WindowGroup(main: main, panels: [.playlist: playlist, .equalizer: equalizer], defaults: defaults)
+        }
+        defer { for window in [main, playlist, equalizer] { window.orderOut(nil) } }
+
+        let first = group()
+        first.restore()
+        first.showAtLaunch()
+        #expect(first.isMainVisible && first.isVisible(.playlist) && first.isVisible(.equalizer))
+        first.toggleMain()
+        #expect(!first.isMainVisible && first.isVisible(.playlist))
+
+        // Hidden at quit, hidden at the next launch.
+        main.orderOut(nil); playlist.orderOut(nil); equalizer.orderOut(nil)
+        let second = group()
+        second.restore()
+        second.showAtLaunch()
+        #expect(!second.isMainVisible && second.isVisible(.playlist))
+
+        // Closing the last other window brings the main window back.
+        second.setVisible(.equalizer, false)
+        #expect(!second.isMainVisible)
+        second.setVisible(.playlist, false)
+        #expect(second.isMainVisible)
+        // And with nothing else showing, it won't hide.
+        #expect(!second.canHideMain)
+        second.setMainVisible(false)
+        #expect(second.isMainVisible)
+
+        // The playlist hands playback commands to the main view.
+        #expect(playlist.supplementalTarget(forAction: #selector(MainView.play(_:)), sender: nil) as? MainView === mainView)
     }
 
     @Test func onlyTheOrbThemeHasOrbArt() {
