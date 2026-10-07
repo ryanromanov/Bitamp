@@ -1,6 +1,6 @@
 import AVFoundation
 
-/// Plays one file through player → 10-band EQ → output mixer → main mixer.
+/// Plays one file through player → 10-band EQ → retro sound → output mixer → main mixer.
 ///
 /// Pausing and seeking stop the player node and reschedule from a frame, so the
 /// position is always `startFrame` plus however far the node has played since.
@@ -42,9 +42,16 @@ final class PlayerEngine {
         didSet { applyEqualizer() }
     }
 
+    /// Crushes the music to 8-bit samples.
+    var retroSound = RetroSound.off {
+        didSet { retroKernel?.mode = retroSound }
+    }
+
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
     private let equalizer = AVAudioUnitEQ(numberOfBands: 10)
+    private let retro = RetroAudioUnit.makeNode()
+    private var retroKernel: RetroAudioUnit.Kernel? { (retro.auAudioUnit as? RetroAudioUnit)?.kernel }
     /// Carries volume and balance into the main mixer.
     private let output = AVAudioMixerNode()
     private var file: AVAudioFile?
@@ -63,6 +70,7 @@ final class PlayerEngine {
         }
         engine.attach(player)
         engine.attach(equalizer)
+        engine.attach(retro)
         engine.attach(output)
         output.volume = Float(volume * volume)
 
@@ -105,13 +113,15 @@ final class PlayerEngine {
         let file = try AVAudioFile(forReading: url)
         stop()
         engine.stop()
-        equalizer.removeTap(onBus: 0)
+        retro.removeTap(onBus: 0)
 
         let format = file.processingFormat
         engine.connect(player, to: equalizer, format: format)
-        engine.connect(equalizer, to: output, format: format)
+        engine.connect(equalizer, to: retro, format: format)
+        engine.connect(retro, to: output, format: format)
         engine.connect(output, to: engine.mainMixerNode, format: format)
-        equalizer.installTap(onBus: 0, bufferSize: 2048, format: nil, block: Self.tapBlock(analyzer))
+        // After the retro sound, so the visualizer shows what's playing.
+        retro.installTap(onBus: 0, bufferSize: 2048, format: nil, block: Self.tapBlock(analyzer))
         engine.prepare()
 
         self.file = file

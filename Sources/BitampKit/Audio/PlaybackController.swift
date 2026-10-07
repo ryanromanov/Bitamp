@@ -19,6 +19,7 @@ final class PlaybackController {
         engine.volume = preferences.volume
         engine.balance = preferences.balance
         engine.equalizerSettings = preferences.equalizer
+        engine.retroSound = preferences.retroSound
         engine.onTrackEnd = { [weak self] in self?.trackEnded() }
     }
 
@@ -51,6 +52,14 @@ final class PlaybackController {
         set {
             queue.repeats = newValue
             preferences.repeats = newValue
+        }
+    }
+
+    var retroSound: RetroSound {
+        get { engine.retroSound }
+        set {
+            engine.retroSound = newValue
+            preferences.retroSound = newValue
         }
     }
 
