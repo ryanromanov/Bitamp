@@ -20,6 +20,7 @@ final class PlaybackController {
         engine.balance = preferences.balance
         engine.equalizerSettings = preferences.equalizer
         engine.retroSound = preferences.retroSound
+        engine.chipBlend = preferences.chipBlend
         engine.onTrackEnd = { [weak self] in self?.trackEnded() }
     }
 
@@ -52,6 +53,14 @@ final class PlaybackController {
         set {
             queue.repeats = newValue
             preferences.repeats = newValue
+        }
+    }
+
+    var chipBlend: ChipBlend {
+        get { engine.chipBlend }
+        set {
+            engine.chipBlend = newValue
+            preferences.chipBlend = newValue
         }
     }
 

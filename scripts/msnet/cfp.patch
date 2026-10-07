@@ -1,0 +1,43 @@
+diff --git a/MSnet/cfp.py b/MSnet/cfp.py
+index f0fcc2e..12000b4 100755
+--- a/MSnet/cfp.py
++++ b/MSnet/cfp.py
+@@ -52,9 +52,9 @@ def STFT(x, fr, fs, Hop, h):
+     t = np.arange(Hop, np.ceil(len(x)/float(Hop))*Hop, Hop)
+     N = int(fs/float(fr))
+     window_size = len(h)
+-    f = fs*np.linspace(0, 0.5, np.round(N/2), endpoint=True)
++    f = fs*np.linspace(0, 0.5, int(np.round(N/2)), endpoint=True)
+     Lh = int(np.floor(float(window_size-1) / 2))
+-    tfr = np.zeros((int(N), len(t)), dtype=np.float)     
++    tfr = np.zeros((int(N), len(t)), dtype=np.float64)     
+         
+     for icol in range(0, len(t)):
+         ti = int(t[icol])           
+@@ -94,7 +94,7 @@ def Freq2LogFreqMapping(tfr, f, fr, fc, tc, NumPerOct):
+             break
+ 
+     Nest = len(central_freq)
+-    freq_band_transformation = np.zeros((Nest-1, len(f)), dtype=np.float)
++    freq_band_transformation = np.zeros((Nest-1, len(f)), dtype=np.float64)
+     for i in range(1, Nest-1):
+         l = int(round(central_freq[i-1]/fr))
+         r = int(round(central_freq[i+1]/fr)+1)
+@@ -124,7 +124,7 @@ def Quef2LogFreqMapping(ceps, q, fs, fc, tc, NumPerOct):
+             break
+     f = 1/q
+     Nest = len(central_freq)
+-    freq_band_transformation = np.zeros((Nest-1, len(f)), dtype=np.float)
++    freq_band_transformation = np.zeros((Nest-1, len(f)), dtype=np.float64)
+     for i in range(1, Nest-1):
+         for j in range(int(round(fs/central_freq[i+1])), int(round(fs/central_freq[i-1])+1)):
+             if f[j] > central_freq[i-1] and f[j] < central_freq[i]:
+@@ -202,7 +202,7 @@ def load_audio(filepath, sr=None, mono=True, dtype='float32'):
+ def feature_extraction(x, fs, Hop=512, Window=2049, StartFreq=80.0, StopFreq=1000.0, NumPerOct=48):
+     
+     fr = 2.0 # frequency resolution    
+-    h = scipy.signal.blackmanharris(Window) # window size
++    h = scipy.signal.windows.blackmanharris(Window) # window size
+     g = np.array([0.24, 0.6, 1]) # gamma value
+ 
+     tfrL0, tfrLF, tfrLQ, f, q, t, CenFreq = CFP_filterbank(x, fr, fs, Hop, h, StartFreq, 1/StopFreq, g, NumPerOct)

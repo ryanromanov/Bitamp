@@ -20,12 +20,15 @@ done
 set --
 if [ "$universal" = 1 ]; then set -- --arch arm64 --arch x86_64; fi
 swift build -c release "$@"
-bin="$(swift build -c release "$@" --show-bin-path)/Bitamp"
+bindir="$(swift build -c release "$@" --show-bin-path)"
+bin="$bindir/Bitamp"
 
 app=Bitamp.app
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin" "$app/Contents/MacOS/Bitamp"
+# The package's resources (Basic Pitch's model), where BasicPitch.modelURL() looks.
+cp -R "$bindir/Bitamp_BitampKit.bundle" "$app/Contents/Resources/"
 cp Resources/Info.plist "$app/Contents/Info.plist"
 if [ -n "$version" ]; then
     plutil -replace CFBundleShortVersionString -string "$version" "$app/Contents/Info.plist"

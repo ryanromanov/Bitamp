@@ -80,6 +80,11 @@ final class Preferences {
         set { defaults.set(newValue.rawValue, forKey: Key.retroSound) }
     }
 
+    var chipBlend: ChipBlend {
+        get { value(Key.chipBlend) ?? .low }
+        set { defaults.set(newValue.rawValue, forKey: Key.chipBlend) }
+    }
+
     var showRemaining: Bool {
         get { defaults.bool(forKey: Key.showRemaining) }
         set { defaults.set(newValue, forKey: Key.showRemaining) }
@@ -163,6 +168,7 @@ final class Preferences {
         static let shuffle = "shuffle"
         static let repeats = "repeat"
         static let retroSound = "retroSound"
+        static let chipBlend = "chiptuneBlend"
         static let showRemaining = "showRemainingTime"
         static let visMode = "visualizerMode"
         static let showPeaks = "visualizerPeaks"

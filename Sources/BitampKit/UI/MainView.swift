@@ -584,15 +584,24 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         applyRetroSound(sound)
     }
 
-    /// Steps to the next retro sound; the T key.
+    /// Steps through off, crush and chiptune; the T key.
     @objc func cycleRetroSound(_ sender: Any?) {
         let all = RetroSound.allCases
         applyRetroSound(all[(all.firstIndex(of: controller.retroSound)! + 1) % all.count])
     }
 
+    /// How much of the song plays under the chiptune cover; it also switches the cover on.
+    @objc func setChipBlend(_ sender: NSMenuItem) {
+        guard let blend = choice(ChipBlend.self, sender) else { return }
+        controller.chipBlend = blend
+        controller.retroSound = .chiptune
+        let names: [ChipBlend: String] = [.none: "NONE", .low: "20%", .medium: "40%"]
+        marquee.flash("CHIPTUNE, ORIGINAL SONG: \(names[blend]!)", for: 1.5)
+    }
+
     private func applyRetroSound(_ sound: RetroSound) {
         controller.retroSound = sound
-        let names: [RetroSound: String] = [.off: "OFF", .crush: "8-BIT CRUSH"]
+        let names: [RetroSound: String] = [.off: "OFF", .crush: "8-BIT CRUSH", .chiptune: "CHIPTUNE (EXPERIMENTAL)"]
         marquee.flash("RETRO SOUND: \(names[sound]!)", for: 1.5)
     }
 
@@ -651,6 +660,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         case #selector(toggleShuffle(_:)): item.state = controller.shuffle ? .on : .off
         case #selector(toggleRepeat(_:)): item.state = controller.repeats ? .on : .off
         case #selector(setRetroSound(_:)): item.state = selected == controller.retroSound.rawValue ? .on : .off
+        case #selector(setChipBlend(_:)): item.state = selected == controller.chipBlend.rawValue ? .on : .off
         case #selector(toggleShade(_:)): item.state = isShaded ? .on : .off
         case #selector(togglePeaks(_:)): item.state = preferences.showPeaks ? .on : .off
         case #selector(setVisMode(_:)): item.state = selected == preferences.visMode.rawValue ? .on : .off
