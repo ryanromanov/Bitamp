@@ -252,28 +252,31 @@ final class BasicPitch: @unchecked Sendable {
     }
 }
 
-/// Reads a file as Basic Pitch hears it: mono at 22,050 Hz, from any sample in its timeline.
+/// Reads a file as Basic Pitch hears it, mono at 22,050 Hz (or at `sampleRate`), from any
+/// sample in its timeline.
 final class BasicPitchReader {
     let file: AVAudioFile
-    /// The file's length at 22,050 Hz.
+    let sampleRate: Double
+    /// The file's length at `sampleRate`.
     let length: Int
     private let sourceRate: Double
     private let mono: AVAudioFormat
     private let target: AVAudioFormat
 
-    init(url: URL) throws {
+    init(url: URL, sampleRate: Double = BasicPitch.sampleRate) throws {
         file = try AVAudioFile(forReading: url)
+        self.sampleRate = sampleRate
         sourceRate = file.processingFormat.sampleRate
-        length = Int(Double(file.length) * BasicPitch.sampleRate / sourceRate)
+        length = Int(Double(file.length) * sampleRate / sourceRate)
         mono = AVAudioFormat(standardFormatWithSampleRate: sourceRate, channels: 1)!
-        target = AVAudioFormat(standardFormatWithSampleRate: BasicPitch.sampleRate, channels: 1)!
+        target = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
     }
 
     /// Fills `count` samples from sample `start` (which may be negative, or run past the end,
     /// where it reads silence).
     func read(from start: Int, count: Int, into out: UnsafeMutablePointer<Float>) throws {
         out.update(repeating: 0, count: count)
-        let ratio = sourceRate / BasicPitch.sampleRate
+        let ratio = sourceRate / sampleRate
         // A little extra either side so the resampler's filter has context.
         let margin = 64
         let sourceStart = max(0, Int((Double(start - margin) * ratio).rounded(.down)))
@@ -316,7 +319,7 @@ final class BasicPitchReader {
         }
         if let error { throw error }
 
-        // Resampled sample i is at sample `first + i` of the 22,050 Hz timeline.
+        // Resampled sample i is at sample `first + i` of the timeline at `sampleRate`.
         let first = Int((Double(sourceStart) / ratio).rounded())
         let data = resampled.floatChannelData![0]
         for i in 0..<Int(resampled.frameLength) {

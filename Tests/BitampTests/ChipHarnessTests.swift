@@ -47,7 +47,9 @@ struct ChipHarnessTests {
         let (file, buffer, startFrame) = try clip()
         let format = file.processingFormat
         var score = ChipScore(duration: Double(file.length) / format.sampleRate)
-        let transcription = try NoteTranscription(url: url, score: score)
+        // MSNet adds the vocal line unless a pitch track stands in for it or BITAMP_CHIP_VOCAL=0.
+        let vocal = environment["BITAMP_CHIP_LEAD"] == nil && environment["BITAMP_CHIP_VOCAL"] != "0"
+        let transcription = try NoteTranscription(url: url, score: score, vocalModel: { vocal ? MSNet.shared : nil })
         if let onset = environment["BITAMP_CHIP_ONSET"].flatMap(Float.init) { transcription.onsetThreshold = onset }
         if let frame = environment["BITAMP_CHIP_FRAME"].flatMap(Float.init) { transcription.frameThreshold = frame }
         let began = Date()

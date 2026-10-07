@@ -81,8 +81,9 @@ final class ChipScore: @unchecked Sendable {
 
 /// Listens to a whole file with Basic Pitch on a background thread, a few seconds at a time
 /// starting from wherever the playhead is, and arranges what it hears into a `ChipScore`.
-/// Basic Pitch runs well over 100 times faster than real time, so it soon gets far ahead of
-/// playback and then finishes the file.
+/// MSNet follows the sung melody alongside, so the lead can carry the part people would hum.
+/// Basic Pitch runs well over 100 times faster than real time and MSNet several times, so
+/// it soon gets ahead of playback and then finishes the file.
 final class NoteTranscription: @unchecked Sendable {
     /// A note, in seconds from the start of the file.
     struct Note: Equatable {
@@ -108,6 +109,8 @@ final class NoteTranscription: @unchecked Sendable {
     var frameThreshold = BasicPitch.frameThreshold
     private let reader: BasicPitchReader
     private let model: () -> BasicPitch?
+    /// MSNet on the file at 44.1 kHz, for the vocal line; nil when MSNet is unavailable.
+    private let vocalTracker: VocalTracker?
     /// How many Basic Pitch windows cover the file.
     let windowCount: Int
 
@@ -125,13 +128,23 @@ final class NoteTranscription: @unchecked Sendable {
     private var lastEnd = -1
     private var carried: [Note] = []
     private var arranger = ChipArranger()
+    private var vocalLine = VocalLine()
 
     /// Seconds of audio transcribed, and how long it took, for measuring speed.
     private(set) var secondsTranscribed = 0.0
     private(set) var secondsSpent = 0.0
 
-    init(url: URL, score: ChipScore, model: @escaping () -> BasicPitch? = { BasicPitch.shared }) throws {
+    init(url: URL, score: ChipScore, model: @escaping () -> BasicPitch? = { BasicPitch.shared },
+         vocalModel: () -> MSNet? = { MSNet.shared }) throws {
         reader = try BasicPitchReader(url: url)
+        if let vocal = vocalModel() {
+            let vocalReader = try BasicPitchReader(url: url, sampleRate: CFP.sampleRate)
+            vocalTracker = VocalTracker(model: vocal, length: vocalReader.length) { start, count, out in
+                try vocalReader.read(from: start, count: count, into: out)
+            }
+        } else {
+            vocalTracker = nil
+        }
         self.score = score
         self.model = model
         windowCount = max(1, (reader.length + BasicPitch.windowHop - 1) / BasicPitch.windowHop)
@@ -214,6 +227,7 @@ final class NoteTranscription: @unchecked Sendable {
         if !continuing {
             carried = []
             arranger = ChipArranger()
+            vocalLine = VocalLine()
         }
 
         // The audio: window w starts `edgeFrames` hops before sample w * windowHop.
@@ -266,11 +280,14 @@ final class NoteTranscription: @unchecked Sendable {
         let endTick = min(score.count, Int((endTime / ChipScore.tickSeconds).rounded(.up)))
         let sounding = carried + fresh
         if firstTick < endTick {
+            let vocal = try vocalNotes(ticks: firstTick..<endTick)
             audio.withUnsafeBufferPointer { audio in
                 for tick in firstTick..<endTick {
                     let center = tick * BasicPitch.fftHop - audioStart
                     let level = Self.loudnessLevel(audio, around: center)
-                    score.write(arranger.arrange(sounding, tick: tick, level: level), at: tick)
+                    var moment = arranger.arrange(sounding, tick: tick, level: level)
+                    if let vocal { moment = arranger.addVocal(vocal[tick - firstTick], to: moment) }
+                    score.write(moment, at: tick)
                 }
             }
         }
@@ -283,6 +300,14 @@ final class NoteTranscription: @unchecked Sendable {
         lock.unlock()
         secondsTranscribed += endTime - startTime
         secondsSpent += Date().timeIntervalSince(began)
+    }
+
+    /// The vocal line's note at each tick of `ticks`, or nil without MSNet.
+    private func vocalNotes(ticks: Range<Int>) throws -> [Int?]? {
+        guard let vocalTracker else { return nil }
+        let lookahead = ticks.lowerBound..<(ticks.upperBound + 2 * VocalLine.shortestNote)
+        let pitches = try vocalTracker.pitches(ticks: lookahead)
+        return vocalLine.notes(pitches, count: ticks.count)
     }
 
     /// How loud the music is around sample `center` of `audio`, as a 4-bit volume:
@@ -329,11 +354,17 @@ struct ChipArranger {
     /// Semitones above a note where its strongest overtones are heard.
     static let overtones: Set<Int> = [12, 19, 24]
 
+    /// While the vocal line sounds, the lead it displaces plays this loud on the chord voice.
+    static let displacedLeadScale: Float = 0.7
+    /// The vocal line's lead is at least this loud.
+    static let vocalLevel: UInt8 = 8
+
     private var lead: NoteTranscription.Note?
     /// The last note the lead played, kept after it ends, to judge what may follow it.
     private var lastLead: NoteTranscription.Note?
     private var bass: NoteTranscription.Note?
     private var chord: [Int] = []
+    private var vocal: Int?
 
     mutating func arrange(_ notes: [NoteTranscription.Note], tick: Int, level: Int) -> ChipMoment {
         let start = Double(tick) * ChipScore.tickSeconds, end = start + ChipScore.tickSeconds
@@ -428,6 +459,26 @@ struct ChipArranger {
             if notes.contains(where: starts) || pitches != chord { moment.onsets |= ChipMoment.chordOnset }
         }
         chord = pitches
+        return moment
+    }
+
+    /// Lays the vocal line (`note`, nil when no one is singing) over an arranged moment.
+    /// While it sounds it takes the lead, and the lead `arrange` chose, if different, moves
+    /// to the chord voice in place of the arpeggio, quieter; elsewhere the moment is as arranged.
+    mutating func addVocal(_ note: Int?, to arranged: ChipMoment) -> ChipMoment {
+        defer { vocal = note }
+        guard let note else { return arranged }
+        var moment = arranged
+        let ownLead = moment.lead, ownOnset = moment.onsets & ChipMoment.leadOnset != 0
+        moment.onsets &= ~ChipMoment.leadOnset
+        if ownLead != 0 && ownLead != UInt8(note) {
+            moment.chord = (ownLead, 0, 0)
+            moment.chordLevel = UInt8(max(1, (Float(moment.leadLevel) * Self.displacedLeadScale).rounded()))
+            if ownOnset { moment.onsets |= ChipMoment.chordOnset }
+        }
+        moment.lead = UInt8(note)
+        moment.leadLevel = max(moment.leadLevel, moment.bassLevel, moment.chordLevel, Self.vocalLevel)
+        if vocal != note { moment.onsets |= ChipMoment.leadOnset }
         return moment
     }
 }

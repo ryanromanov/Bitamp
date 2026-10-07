@@ -130,10 +130,11 @@ final class CFP {
         for pointer in [re, im, reversedRe, reversedIm, scratch1, scratch2, a, b] { pointer.deallocate() }
     }
 
-    /// The maps for mono 44.1 kHz audio. Frame c is centred on sample 256(c + 1) − 1 and,
-    /// as in `cfp.py`, its window is cut short where the audio ends.
-    func maps(_ samples: UnsafeBufferPointer<Float>) -> Maps {
-        let frames = Self.frameCount(samples: samples.count)
+    /// The maps for mono 44.1 kHz audio. Frame c is centred on sample 256(c + 1) − 1, or on
+    /// `centres[c]` when given, and as in `cfp.py` its window is cut short where the audio ends.
+    func maps(_ samples: UnsafeBufferPointer<Float>, centres: [Int]? = nil) -> Maps {
+        let frames = centres?.count ?? Self.frameCount(samples: samples.count)
+        func centre(_ frame: Int) -> Int { centres?[frame] ?? Self.hop * (frame + 1) - 1 }
         var maps = Maps(frames: frames,
                         spectrum: [Float](repeating: 0, count: Self.binCount * frames),
                         gcos: [Float](repeating: 0, count: Self.binCount * frames),
@@ -143,8 +144,8 @@ final class CFP {
         // transform, since every layer's input is real.
         for first in stride(from: 0, to: frames, by: 2) {
             let pair = min(2, frames - first)
-            place(frame: first, of: samples, into: re)
-            if pair == 2 { place(frame: first + 1, of: samples, into: im) } else { vDSP_vclrD(im, 1, vDSP_Length(n)) }
+            place(centre: centre(first), of: samples, into: re)
+            if pair == 2 { place(centre: centre(first + 1), of: samples, into: im) } else { vDSP_vclrD(im, 1, vDSP_Length(n)) }
 
             // The spectrum's magnitudes to the power 0.24.
             transform.transform(re, im)
@@ -171,12 +172,11 @@ final class CFP {
         return maps
     }
 
-    /// Writes frame `frame`'s windowed samples into `buffer`, wrapped around index 0. The
+    /// Writes the windowed samples around `centre` into `buffer`, wrapped around index 0. The
     /// window runs from 1,024 samples before the centre to 1,023 after; `cfp.py` indexes the
     /// window one short, so the first weight is the window's last.
-    private func place(frame: Int, of samples: UnsafeBufferPointer<Float>, into buffer: UnsafeMutablePointer<Double>) {
+    private func place(centre: Int, of samples: UnsafeBufferPointer<Float>, into buffer: UnsafeMutablePointer<Double>) {
         vDSP_vclrD(buffer, 1, vDSP_Length(n))
-        let centre = Self.hop * (frame + 1) - 1
         let half = (Self.windowLength - 1) / 2
         let taus = -min(half, centre)..<min(half, samples.count - 1 - centre)
         let window = Self.window
@@ -253,15 +253,18 @@ final class CFP {
     }
 
     /// MSNet's input from the maps: each map as log(1 + x), scaled to 0...1 over all its
-    /// values, in channel, bin, frame order.
-    static func features(_ maps: Maps) -> [Float] {
+    /// values, in channel, bin, frame order. With `peaks` (each map's largest log(1 + x)
+    /// over a wider stretch of the song) it's divided by those instead: the smallest value
+    /// is always 0, since row 0 is empty and nothing is negative.
+    static func features(_ maps: Maps, peaks: [Float]? = nil) -> [Float] {
         var features: [Float] = []
         features.reserveCapacity(3 * binCount * maps.frames)
-        for map in [maps.spectrum, maps.gcos, maps.cepstrum] {
+        for (channel, map) in [maps.spectrum, maps.gcos, maps.cepstrum].enumerated() {
             var logged = [Float](repeating: 0, count: map.count)
             var count = Int32(map.count)
             map.withUnsafeBufferPointer { vvlog1pf(&logged, $0.baseAddress!, &count) }
-            let low = vDSP.minimum(logged), high = vDSP.maximum(logged)
+            let low = peaks == nil ? vDSP.minimum(logged) : 0
+            let high = peaks?[channel] ?? vDSP.maximum(logged)
             let range = high > low ? high - low : 1
             features += vDSP.multiply(1 / range, vDSP.add(-low, logged))
         }

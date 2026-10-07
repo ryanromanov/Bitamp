@@ -44,7 +44,8 @@ import Testing
         defer { try? FileManager.default.removeItem(at: url) }
         let duration = Self.noteStart + Double(Self.arpeggio.count) * Self.noteLength + 0.5
         let score = ChipScore(duration: duration)
-        let transcription = try NoteTranscription(url: url, score: score)
+        // Basic Pitch's arrangement alone: MSNet hears some of these tones as singing.
+        let transcription = try NoteTranscription(url: url, score: score, vocalModel: { nil })
         try transcription.transcribe(from: 0, to: duration)
         let notes = transcription.notes
         for (index, pitch) in Self.arpeggio.enumerated() {
