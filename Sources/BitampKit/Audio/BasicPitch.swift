@@ -59,10 +59,10 @@ final class BasicPitch: @unchecked Sendable {
 
     /// The compiled model, from the caches folder if this exact package was compiled before.
     /// Command Line Tools have no coremlcompiler, so the package is compiled at run time.
-    static func compiledModel(for package: URL) throws -> URL {
+    static func compiledModel(for package: URL, name: String = "BasicPitch") throws -> URL {
         let caches = try FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent(Bundle.main.bundleIdentifier ?? "Bitamp")
-        let cached = caches.appendingPathComponent("BasicPitch-\(try fingerprint(of: package)).mlmodelc")
+        let cached = caches.appendingPathComponent("\(name)-\(try fingerprint(of: package)).mlmodelc")
         if FileManager.default.fileExists(atPath: cached.path) { return cached }
         let compiled = try MLModel.compileModel(at: package)
         try FileManager.default.createDirectory(at: caches, withIntermediateDirectories: true)
@@ -92,9 +92,8 @@ final class BasicPitch: @unchecked Sendable {
 
     /// Where the model is: in Bitamp.app, `scripts/bundle.sh` copies the package's resource
     /// bundle into Contents/Resources; in a debug build or the tests it's beside the binary.
-    static func modelURL() -> URL? {
+    static func modelURL(path: String = "BasicPitch/nmp.mlpackage") -> URL? {
         let resourceBundle = "Bitamp_BitampKit.bundle"
-        let path = "BasicPitch/nmp.mlpackage"
         let places = [Bundle.main.resourceURL, Bundle.main.bundleURL, Bundle.main.executableURL?.deletingLastPathComponent(),
                       Bundle(for: BasicPitch.self).bundleURL.deletingLastPathComponent()]
         for place in places.compactMap({ $0 }) {
