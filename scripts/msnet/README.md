@@ -81,7 +81,15 @@ under 4 ticks merge into the previous one.
    each `norm(lognorm(·))`. That normalisation is over the whole input, so for streaming
    ahead of the playhead it has to become per window (check that this doesn't hurt).
    Write a test that compares the Swift features with the Python ones on a short clip.
-3. **Runtime.** Run it in windows ahead of the playhead alongside `NoteTranscription`
+3. **Runtime. Done (2026-10-07), 4938a3e.** `VocalTracker` (CFP in 512-frame chunks on up to 4 cores,
+   cached until used) runs inside `NoteTranscription` beside Basic Pitch; `VocalLine` makes the notes
+   and `ChipArranger.addVocal` is the add mode. Normalisation: per-stretch scaling dropped voicing
+   agreement to 87–90%, and peaks from a 1-in-16 frame scan undershoot (83%), because MSNet is very
+   sensitive to the scale. Scaling each stretch by the peaks within ±10 s (like the 20–30 s clips
+   that were approved by ear) gives 99%. Whole-song peaks run 5–10% above clip peaks
+   (`BITAMP_PEAKS_FILES` survey test). Release speed: ~8× real time for MSNet, 4× end to end
+   counting the first segment's lookahead. Harness: `BITAMP_CHIP_VOCAL=0` turns MSNet off.
+   Original plan: Run it in windows ahead of the playhead alongside `NoteTranscription`
    (the Python reference runs at 2–3.4× real time on CPU; Core ML should be far faster).
    Decode with argmax over frequency, index 0 = unvoiced, and move `withLead` from the
    harness into `ChipArranger` as the add mode.
