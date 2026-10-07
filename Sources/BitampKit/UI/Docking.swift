@@ -79,6 +79,9 @@ final class WindowGroup {
     private let panels: [Panel: NSWindow]
     private let defaults: UserDefaults
     private var drag: (lead: NSWindow, mouse: NSPoint, origins: [(NSWindow, NSPoint)])?
+    /// While the main window is hidden: where it sits against each window that was docked
+    /// to it when it hid, so it can come back with them wherever they've moved.
+    private var hiddenMainOffsets: [Panel: CGVector] = [:]
 
     init(main: NSWindow, panels: [Panel: NSWindow], defaults: UserDefaults = .standard) {
         self.main = main
@@ -130,8 +133,17 @@ final class WindowGroup {
         guard visible || canHideMain else { return }
         defaults.set(visible, forKey: Self.mainVisibilityKey)
         if visible {
+            followDockedPanels()
+            hiddenMainOffsets = [:]
             main.makeKeyAndOrderFront(nil)
+            keepOnScreen()
         } else {
+            let others = Panel.allCases.filter(isVisible)
+            let docked = Docking.docked(to: main.frame, among: others.compactMap { panels[$0]?.frame })
+            hiddenMainOffsets = Dictionary(uniqueKeysWithValues: docked.compactMap { index in
+                panels[others[index]].map { (others[index], CGVector(dx: main.frame.minX - $0.frame.minX,
+                                                                     dy: main.frame.minY - $0.frame.minY)) }
+            })
             main.orderOut(nil)
             // Focus moves to the playlist, whose keys reach the main view, else the equalizer.
             [Panel.playlist, .equalizer].compactMap { panels[$0] }.first(where: \.isVisible)?.makeKey()
@@ -140,6 +152,16 @@ final class WindowGroup {
 
     func toggleMain() {
         setMainVisible(!isMainVisible)
+    }
+
+    /// Moves the hidden main window back to where it was against the playlist (or else the
+    /// equalizer), if that was docked to it when it hid.
+    private func followDockedPanels() {
+        guard !main.isVisible,
+              let (panel, offset) = [Panel.playlist, .equalizer].lazy
+                .compactMap({ panel in self.hiddenMainOffsets[panel].map { (panel, $0) } }).first,
+              let window = panels[panel] else { return }
+        main.setFrameOrigin(NSPoint(x: window.frame.minX + offset.dx, y: window.frame.minY + offset.dy))
     }
 
     /// Brings the windows forward at launch, after `restore`: the main window unless it was
@@ -192,6 +214,8 @@ final class WindowGroup {
 
     /// Saves every window's frame; `restore` reads them back on the next launch.
     func saveLayout() {
+        // A hidden main window is saved where it would come back.
+        followDockedPanels()
         for window in windows {
             defaults.set(NSStringFromRect(window.frame), forKey: Self.key(window, "Frame"))
         }
