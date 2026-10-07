@@ -8,6 +8,15 @@ A small, open-source audio player for macOS with an old-school look: a tiny skin
 
 Bitamp isn't affiliated with or endorsed by Winamp or Nullsoft. Its default skin is original artwork.
 
+<p align="center">
+  <img src="docs/images/bitamp.png" width="614" alt="Bitamp's main window, equalizer and playlist in the default skin, playing a song">
+</p>
+
+<p align="center">
+  <img src="docs/images/skin-millennium.png" width="307" alt="The same windows in the glossy Bitamp Millennium skin">
+  <img src="docs/images/skin-orb.png" width="350" alt="The Bitamp Orb skin, whose main window is a freeform shape with a big round play button">
+</p>
+
 ## Features
 
 - Main window, 10-band equalizer and playlist, which snap together and move as a group. Window ▸ Main Window (⌥W) hides the main window and leaves the playlist, with its own little transport buttons, and Window ▸ Regroup Windows (⌥R) docks everything back into the classic stack
@@ -30,6 +39,8 @@ scripts/test.sh        # run tests (wraps swift test; see below)
 scripts/bundle.sh      # release build → Bitamp.app (--universal, --version X.Y.Z)
 open Bitamp.app
 ```
+
+`scripts/screenshots.sh` renders the pictures above (and `social-preview.png`, for the repository's social preview) into `docs/images` from the app's own views, with a made-up playlist.
 
 `scripts/test.sh` works around a Command Line Tools bug: an incremental test rebuild can fail with "plugin for module 'TestingMacros' not found". The script clears stale build state and retries, falling back to a clean build.
 

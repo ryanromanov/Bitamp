@@ -116,10 +116,11 @@ final class PlaybackController {
         }
     }
 
-    /// Sets the queue as given, without expanding folders or checking the files exist.
-    /// For rendering and tests.
-    func setQueueItems(_ urls: [URL]) {
+    /// Sets the queue as given, without expanding folders or checking the files exist,
+    /// and makes item `current` the current one. For rendering and tests.
+    func setQueueItems(_ urls: [URL], current: Int? = nil) {
         queue.replace(with: urls)
+        if let current { queue.select(current) }
     }
 
     func playItem(at index: Int) {

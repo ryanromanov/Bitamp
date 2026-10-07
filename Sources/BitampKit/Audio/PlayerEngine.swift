@@ -106,6 +106,7 @@ final class PlayerEngine {
     }
 
     var currentTime: Double {
+        if let stagedTime { return stagedTime }
         guard let file else { return 0 }
         return Double(currentFrame) / file.processingFormat.sampleRate
     }
@@ -124,7 +125,18 @@ final class PlayerEngine {
         }
     }
 
+    /// Shows `track` as playing at `seconds`, without loading or playing anything.
+    /// For rendering screenshots.
+    func stage(_ track: Track, at seconds: Double) {
+        self.track = track
+        state = .playing
+        stagedTime = seconds
+    }
+
+    private var stagedTime: Double?
+
     func load(_ url: URL) throws {
+        stagedTime = nil
         let file = try AVAudioFile(forReading: url)
         stop()
         engine.stop()
