@@ -6,7 +6,11 @@ let package = Package(
     platforms: [.macOS(.v13)],
     targets: [
         // Everything but the entry point lives in BitampKit so tests can import it.
-        .target(name: "BitampKit"),
+        .target(
+            name: "BitampKit", dependencies: ["BitampAtomics"],
+            // Basic Pitch's Core ML model, compiled when first used (see BasicPitch.swift).
+            resources: [.copy("Resources/BasicPitch")]),
+        .target(name: "BitampAtomics"),
         .executableTarget(name: "Bitamp", dependencies: ["BitampKit"]),
         .testTarget(name: "BitampTests", dependencies: ["BitampKit"]),
     ]

@@ -42,9 +42,17 @@ final class PlayerEngine {
         didSet { applyEqualizer() }
     }
 
-    /// Crushes the music to 8-bit samples.
+    /// Crushes the music to 8-bit samples, or replaces it with a chip cover.
     var retroSound = RetroSound.off {
-        didSet { retroKernel?.mode = retroSound }
+        didSet {
+            retroKernel?.mode = retroSound
+            startTranscription()
+        }
+    }
+
+    /// How much of the song plays under the chiptune cover.
+    var chipBlend = ChipBlend.low {
+        didSet { retroKernel?.blend = chipBlend.level }
     }
 
     private let engine = AVAudioEngine()
@@ -59,6 +67,10 @@ final class PlayerEngine {
     private var pausedFrame: AVAudioFramePosition = 0
     /// Bumped whenever scheduled audio is thrown away, so stale completions are ignored.
     private var generation = 0
+    /// The chip arrangement of the loaded file, and the background work filling it in, which
+    /// starts the first time the file plays as a chiptune.
+    private var score: ChipScore?
+    private var transcription: NoteTranscription?
 
     init() {
         for (band, frequency) in zip(equalizer.bands, Self.eqFrequencies) {
@@ -70,9 +82,12 @@ final class PlayerEngine {
         }
         engine.attach(player)
         engine.attach(equalizer)
+        retroKernel?.blend = chipBlend.level
         engine.attach(retro)
         engine.attach(output)
         output.volume = Float(volume * volume)
+        // Compile Basic Pitch's model ahead of the first chiptune.
+        DispatchQueue.global(qos: .utility).async { _ = BasicPitch.shared }
 
         NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
@@ -114,6 +129,12 @@ final class PlayerEngine {
         stop()
         engine.stop()
         retro.removeTap(onBus: 0)
+        // The render thread is stopped, so the kernel can take a new score.
+        transcription?.cancel()
+        transcription = nil
+        let score = ChipScore(duration: Double(file.length) / file.processingFormat.sampleRate)
+        self.score = score
+        retroKernel?.score = score
 
         let format = file.processingFormat
         engine.connect(player, to: equalizer, format: format)
@@ -133,6 +154,43 @@ final class PlayerEngine {
             duration: duration, sampleRate: fileFormat.sampleRate,
             channels: Int(fileFormat.channelCount), kbps: Self.averageKbps(url: url, duration: duration))
         loadMetadata(for: url)
+        startTranscription()
+    }
+
+    /// Starts working out the loaded file's chip arrangement, once it's wanted.
+    private func startTranscription() {
+        guard retroSound == .chiptune, transcription == nil, let score, let url = track?.url else { return }
+        do {
+            let transcription = try NoteTranscription(url: url, score: score)
+            transcription.prioritize(currentTime)
+            transcription.start()
+            self.transcription = transcription
+        } catch {
+            NSLog("Bitamp: couldn't transcribe \(url.path): \(error)")
+            score.markUnusable()
+        }
+    }
+
+    /// Once the player has rendered, works out which file frame plays at each render
+    /// sample time and tells the chip, so it plays the score in step with the music.
+    private func syncClock(generation: Int, attempts: Int = 0) {
+        guard generation == self.generation, state == .playing, attempts < 100 else { return }
+        if let offset = Self.clockOffset(player: player, startFrame: startFrame) {
+            retroKernel?.setClock(offset: offset)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
+                MainActor.assumeIsolated { self?.syncClock(generation: generation, attempts: attempts + 1) }
+            }
+        }
+    }
+
+    /// The file frame at render sample time 0: the player's sample time counts from where
+    /// it started, which was `startFrame` in the file.
+    nonisolated static func clockOffset(player: AVAudioPlayerNode, startFrame: AVAudioFramePosition) -> Int64? {
+        guard let nodeTime = player.lastRenderTime, nodeTime.isSampleTimeValid,
+              let playerTime = player.playerTime(forNodeTime: nodeTime), playerTime.isSampleTimeValid
+        else { return nil }
+        return startFrame + playerTime.sampleTime - nodeTime.sampleTime
     }
 
     /// Resumes when paused; otherwise starts the track from the top.
@@ -173,6 +231,7 @@ final class PlayerEngine {
 
     private func halt() {
         generation += 1
+        retroKernel?.setClock(offset: nil)
         player.stop()
         if engine.isRunning { engine.pause() }
     }
@@ -181,6 +240,7 @@ final class PlayerEngine {
         guard let file else { return }
         generation += 1
         player.stop()
+        retroKernel?.setClock(offset: nil)
         let frame = min(max(0, frame), file.length)
         guard frame < file.length else {
             trackEnded()
@@ -200,6 +260,8 @@ final class PlayerEngine {
         }
         player.play()
         state = .playing
+        transcription?.prioritize(Double(frame) / file.processingFormat.sampleRate)
+        syncClock(generation: generation)
     }
 
     private func segmentFinished(_ finishedGeneration: Int) {
