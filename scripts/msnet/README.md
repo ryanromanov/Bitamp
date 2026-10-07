@@ -35,7 +35,7 @@ One-time setup (Python 3.12):
 cd scripts/msnet
 git clone https://github.com/bill317996/Melody-extraction-with-melodic-segnet repo
 git -C repo apply ../cfp.patch          # numpy/scipy API updates; repo/ is gitignored
-python3 -m venv venv && venv/bin/pip install torch numpy scipy soundfile pandas
+python3 -m venv venv && venv/bin/pip install torch==2.7.0 numpy scipy soundfile pandas coremltools
 ```
 
 Then, per clip:
@@ -59,7 +59,12 @@ under 4 ticks merge into the previous one.
 
 ## Next: port to the app
 
-1. **Core ML model.** Load `MSnet_vocal` into `model.MSnet_vocal()`, trace it, convert with
+1. **Core ML model. Done (2026-10-07).** `convert.py OUT.mlpackage` writes
+   `Sources/BitampKit/Resources/MSNet/msnet_vocal.mlpackage` (fp16, 1 MB, 64–8192 frames).
+   The unpools became first-max masks (identical to PyTorch). `check.py MODEL SONG START SECONDS ...`
+   compares it with PyTorch: on the four clips, 99.8–100% voicing agreement and 99.7–99.9% of
+   co-voiced frames within 50 cents, at 64–144× real time. torch is pinned to 2.7.0 because
+   coremltools 9.0 fails on 2.14. Original plan: load `MSnet_vocal` into `model.MSnet_vocal()`, trace it, convert with
    coremltools (fp16). `MaxUnpool2d` may not convert directly; if not, rewrite the unpool as
    a scatter or as `upsample × (input == maxpool-upsampled)` masks before tracing. Check the
    Core ML output against PyTorch on the four clips. Bundle it with its MIT licence next to
