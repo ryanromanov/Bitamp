@@ -57,18 +57,29 @@ import Testing
     }
 
     @Test func vocalReplacesTheLeadWhileItSounds() {
-        var arranger = ChipArranger()
         var moment = ChipMoment()
         moment.lead = 72
         moment.leadLevel = 10
-        moment.onsets = ChipMoment.leadOnset
-        let sung = arranger.addVocal(67, to: moment)
-        #expect(sung.lead == 67 && sung.leadLevel == 10)
-        #expect(sung.chord == (72, 0, 0) && sung.chordLevel == 7)
-        #expect(sung.onsets == ChipMoment.leadOnset | ChipMoment.chordOnset)
+        moment.chord = (60, 64, 67)
+        moment.chordLevel = 5
+        moment.onsets = ChipMoment.leadOnset | ChipMoment.chordOnset
+
+        // By default the voice sings alone, but for the bass.
+        var arranger = ChipArranger()
+        let alone = arranger.addVocal(67, to: moment)
+        #expect(alone.lead == 67 && alone.leadLevel == 10)
+        #expect(alone.chord == (0, 0, 0) && alone.chordLevel == 0)
+        #expect(alone.onsets == ChipMoment.leadOnset)
         let held = arranger.addVocal(67, to: ChipMoment())
         #expect(held.lead == 67 && held.leadLevel == ChipArranger.vocalLevel && held.onsets == 0)
         #expect(arranger.addVocal(nil, to: moment) == moment)
+
+        // The full arrangement keeps the lead it chose, on the chord voice, quieter.
+        var full = ChipArranger(style: .full)
+        let sung = full.addVocal(67, to: moment)
+        #expect(sung.lead == 67 && sung.leadLevel == 10)
+        #expect(sung.chord == (72, 0, 0) && sung.chordLevel == 7)
+        #expect(sung.onsets == ChipMoment.leadOnset | ChipMoment.chordOnset)
     }
 
     @Test func modelRuns() throws {

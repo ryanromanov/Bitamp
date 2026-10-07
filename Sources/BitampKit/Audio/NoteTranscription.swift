@@ -335,19 +335,23 @@ final class NoteTranscription: @unchecked Sendable {
 /// an old console might: the melody on the lead, the lowest note on the bass, and what's
 /// left of the chord as a fast arpeggio.
 struct ChipArranger {
-    /// What the arrangement plays besides the tune, for trying sparser covers.
+    /// What the arrangement plays besides the tune. The defaults are the sparse cover picked
+    /// by ear (2026-10-07) over the fuller one, `full`, which sounded too busy.
     struct Style {
         /// Arpeggiate what's left of the chord.
-        var chord = true
+        var chord = false
         /// While the vocal line sounds, keep the arranged lead, on the chord voice.
-        var accompanyVocal = true
+        var accompanyVocal = false
         /// Notes shorter than these never take the lead or the bass, in seconds.
-        var shortestLead = ChipArranger.shortestLead
-        var shortestBass = 0.0
+        var shortestLead = 0.15
+        var shortestBass = 0.1
         /// How far the voice may wander, in semitones, and how few ticks it may hold a note,
         /// before a new note starts.
         var vocalHoldRange = VocalLine.holdRange
         var shortestVocalTicks = VocalLine.shortestNote
+
+        /// The arrangement before the vocal line: arpeggios, and a lead from 60 ms notes.
+        static let full = Style(chord: true, accompanyVocal: true, shortestLead: ChipArranger.shortestLead, shortestBass: 0)
     }
 
     var style = Style()
