@@ -1083,6 +1083,26 @@ import Testing
         #expect(main.frame.minX - playlist.frame.minX == before.main.x - before.playlist.x)
         #expect(main.frame.minY - playlist.frame.minY == before.main.y - before.playlist.y)
 
+        // Regrouping stacks the equalizer and then the playlist under the main window.
+        func expectStacked() {
+            #expect(equalizer.frame.minX == main.frame.minX && equalizer.frame.maxY == main.frame.minY)
+            #expect(playlist.frame.minX == main.frame.minX && playlist.frame.maxY == equalizer.frame.minY)
+        }
+        second.setVisible(.playlist, true)
+        second.setVisible(.equalizer, true)
+        playlist.setFrameOrigin(NSPoint(x: playlist.frame.minX + 300, y: playlist.frame.minY + 40))
+        equalizer.setFrameOrigin(NSPoint(x: equalizer.frame.minX - 200, y: equalizer.frame.minY - 90))
+        second.regroup()
+        expectStacked()
+        // Hidden, the windows stack from the top one, and the main window comes back above them.
+        second.setMainVisible(false)
+        playlist.setFrameOrigin(NSPoint(x: playlist.frame.minX + 150, y: playlist.frame.minY + 500))
+        let playlistTop = NSPoint(x: playlist.frame.minX, y: playlist.frame.maxY)
+        second.regroup()
+        #expect(equalizer.frame.minX == playlistTop.x && equalizer.frame.maxY == playlistTop.y)
+        second.setMainVisible(true)
+        expectStacked()
+
         // The playlist hands playback commands to the main view.
         #expect(playlist.supplementalTarget(forAction: #selector(MainView.play(_:)), sender: nil) as? MainView === mainView)
     }

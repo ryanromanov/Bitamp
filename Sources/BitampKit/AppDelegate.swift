@@ -215,6 +215,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowGroup?.toggleMain()
     }
 
+    @objc private func regroupWindows(_ sender: Any?) {
+        windowGroup?.regroup()
+    }
+
     @objc private func toggleEqualizer(_ sender: Any?) {
         windowGroup?.toggle(.equalizer)
     }
@@ -245,6 +249,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let mainWindow = Menus.item("Main Window", #selector(toggleMainWindow(_:)), "w", [.option])
         let equalizer = Menus.item("Equalizer", #selector(toggleEqualizer(_:)), "g", [.option])
         let playlist = Menus.item("Playlist", #selector(togglePlaylist(_:)), "e", [.option])
+        let regroup = Menus.item("Regroup Windows", #selector(regroupWindows(_:)), "r", [.option])
         let minimize = Menus.item("Minimize", #selector(minimize(_:)), "m", [.command])
         let sizes = SkinnedView.scales.map { scale -> NSMenuItem in
             let item = Menus.item("\(scale)×", #selector(setScale(_:)), "\(scale)", [.command])
@@ -257,9 +262,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let equalizerShade = Menus.item("Shade Equalizer", #selector(toggleEqualizerShade(_:)), "w", [.control, .option])
         let playlistShade = Menus.item("Shade Playlist", #selector(togglePlaylistShade(_:)), "w", [.control, .shift])
         let shadows = Menus.item("Window Shadows", #selector(toggleShadows(_:)))
-        for item in [mainWindow, equalizer, playlist, minimize, equalizerShade, playlistShade, shadows] { item.target = self }
+        for item in [mainWindow, equalizer, playlist, regroup, minimize, equalizerShade, playlistShade, shadows] { item.target = self }
         let windowMenu = Menus.menu("Window", [
-            mainWindow, equalizer, playlist, .separator(),
+            mainWindow, equalizer, playlist, regroup, .separator(),
             mainShade, equalizerShade, playlistShade, .separator(),
             Menus.submenu(Menus.menu("Size", sizes)), shadows, .separator(),
             minimize,
