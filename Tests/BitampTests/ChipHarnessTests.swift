@@ -53,7 +53,8 @@ struct ChipHarnessTests {
         let began = Date()
         try transcription.transcribe(from: start, to: start + seconds)
         if let path = environment["BITAMP_CHIP_LEAD"] {
-            score = try Self.withLead(fromPitchTrack: path, clipStart: start, seconds: seconds, over: score)
+            score = try Self.withLead(fromPitchTrack: path, clipStart: start, seconds: seconds, over: score,
+                                      adding: environment["BITAMP_CHIP_LEAD_MODE"] == "add")
         }
         let wall = Date().timeIntervalSince(began)
         print(String(format: "CHIP transcribed %.1f s in %.2f s (%.0f× real time; %.0f× counting only segment work)",
@@ -192,10 +193,13 @@ struct ChipHarnessTests {
     /// "seconds hertz", from the clip's start; 0 Hz is unvoiced) such as MSNet's. Each tick
     /// takes the median voiced pitch in it; notes hold within 0.8 semitone so vibrato
     /// doesn't split them, last at least 4 ticks, and short unvoiced gaps are bridged.
-    static func withLead(fromPitchTrack path: String, clipStart: Double, seconds: Double, over score: ChipScore) throws -> ChipScore {
+    /// When `adding`, the score's own lead isn't dropped: while the vocal sounds it moves to
+    /// the chord voice in place of the arpeggio, quieter, and elsewhere it stays the lead.
+    static func withLead(fromPitchTrack path: String, clipStart: Double, seconds: Double, over score: ChipScore,
+                         adding: Bool = false) throws -> ChipScore {
         let rows = try String(contentsOfFile: path, encoding: .utf8).split(separator: "\n").compactMap { line -> (Double, Double)? in
             let parts = line.split(separator: " ").compactMap { Double($0) }
-            return parts.count == 2 ? (parts[0], parts[1]) : nil
+            return parts.count >= 2 ? (parts[0], parts[1]) : nil
         }
         let first = ChipScore.tick(at: clipStart), last = ChipScore.tick(at: clipStart + seconds)
         // A pitch per tick, in fractional MIDI notes.
@@ -246,7 +250,17 @@ struct ChipHarnessTests {
         let result = ChipScore(duration: Double(score.count) * ChipScore.tickSeconds)
         for (index, note) in notes.enumerated() {
             var moment = score.moment(at: first + index) ?? ChipMoment()
+            if adding && note == nil {
+                result.write(moment, at: first + index)
+                continue
+            }
+            let ownLead = moment.lead, ownLevel = moment.leadLevel, ownOnset = moment.onsets & ChipMoment.leadOnset != 0
             moment.onsets &= ~ChipMoment.leadOnset
+            if adding, let note, ownLead != 0, ownLead != UInt8(note) {
+                moment.chord = (ownLead, 0, 0)
+                moment.chordLevel = UInt8(max(1, (Float(ownLevel) * 0.7).rounded()))
+                if ownOnset { moment.onsets |= ChipMoment.chordOnset }
+            }
             if let note {
                 let level = max(moment.leadLevel, moment.bassLevel, moment.chordLevel, 8)
                 moment.lead = UInt8(note)
