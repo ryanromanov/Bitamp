@@ -72,6 +72,43 @@ import Testing
         #expect(transcription.secondsTranscribed >= duration - 0.1)
     }
 
+    /// Background transcription keeps about `aheadSeconds` ahead of the playhead, follows it,
+    /// and starts again when the playhead jumps back after it has finished.
+    @Test func staysNearThePlayhead() async throws {
+        let seconds = 100.0
+        let format = AVAudioFormat(standardFormatWithSampleRate: Self.sampleRate, channels: 1)!
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(seconds * Self.sampleRate)))
+        buffer.frameLength = buffer.frameCapacity
+        for i in 0..<Int(buffer.frameLength) { buffer.floatChannelData![0][i] = Float(0.2 * sin(2 * .pi * 440 * Double(i) / Self.sampleRate)) }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("bitamp-long-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try AVAudioFile(forWriting: url, settings: format.settings).write(from: buffer)
+
+        let score = ChipScore(duration: seconds)
+        let transcription = try NoteTranscription(url: url, score: score, vocalModel: { nil })
+        defer { transcription.cancel() }
+        func written(_ at: Double) -> Bool { score.isWritten(at: ChipScore.tick(at: at)) }
+        func waitFor(_ at: Double) async throws {
+            for _ in 0..<600 where !written(at) { try await Task.sleep(for: .milliseconds(50)) }
+            #expect(written(at), "nothing at \(at) s")
+        }
+
+        transcription.prioritize(50)
+        transcription.start()
+        try await waitFor(60)
+        try await Task.sleep(for: .seconds(1))
+        #expect(!written(seconds - 5), "ran on past the playhead")
+        // The playhead reaches 70 s: the rest of the song follows.
+        _ = score.moment(at: ChipScore.tick(at: 70))
+        try await waitFor(seconds - 5)
+        // Done; the playhead jumps back to 10 s, where nothing was worked out.
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(!written(15))
+        transcription.prioritize(10)
+        _ = score.moment(at: ChipScore.tick(at: 10))
+        try await waitFor(15)
+    }
+
     @Test func decodesOnsetsIntoNotes() {
         // One note from frame 10 to 40 at A4, with an onset at frame 10; nothing else.
         let n = 60, width = BasicPitch.noteCount, f = 69 - BasicPitch.lowestNote

@@ -1,96 +1,62 @@
-# Hummable lead: MSNet prototype
+# MSNet: the chiptune cover's vocal line
 
-Work in progress on the `chiptune-melody` branch. The chiptune cover (draft PR #8) builds
-its lead from Basic Pitch's notes, which often miss the part of a song people would hum.
-This experiment adds a vocal melody tracker on top. So far it runs offline only, through the
-chip harness; the app doesn't use it yet.
-
-## Where things stand (2026-10-07)
+The chiptune cover (Retro Sound ▸ Chiptune) takes most of its notes from Basic Pitch, which
+often misses the part of a song people would hum. MSNet follows the sung melody instead,
+and while someone sings, that line takes the lead.
 
 - **Model:** MSNet vocal, from *Hsieh, Su & Yang, "A Streamlined Encoder/Decoder Architecture
   for Melody Extraction", ICASSP 2019*, github.com/bill317996/Melody-extraction-with-melodic-segnet.
-  MIT licence, weights in the repo (`MSnet/pretrain_model/MSnet_vocal`, 2,090,119 bytes,
-  about 0.5M parameters; roughly 1 MB as fp16 Core ML).
+  MIT licence (bundled as `Sources/BitampKit/Resources/MSNet/LICENSE`). The Core ML package
+  there is fp16, 1 MB.
+- **In the app:** `CFP.swift` computes the model's input features (a port of the repo's
+  `cfp.py`), `MSNet.swift` runs the model, `VocalTracker.swift` runs both ahead of the
+  playhead and turns frames into notes, and `ChipArranger.addVocal` lays them over the
+  arrangement.
 - **Rejected:** Demucs (80–160 MB), Spleeter (~79 MB), Open-Unmix (35 MB; UMX-L is
-  CC BY-NC-SA), RMVPE (181 MB, unclear weight licence), FTANet (no licence),
-  CREPE tiny (MIT and small, but monophonic, so it tracks the loudest thing, not the voice).
-- **Three versions, each on a branch:**
-  - `chiptune-basicpitch`: no MSNet (today's app).
-  - `chiptune-msnet-replace`: MSNet's vocal line replaces the lead.
-  - `chiptune-melody`: MSNet's vocal line is **added**. It becomes the lead while it sounds,
-    and Basic Pitch's own lead moves to the chord voice at 0.7× its level. With no vocal,
-    nothing changes. **The user picked this one as probably best.**
-- **What the user heard:** replacing made vocals more apparent and Shock the Monkey better,
-  but lost Boadicea's intro backing; adding was meant to keep both. Halo (Mjolnir Mix) is a
-  poor fit either way.
-- **Known limit:** MSNet's voicing confidence is bimodal (nearly always 0 or 1) and it is
-  confidently "voiced" on choirs (Boadicea's intro, the Halo chant). Gating on confidence
-  can't separate the hummable vocal from backing voices.
+  CC BY-NC-SA), RMVPE (181 MB, unclear weight licence), FTANet (no licence), CREPE tiny
+  (monophonic, so it tracks the loudest thing, not the voice).
 
-## Reproducing the clips
+## Regenerating and checking the model
 
-One-time setup (Python 3.12):
+One-time setup (Python 3.12; `repo/` and `venv/` are gitignored):
 
 ```sh
 cd scripts/msnet
 git clone https://github.com/bill317996/Melody-extraction-with-melodic-segnet repo
-git -C repo apply ../cfp.patch          # numpy/scipy API updates; repo/ is gitignored
+git -C repo apply ../cfp.patch          # numpy/scipy API updates
 python3 -m venv venv && venv/bin/pip install torch==2.7.0 numpy scipy soundfile pandas coremltools
 ```
 
-Then, per clip:
+coremltools 9.0 fails on newer torch, hence the pin.
 
-```sh
-scripts/msnet/venv/bin/python scripts/msnet/pitch-track.py SONG.mp3 START SECONDS /tmp/x/name.f0.txt
-BITAMP_CHIP_FILE=SONG.mp3 BITAMP_CHIP_START=START BITAMP_CHIP_SECONDS=SECONDS \
-BITAMP_CHIP_NAME=name-msnet-add BITAMP_CHIP_OUT=/tmp/x \
-BITAMP_CHIP_LEAD=/tmp/x/name.f0.txt BITAMP_CHIP_LEAD_MODE=add \
-scripts/test.sh --filter ChipHarnessTests/basicPitchCover
-```
+- `convert.py OUT.mlpackage` converts the PyTorch weights. Core ML has no `MaxUnpool2d`, so
+  each unpool is rebuilt from a first-maximum mask; that matches PyTorch exactly before the
+  fp16 conversion.
+- `check.py MODEL SONG START SECONDS [...]` compares Core ML with PyTorch on real clips. On
+  four test clips: voicing agreed on 99.8–100% of frames, and 99.7–99.9% of pitches were
+  within 50 cents.
+- `dump-features.py SONG START SECONDS OUT.cfp` writes a clip's samples, Python's features
+  and PyTorch's pitches; `BITAMP_CFP_DUMP=OUT.cfp scripts/test.sh --filter MSNetDumpTests`
+  compares the Swift side with them (features within 6e-8, pitches 99% the same).
 
-Leave out `BITAMP_CHIP_LEAD_MODE` for the replace version, and `BITAMP_CHIP_LEAD` for today's.
-Clips used so far: Enya "Boadicea" 0–20 s, Peter Gabriel "Shock the Monkey" 45–65 s,
-Halo 2 "Halo Theme Mjolnir Mix" 0–30 s (intro) and 78–98 s (high part).
+## Things learned
 
-The pitch track becomes notes in `ChipHarnessTests.withLead(fromPitchTrack:...)`: per 11.6 ms
-score tick, the median voiced pitch if at least half the tick's frames are voiced; a note holds
-while the pitch stays within 0.8 semitone; unvoiced gaps of up to 3 ticks are bridged; notes
-under 4 ticks merge into the previous one.
+- **Normalisation matters a lot.** `cfp.py` scales each feature map by its peak over all the
+  audio it's given, and MSNet's voicing shifts with that scale: scaling each few-second
+  stretch on its own dropped agreement to 87–90%. Bitamp scales each stretch by the peaks
+  within 10 seconds either side, like the 20–30 s clips the cover was tuned on by ear, which
+  keeps it at 99%. Whole-song peaks run 5–10% higher than a clip's
+  (`BITAMP_PEAKS_FILES=a.mp3:b.mp3 scripts/test.sh --filter MSNetPeakSurvey`).
+- **Choirs count as singing.** MSNet's confidence is nearly always 0 or 1, and it is
+  confidently voiced on choirs (Boadicea's intro, the Halo 2 chant).
+- **By ear (2026-10-07):** adding the vocal line beat replacing Basic Pitch's lead with it.
+  The full arrangement (arpeggios, the displaced lead behind the voice) was too busy, so the
+  default is sparse: nothing but the bass behind the voice, no arpeggio, and longer minimum
+  notes. A steadier vocal line (1 semitone, 8 ticks) sounded worse.
+- **Speed:** the features are the slow part, about 3.4× real time on one core in a release
+  build (22,050-point transforms via Bluestein); `VocalTracker` uses up to four cores, so
+  transcription runs at about 4× real time end to end, and it stays within 30 s of the playhead.
 
-## Next: port to the app
-
-1. **Core ML model. Done (2026-10-07).** `convert.py OUT.mlpackage` writes
-   `Sources/BitampKit/Resources/MSNet/msnet_vocal.mlpackage` (fp16, 1 MB, 64–8192 frames).
-   The unpools became first-max masks (identical to PyTorch). `check.py MODEL SONG START SECONDS ...`
-   compares it with PyTorch: on the four clips, 99.8–100% voicing agreement and 99.7–99.9% of
-   co-voiced frames within 50 cents, at 64–144× real time. torch is pinned to 2.7.0 because
-   coremltools 9.0 fails on 2.14. Original plan: load `MSnet_vocal` into `model.MSnet_vocal()`, trace it, convert with
-   coremltools (fp16). `MaxUnpool2d` may not convert directly; if not, rewrite the unpool as
-   a scatter or as `upsample × (input == maxpool-upsampled)` masks before tracing. Check the
-   Core ML output against PyTorch on the four clips. Bundle it with its MIT licence next to
-   Basic Pitch's in `Resources/`, compiled and cached at runtime the same way.
-2. **CFP features in Swift (vDSP). Done (2026-10-07).** `Sources/BitampKit/Audio/CFP.swift`, with
-   `MSNet.swift` running the model. `dump-features.py SONG START SECONDS OUT.cfp` writes Python's
-   features and PyTorch's pitch bins; `BITAMP_CFP_DUMP=OUT.cfp scripts/test.sh --filter MSNetDumpTests`
-   compares. Shock the Monkey 45–65 s: features within 6e-8 of Python's, voicing and pitch
-   (within 40 cents) agree on 99% of frames. CFP takes 8 s for 20 s of audio in a debug build;
-   it's the slow part. Original plan: port `feature_extraction` in `MSnet/cfp.py` for the vocal
-   settings: 44.1 kHz mono, hop 256 (5.8 ms), Blackman-Harris window of 2049, frequency
-   resolution 2 Hz (so a 22,050-point FFT), gammas [0.24, 0.6, 1], 31–1250 Hz at
-   60 bins per octave. Three channels: spectrum, generalized cepstrum, and their product,
-   each `norm(lognorm(·))`. That normalisation is over the whole input, so for streaming
-   ahead of the playhead it has to become per window (check that this doesn't hurt).
-   Write a test that compares the Swift features with the Python ones on a short clip.
-3. **Runtime. Done (2026-10-07), 4938a3e.** `VocalTracker` (CFP in 512-frame chunks on up to 4 cores,
-   cached until used) runs inside `NoteTranscription` beside Basic Pitch; `VocalLine` makes the notes
-   and `ChipArranger.addVocal` is the add mode. Normalisation: per-stretch scaling dropped voicing
-   agreement to 87–90%, and peaks from a 1-in-16 frame scan undershoot (83%), because MSNet is very
-   sensitive to the scale. Scaling each stretch by the peaks within ±10 s (like the 20–30 s clips
-   that were approved by ear) gives 99%. Whole-song peaks run 5–10% above clip peaks
-   (`BITAMP_PEAKS_FILES` survey test). Release speed: ~8× real time for MSNet, 4× end to end
-   counting the first segment's lookahead. Harness: `BITAMP_CHIP_VOCAL=0` turns MSNet off.
-   Original plan: Run it in windows ahead of the playhead alongside `NoteTranscription`
-   (the Python reference runs at 2–3.4× real time on CPU; Core ML should be far faster).
-   Decode with argmax over frequency, index 0 = unvoiced, and move `withLead` from the
-   harness into `ChipArranger` as the add mode.
-4. **Listen again** in the app on the same four songs, then update PR #8.
+The chip harness renders clips for listening:
+`BITAMP_CHIP_FILE=SONG BITAMP_CHIP_START=45 BITAMP_CHIP_SECONDS=20 BITAMP_CHIP_OUT=DIR scripts/test.sh --filter ChipHarnessTests/basicPitchCover`,
+with `BITAMP_CHIP_STYLE=a...e` for the arrangements compared and `BITAMP_CHIP_VOCAL=0` for none.

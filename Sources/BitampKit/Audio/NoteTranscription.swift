@@ -38,6 +38,8 @@ final class ChipScore: @unchecked Sendable {
     private let ready: UnsafeMutablePointer<Int32>
     /// 1 until the transcription finds it can't run, when players should hear something else.
     private let usable: UnsafeMutablePointer<Int32>
+    /// The tick last asked for, which is where the playhead is.
+    private let playhead: UnsafeMutablePointer<Int32>
 
     init(duration: Double) {
         count = max(1, Int((duration / Self.tickSeconds).rounded(.up)) + 1)
@@ -47,12 +49,15 @@ final class ChipScore: @unchecked Sendable {
         ready.initialize(repeating: 0, count: count)
         usable = .allocate(capacity: 1)
         usable.initialize(to: 1)
+        playhead = .allocate(capacity: 1)
+        playhead.initialize(to: 0)
     }
 
     deinit {
         moments.deallocate()
         ready.deallocate()
         usable.deallocate()
+        playhead.deallocate()
     }
 
     /// Whether this score will ever have notes.
@@ -67,11 +72,21 @@ final class ChipScore: @unchecked Sendable {
         bitamp_store_release_32(ready + tick, 1)
     }
 
-    /// The moment at `tick`, if it's been worked out. Safe on the render thread.
+    /// The moment at `tick`, if it's been worked out. Safe on the render thread, which asks
+    /// for the playhead's tick, so this also notes where the playhead is.
     func moment(at tick: Int) -> ChipMoment? {
+        bitamp_store_release_32(playhead, Int32(clamping: tick))
         guard tick >= 0 && tick < count, bitamp_load_acquire_32(ready + tick) != 0 else { return nil }
         return moments[tick]
     }
+
+    /// Whether the moment at `tick` has been worked out, without moving the playhead.
+    func isWritten(at tick: Int) -> Bool {
+        tick >= 0 && tick < count && bitamp_load_acquire_32(ready + tick) != 0
+    }
+
+    /// Where the playhead was last, in seconds.
+    var playheadSeconds: Double { Double(bitamp_load_acquire_32(playhead)) * Self.tickSeconds }
 
     /// The tick a time in the song falls in.
     static func tick(at seconds: Double) -> Int {
@@ -83,7 +98,8 @@ final class ChipScore: @unchecked Sendable {
 /// starting from wherever the playhead is, and arranges what it hears into a `ChipScore`.
 /// MSNet follows the sung melody alongside, so the lead can carry the part people would hum.
 /// Basic Pitch runs well over 100 times faster than real time and MSNet several times, so
-/// it soon gets ahead of playback and then finishes the file.
+/// it soon gets ahead of playback; it stays at most `aheadSeconds` ahead, waking now and
+/// then to keep up, and stops at the end of the file.
 final class NoteTranscription: @unchecked Sendable {
     /// A note, in seconds from the start of the file.
     struct Note: Equatable {
@@ -102,6 +118,8 @@ final class NoteTranscription: @unchecked Sendable {
     static let lookaheadWindows = 1
     /// Notes this many frames or shorter (about 35 ms) are dropped.
     static let minimumFrames = 3
+    /// How far ahead of the playhead the background work goes before it waits.
+    static let aheadSeconds = 30.0
 
     let score: ChipScore
     /// Basic Pitch's thresholds, adjustable for tuning experiments.
@@ -122,6 +140,8 @@ final class NoteTranscription: @unchecked Sendable {
     private var cancelled = false
     private var allNotes: [Note] = []
     private var running = false
+    /// Whether `start()` was ever called, so `prioritize` knows to restart the work.
+    private var started = false
 
     // Worker state, touched only by whichever thread is transcribing.
     private var done: [Bool]
@@ -165,14 +185,27 @@ final class NoteTranscription: @unchecked Sendable {
         lock.lock()
         let alreadyRunning = running
         running = true
+        started = true
         lock.unlock()
         guard !alreadyRunning else { return }
         DispatchQueue.global(qos: .utility).async { [self] in
             do {
-                while let segment = nextSegment() { try process(segment) }
+                while let segment = nextSegment(stoppingWhenDone: true) {
+                    lock.lock()
+                    let from = max(Double(wanted * BasicPitch.windowHop) / BasicPitch.sampleRate, score.playheadSeconds)
+                    lock.unlock()
+                    if BasicPitch.time(window: segment.lowerBound, frame: 0) - from > Self.aheadSeconds {
+                        Thread.sleep(forTimeInterval: 0.25)
+                        continue
+                    }
+                    try process(segment)
+                }
             } catch {
                 NSLog("Bitamp: transcription stopped: \(error)")
                 score.markUnusable()
+                lock.lock()
+                running = false
+                lock.unlock()
             }
         }
     }
@@ -185,10 +218,13 @@ final class NoteTranscription: @unchecked Sendable {
     }
 
     /// Moves the transcription to the playhead, at `seconds` into the file.
+    /// Starts the background work again if it had finished.
     func prioritize(_ seconds: Double) {
         lock.lock()
         wanted = min(windowCount - 1, max(0, Int(seconds * BasicPitch.sampleRate) / BasicPitch.windowHop))
+        let restart = started && !running && !cancelled
         lock.unlock()
+        if restart { start() }
     }
 
     /// Transcribes from `start` to `end` seconds on this thread, for tests and the harness.
@@ -202,18 +238,23 @@ final class NoteTranscription: @unchecked Sendable {
         }
     }
 
-    /// The next windows to transcribe: from the playhead's window on, or anything left
-    /// before it once the rest is done.
-    private func nextSegment() -> Range<Int>? {
+    /// The next windows to transcribe, from the playhead's window on. When there are none
+    /// and `stoppingWhenDone`, the background work is marked as stopped, under the same lock
+    /// as `prioritize`, so a seek can't slip between the check and the stop.
+    private func nextSegment(stoppingWhenDone: Bool = false) -> Range<Int>? {
+        // Loading the model can take a while the first time, so not under the lock.
+        let available = model() != nil
         lock.lock()
-        let wanted = self.wanted, cancelled = self.cancelled
-        lock.unlock()
-        guard !cancelled, model() != nil else {
+        defer { lock.unlock() }
+        guard !cancelled, available else {
             if !cancelled { score.markUnusable() }
+            if stoppingWhenDone { running = false }
             return nil
         }
-        guard let first = (wanted..<windowCount).first(where: { !done[$0] }) ?? (0..<wanted).first(where: { !done[$0] })
-        else { return nil }
+        guard let first = (wanted..<windowCount).first(where: { !done[$0] }) else {
+            if stoppingWhenDone { running = false }
+            return nil
+        }
         let size = first == lastEnd ? Self.segmentWindows : Self.firstSegmentWindows
         var end = first + 1
         while end < min(windowCount, first + size) && !done[end] { end += 1 }
