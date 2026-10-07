@@ -46,12 +46,15 @@ struct ChipHarnessTests {
     @Test func basicPitchCover() throws {
         let (file, buffer, startFrame) = try clip()
         let format = file.processingFormat
-        let score = ChipScore(duration: Double(file.length) / format.sampleRate)
+        var score = ChipScore(duration: Double(file.length) / format.sampleRate)
         let transcription = try NoteTranscription(url: url, score: score)
         if let onset = environment["BITAMP_CHIP_ONSET"].flatMap(Float.init) { transcription.onsetThreshold = onset }
         if let frame = environment["BITAMP_CHIP_FRAME"].flatMap(Float.init) { transcription.frameThreshold = frame }
         let began = Date()
         try transcription.transcribe(from: start, to: start + seconds)
+        if let path = environment["BITAMP_CHIP_LEAD"] {
+            score = try Self.withLead(fromPitchTrack: path, clipStart: start, seconds: seconds, over: score)
+        }
         let wall = Date().timeIntervalSince(began)
         print(String(format: "CHIP transcribed %.1f s in %.2f s (%.0f× real time; %.0f× counting only segment work)",
                      transcription.secondsTranscribed, wall, transcription.secondsTranscribed / wall,
@@ -183,5 +186,78 @@ struct ChipHarnessTests {
         let rate = Double(drums.count) / duration
         print(String(format: "CHIP live drums: %.1f/s (kick %d, snare %d, hat %d)", rate, kicks, snares, hats))
         try write(chip, sampleRate: format.sampleRate, suffix: "-live")
+    }
+
+    /// The score with its lead replaced by a vocal melody, from a pitch track (lines of
+    /// "seconds hertz", from the clip's start; 0 Hz is unvoiced) such as MSNet's. Each tick
+    /// takes the median voiced pitch in it; notes hold within 0.8 semitone so vibrato
+    /// doesn't split them, last at least 4 ticks, and short unvoiced gaps are bridged.
+    static func withLead(fromPitchTrack path: String, clipStart: Double, seconds: Double, over score: ChipScore) throws -> ChipScore {
+        let rows = try String(contentsOfFile: path, encoding: .utf8).split(separator: "\n").compactMap { line -> (Double, Double)? in
+            let parts = line.split(separator: " ").compactMap { Double($0) }
+            return parts.count == 2 ? (parts[0], parts[1]) : nil
+        }
+        let first = ChipScore.tick(at: clipStart), last = ChipScore.tick(at: clipStart + seconds)
+        // A pitch per tick, in fractional MIDI notes.
+        var pitches = [Double?](repeating: nil, count: last - first)
+        var row = 0
+        for i in pitches.indices {
+            let from = Double(first + i) * ChipScore.tickSeconds - clipStart, to = from + ChipScore.tickSeconds
+            var voiced: [Double] = [], total = 0
+            while row < rows.count && rows[row].0 < to {
+                if rows[row].0 >= from {
+                    total += 1
+                    if rows[row].1 > 0 { voiced.append(69 + 12 * log2(rows[row].1 / 440)) }
+                }
+                row += 1
+            }
+            if voiced.count * 2 >= max(1, total) { pitches[i] = voiced.sorted()[voiced.count / 2] }
+        }
+        // Into notes.
+        var notes = [Int?](repeating: nil, count: pitches.count)
+        var current: Int?
+        var gap = 0
+        for i in pitches.indices {
+            guard let pitch = pitches[i] else {
+                gap += 1
+                notes[i] = gap <= 3 ? current : nil
+                if gap > 3 { current = nil }
+                continue
+            }
+            gap = 0
+            if let note = current, abs(pitch - Double(note)) < 0.8 {
+                notes[i] = note
+            } else {
+                current = Int(pitch.rounded())
+                notes[i] = current
+            }
+        }
+        // Notes shorter than 4 ticks join the note before them.
+        var i = 0
+        while i < notes.count {
+            var j = i
+            while j < notes.count && notes[j] == notes[i] { j += 1 }
+            if notes[i] != nil && j - i < 4 && i > 0 {
+                for k in i..<j { notes[k] = notes[i - 1] }
+            }
+            i = j
+        }
+
+        let result = ChipScore(duration: Double(score.count) * ChipScore.tickSeconds)
+        for (index, note) in notes.enumerated() {
+            var moment = score.moment(at: first + index) ?? ChipMoment()
+            moment.onsets &= ~ChipMoment.leadOnset
+            if let note {
+                let level = max(moment.leadLevel, moment.bassLevel, moment.chordLevel, 8)
+                moment.lead = UInt8(note)
+                moment.leadLevel = level
+                if index == 0 || notes[index - 1] != note { moment.onsets |= ChipMoment.leadOnset }
+            } else {
+                moment.lead = 0
+                moment.leadLevel = 0
+            }
+            result.write(moment, at: first + index)
+        }
+        return result
     }
 }
