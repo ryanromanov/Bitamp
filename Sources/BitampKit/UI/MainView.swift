@@ -14,6 +14,8 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     var onSkinDropped: ((URL) -> Void)?
 
     private var engine: PlayerEngine { controller.engine }
+    /// Light the EQ and PL buttons as if their windows were open, for screenshots.
+    var drawsPanelsAsOpen = false
     private var marquee = Marquee(visibleWidth: Int(Layout.marquee.width))
 
     // Mouse tracking.
@@ -227,8 +229,8 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         switch button {
         case .shuffle: return controller.shuffle
         case .repeatTrack: return controller.repeats
-        case .equalizer: return windowGroup?.isVisible(.equalizer) ?? false
-        case .playlist: return windowGroup?.isVisible(.playlist) ?? false
+        case .equalizer: return drawsPanelsAsOpen || windowGroup?.isVisible(.equalizer) ?? false
+        case .playlist: return drawsPanelsAsOpen || windowGroup?.isVisible(.playlist) ?? false
         }
     }
 

@@ -58,6 +58,12 @@ final class TrackInfoStore {
         return nil
     }
 
+    /// Sets `url`'s metadata without reading the file. For rendering and tests.
+    func seed(_ metadata: TrackMetadata, for url: URL) {
+        cache[url] = metadata
+        requested.insert(url)
+    }
+
     func displayName(for url: URL) -> String {
         metadata(for: url)?.displayName(for: url) ?? TrackMetadata.fileName(url)
     }
