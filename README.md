@@ -24,6 +24,21 @@ Bitamp isn't affiliated with or endorsed by Winamp or Nullsoft. Its default skin
 - Shade mode for each window (double-click a title bar), and window sizes from 1× to 4×
 - Spectrum and oscilloscope visualizer, shuffle and repeat, `.m3u` playlists
 - Retro Sound (Playback ▸ Retro Sound, or T): an 8-bit crush that plays the song as 8-bit samples, or an experimental chiptune cover that transcribes the song, follows the sung melody for the lead, and plays it on pulse, triangle and noise voices, with some of the original mixed in if you like
+- [Expansion Paks](#expansion-paks): add-ons that bring other music sources into Bitamp, which anyone can write
+
+## Expansion Paks
+
+<p align="center">
+  <img src="docs/images/expansion-paks.png" width="307" alt="The Expansion Paks window: a Demo cartridge plugged into the first of three slots, marked Ready">
+</p>
+
+An Expansion Pak adds a music source to Bitamp: a music server, a radio directory, an archive, anything with songs. Each one is a cartridge in the Expansion Paks window (Window ▸ Expansion Paks, ⌥K). Click a cartridge to search it and add songs to your playlist; they play like local files, with the equalizer, visualizer and Retro Sound. Click the slot under a cartridge to eject it, which switches that source off until you put it back.
+
+To install a Pak, double-click its `.bitpak`, drop it on Bitamp, or use File ▸ Install Expansion Pak…. A Pak is a program, so Bitamp asks first; only install Paks from people you trust.
+
+**Try the demo Pak.** It plays a few public-domain tunes (Ode to Joy, Für Elise, Greensleeves…) as chiptunes, made on your Mac, with a choice of waveform. Build it with `scripts/make-pak.sh` and double-click the `Demo.bitpak` it makes.
+
+**Write your own.** A Pak is a folder with a small manifest and a program that answers a few questions in JSON: search, describe a track, and say where its audio is. Write it in Swift with the `BitampPakSDK` library in this package, or in any language. [Writing an Expansion Pak](docs/PAK-SDK.md) has everything, including a complete Pak in a few dozen lines of Python.
 
 ## Download
 
@@ -38,6 +53,7 @@ swift build            # debug build
 scripts/test.sh        # run tests (wraps swift test; see below)
 scripts/bundle.sh      # release build → Bitamp.app (--universal, --version X.Y.Z)
 open Bitamp.app
+scripts/make-pak.sh    # the demo Expansion Pak → Demo.bitpak (--universal)
 ```
 
 `scripts/screenshots.sh` renders the pictures above (and `social-preview.png`, for the repository's social preview) into `docs/images` from the app's own views, with a made-up playlist.
