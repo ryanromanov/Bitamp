@@ -148,10 +148,33 @@ struct ShowcaseTests {
             try compose(stack(skin, playlistRows: 0), factor: 2).write(to: folder.appendingPathComponent("skin-\(name).png"))
         }
 
+        // The Expansion Paks window with the demo Pak inserted, for the README's Paks section.
+        let preferences = Preferences(defaults: UserDefaults(suiteName: "BitampShowcase-\(UUID().uuidString)")!)
+        let paks = PakRegistry([ShowcasePak()], preferences: preferences)
+        let pakView = PakView(controller: PlaybackController(engine: PlayerEngine(), preferences: preferences, paks: paks),
+                              skin: DefaultSkin(), scale: 1)
+        try compose([Placed(image: try image(pakView), size: pakView.pixelSize, origin: .zero)], factor: 4)
+            .write(to: folder.appendingPathComponent("expansion-paks.png"))
+
         // The social preview GitHub shows for links to the repository: 1280 × 640.
         let main = try stack(DefaultSkin(theme: .orb), playlistRows: 0)
         try compose(Array(main.prefix(1)), factor: 3, background: NSColor(srgbRed: 0.09, green: 0.13, blue: 0.27, alpha: 1),
                     canvas: CGSize(width: 1_280, height: 640))
             .write(to: folder.appendingPathComponent("social-preview.png"))
     }
+}
+
+/// Stands in for the demo Pak in the Expansion Paks picture, without running its program.
+@MainActor
+private final class ShowcasePak: Pak {
+    let id = "demo"
+    let name = "Demo"
+    let schemes: Set<String> = ["bitpak-demo"]
+    let isAvailable = true
+    let account = PakAccount.connected(name: nil)
+    func connect() async throws {}
+    func disconnect() {}
+    func search(_ term: String) async throws -> [PakTrack] { [] }
+    func metadata(for url: URL) async -> PakTrack? { nil }
+    func playback(for url: URL) throws -> PakPlayback { throw CocoaError(.featureUnsupported) }
 }
