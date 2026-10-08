@@ -48,6 +48,26 @@ struct SnapshotTests {
             try save(EqualizerView(controller: controller, skin: skin, scale: 2), "\(name)-eq")
             try save(PlaylistView(controller: controller, preferences: preferences(), skin: skin), "\(name)-playlist")
 
+            // Expansion Paks: one playing, one ejected, one slot empty; and the main window's badge.
+            let paks = PakRegistry([SnapshotPak(id: "jukebox", name: "Jukebox"),
+                                    SnapshotPak(id: "navidrome", name: "Navidrome")], preferences: preferences())
+            paks.setInserted(false, paks.paks[1])
+            let pakController = PlaybackController(engine: PlayerEngine(), preferences: preferences(), paks: paks)
+            pakController.enqueue([URL(string: "jukebox://song/1")!])
+            let pakView = PakView(controller: pakController, skin: skin, scale: 2)
+            for _ in 0..<20 { pakView.tick() }
+            try save(pakView, "\(name)-paks")
+            try save(MainView(controller: pakController, preferences: preferences(), skin: skin), "\(name)-main-pak")
+            try save(EqualizerView(controller: pakController, skin: skin, scale: 2), "\(name)-eq-pak")
+
+            // Four Paks: a second row.
+            let many = PakRegistry(["Jukebox", "Demo", "Navidrome", "Internet Radio"].map {
+                SnapshotPak(id: $0.lowercased().replacingOccurrences(of: " ", with: "-"), name: $0)
+            }, preferences: preferences())
+            let manyView = PakView(controller: PlaybackController(engine: PlayerEngine(), preferences: preferences(), paks: many),
+                                   skin: skin, scale: 2)
+            try save(manyView, "\(name)-paks-rows")
+
             // The shade strips.
             let views: [(String, SkinnedView)] = [
                 ("main", MainView(controller: controller, preferences: preferences(), skin: skin)),
@@ -60,4 +80,39 @@ struct SnapshotTests {
             }
         }
     }
+}
+
+/// A Pak that "plays" anything in its scheme, for the Expansion Paks snapshots.
+@MainActor
+private final class SnapshotPak: Pak, PlaybackBackend {
+    let id: String
+    let name: String
+    var schemes: Set<String> { [id] }
+    let isAvailable = true
+    let account = PakAccount.connected(name: nil)
+    private(set) var state = PlaybackState.stopped
+    private(set) var nowPlaying: NowPlaying?
+    let currentTime: Double = 83
+    let capabilities: PlaybackCapabilities = []
+    var onTrackEnd: (() -> Void)?
+    var onLoadFailure: ((Error) -> Void)?
+
+    init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+
+    func connect() async throws {}
+    func disconnect() {}
+    func search(_ term: String) async throws -> [PakTrack] { [] }
+    func metadata(for url: URL) async -> PakTrack? { nil }
+    func playback(for url: URL) throws -> PakPlayback { .backend(self) }
+
+    func load(_ url: URL) throws {
+        nowPlaying = NowPlaying(url: url, title: "Heroes (feat. Mindy Jones)", artist: "Moby", duration: 317)
+    }
+    func play() { state = .playing }
+    func pause() {}
+    func stop() { state = .stopped }
+    func seek(to seconds: Double) {}
 }

@@ -42,6 +42,11 @@ final class Canvas {
         fill(x + w - 1, y, 1, h, dark)
     }
 
+    /// Darkens `rect`, for controls that do nothing right now.
+    func dim(_ rect: CGRect) {
+        fill(rect, CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.6))
+    }
+
     /// Draws `image` upright with its top-left corner at (x, y).
     func draw(_ image: CGImage, _ x: Int, _ y: Int) {
         context.saveGState()

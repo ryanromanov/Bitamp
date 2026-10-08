@@ -1,16 +1,29 @@
 import AppKit
+import BitampPakProtocol
 import UniformTypeIdentifiers
 
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let preferences = Preferences()
-    private lazy var controller = PlaybackController(engine: PlayerEngine(), preferences: preferences)
+    private let builtInPaks: [Pak]
+    private lazy var pakLibrary = PakLibrary()
+    /// The built-in Paks, then the installed ones by name.
+    private lazy var paks = PakRegistry(builtInPaks + pakLibrary.installed(), preferences: preferences)
+    private var pakView: PakView?
+    private var settingsPanels: [String: PakSettingsPanel] = [:]
+    private lazy var controller = PlaybackController(engine: PlayerEngine(), preferences: preferences, paks: paks)
+    /// "Add from…" panels, by Pak id, made when first opened.
+    private var searchPanels: [String: PakSearchPanel] = [:]
     private var windowGroup: WindowGroup?
     private var mainView: MainView?
     private var views: [SkinnedView] = []
     private let skinsMenu = NSMenu(title: "Skins")
+    /// Rebuilt as it opens, since its "Add from…" items follow the installed Paks.
+    private let fileMenu = NSMenu(title: "File")
 
-    public override init() {
+    /// `paks` are the Expansion Paks built into this copy of Bitamp.
+    public init(paks: [Pak] = []) {
+        builtInPaks = paks
         super.init()
     }
 
@@ -30,18 +43,32 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let equalizerView = EqualizerView(controller: controller, skin: skin, scale: CGFloat(preferences.scale))
         let playlistView = PlaylistView(controller: controller, preferences: preferences, skin: skin)
         playlistView.keyFallback = mainView
-        for view in [equalizerView, playlistView] as [SkinnedView] {
+        let pakView = PakView(controller: controller, skin: skin, scale: CGFloat(preferences.scale))
+        pakView.onSearch = { [weak self] pak in self?.showSearch(pak) }
+        pakView.onSettings = { [weak self] pak in self?.showSettings(pak) }
+        pakView.onInstall = { [weak self] url in self?.installPak(url) }
+        pakView.onRemove = { [weak self] pak in self?.removePak(pak) }
+        mainView.onPakDropped = { [weak self] url in self?.installPak(url) }
+        self.pakView = pakView
+        // An ejected Pak's search closes with it.
+        pakView.onInsertedChange = { [weak self] pak, inserted in
+            if !inserted { self?.searchPanels[pak.id]?.close() }
+        }
+        mainView.onShowPaks = { [weak self] in self?.windowGroup?.setVisible(.paks, true) }
+        for view in [equalizerView, playlistView, pakView] as [SkinnedView] {
             view.announce = mainView.announce
+            view.flashMessage = { [weak mainView] message in mainView?.flash(message, for: 2) }
         }
 
         let main = SkinnedWindow(view: mainView, layoutName: "MainWindow", isMain: true)
         let panels: [WindowGroup.Panel: SkinnedWindow] = [
             .equalizer: SkinnedWindow(view: equalizerView, layoutName: "EqualizerWindow", isMain: false),
             .playlist: SkinnedWindow(view: playlistView, layoutName: "PlaylistWindow", isMain: false),
+            .paks: SkinnedWindow(view: pakView, layoutName: "PaksWindow", isMain: false),
         ]
         for window in panels.values { window.actionFallback = mainView }
         let group = WindowGroup(main: main, panels: panels)
-        views = [mainView, equalizerView, playlistView]
+        views = [mainView, equalizerView, playlistView, pakView]
         for view in views {
             view.windowGroup = group
         }
@@ -61,11 +88,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public func applicationWillTerminate(_ notification: Notification) {
         controller.saveSession()
         windowGroup?.saveLayout()
+        for pak in paks.paks { (pak as? ExternalPak)?.disconnect() }
     }
 
     public func application(_ application: NSApplication, open urls: [URL]) {
         if let skin = urls.first(where: SkinLibrary.isSkin) {
             installSkin(skin)
+        } else if let pak = urls.first(where: PakLibrary.isPak) {
+            installPak(pak)
         } else {
             controller.open(urls)
         }
@@ -88,6 +118,95 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.allowsMultipleSelection = true
         guard panel.runModal() == .OK else { return }
         controller.open(panel.urls)
+    }
+
+    // MARK: - Expansion Paks
+
+    @objc private func chooseExpansionPak(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.message = "Choose a .bitpak to install."
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.treatsFilePackagesAsDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        installPak(url)
+    }
+
+    /// Asks first, since a Pak is a program, then installs (or updates) it and shows it in
+    /// the Expansion Paks window.
+    private func installPak(_ url: URL) {
+        let manifest: PakManifest
+        do {
+            guard PakLibrary.isPak(url) else { throw PakLibrary.InstallError.noManifest }
+            manifest = try PakLibrary.manifest(in: url)
+        } catch {
+            showPakError("“\(url.lastPathComponent)” isn't an Expansion Pak Bitamp can install.", error)
+            return
+        }
+        let existing = paks.paks.first { $0.id == manifest.id } as? ExternalPak
+        let alert = NSAlert()
+        alert.messageText = existing == nil
+            ? "Install the “\(manifest.name)” Expansion Pak?"
+            : "Replace the installed “\(existing!.name)” Pak with version \(manifest.version)?"
+        alert.informativeText = [manifest.description,
+            "A Pak is a program that runs on your Mac with your permissions. Only install Paks from people you trust."]
+            .compactMap { $0 }.joined(separator: "\n\n")
+        alert.addButton(withTitle: existing == nil ? "Install" : "Replace")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        do {
+            if let existing { unloadPak(existing) }
+            try pakLibrary.install(url, reservedIDs: Set(builtInPaks.map(\.id)))
+            guard let installed = pakLibrary.installed().first(where: { $0.id == manifest.id }) else { return }
+            paks.register(installed)
+            pakView?.paksChanged()
+            windowGroup?.setVisible(.paks, true)
+            mainView?.flash("\(installed.name) PAK INSTALLED", for: 2)
+            if installed.hasSettings && installed.account == .disconnected { showSettings(installed) }
+        } catch {
+            showPakError("The “\(manifest.name)” Pak couldn't be installed.", error)
+        }
+    }
+
+    private func removePak(_ pak: ExternalPak) {
+        let alert = NSAlert()
+        alert.messageText = "Remove the “\(pak.name)” Expansion Pak?"
+        alert.informativeText = "Its songs stay in your playlist but won't play. Its settings are forgotten."
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        unloadPak(pak)
+        do {
+            try pakLibrary.remove(pak)
+        } catch {
+            showPakError("The “\(pak.name)” Pak couldn't be removed.", error)
+        }
+        pakView?.paksChanged()
+        mainView?.flash("\(pak.name) PAK REMOVED", for: 2)
+    }
+
+    /// Stops a third-party Pak and takes it out of Bitamp, before it's replaced or removed.
+    private func unloadPak(_ pak: ExternalPak) {
+        if controller.playingPak === pak { controller.stop() }
+        pak.disconnect()
+        searchPanels.removeValue(forKey: pak.id)?.close()
+        settingsPanels.removeValue(forKey: pak.id)?.close()
+        paks.unregister(pak)
+    }
+
+    private func showSettings(_ pak: ExternalPak) {
+        let panel = settingsPanels[pak.id] ?? PakSettingsPanel(pak: pak)
+        settingsPanels[pak.id] = panel
+        panel.show()
+    }
+
+    private func showPakError(_ message: String, _ error: Error) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = message
+        alert.informativeText = error.localizedDescription
+        alert.runModal()
     }
 
     // MARK: - Skins
@@ -227,6 +346,46 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowGroup?.toggle(.playlist)
     }
 
+    @objc func searchPak(_ sender: NSMenuItem) {
+        if let pak = pak(for: sender) { showSearch(pak) }
+    }
+
+    /// The Pak a File menu item names, by id.
+    private func pak(for item: NSMenuItem) -> Pak? {
+        paks.paks.first { $0.id == item.representedObject as? String }
+    }
+
+    private func rebuildFileMenu() {
+        let open = Menus.item("Open…", #selector(openDocument(_:)), "o", [.command])
+        let addFromPaks = paks.paks.map { pak -> NSMenuItem in
+            let item = Menus.item("Add from \(pak.name)…", #selector(searchPak(_:)))
+            item.representedObject = pak.id
+            return item
+        }
+        // The first Pak gets ⇧⌘A.
+        if let first = addFromPaks.first {
+            first.keyEquivalent = "a"
+            first.keyEquivalentModifierMask = [.command, .shift]
+        }
+        let installPak = Menus.item("Install Expansion Pak…", #selector(chooseExpansionPak(_:)))
+        fileMenu.removeAllItems()
+        for item in [open, .separator()] + addFromPaks + [installPak] {
+            if !item.isSeparatorItem { item.target = self }
+            fileMenu.addItem(item)
+        }
+    }
+
+    @objc private func togglePaks(_ sender: Any?) {
+        windowGroup?.toggle(.paks)
+    }
+
+    private func showSearch(_ pak: Pak) {
+        guard pak.isAvailable, paks.isInserted(pak) else { return }
+        let panel = searchPanels[pak.id] ?? PakSearchPanel(pak: pak, controller: controller)
+        searchPanels[pak.id] = panel
+        panel.show()
+    }
+
     private func makeMainMenu() -> NSMenu {
         let appMenu = Menus.menu("Bitamp", [
             Menus.item("About Bitamp", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
@@ -235,9 +394,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             Menus.item("Quit Bitamp", #selector(NSApplication.terminate(_:)), "q", [.command]),
         ])
 
-        let open = Menus.item("Open…", #selector(openDocument(_:)), "o", [.command])
-        open.target = self
-        let fileMenu = Menus.menu("File", [open])
+        rebuildFileMenu()
+        fileMenu.delegate = self
 
         // Select All reaches the playlist when it has focus.
         let editMenu = Menus.menu("Edit", [
@@ -249,6 +407,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let mainWindow = Menus.item("Main Window", #selector(toggleMainWindow(_:)), "w", [.option])
         let equalizer = Menus.item("Equalizer", #selector(toggleEqualizer(_:)), "g", [.option])
         let playlist = Menus.item("Playlist", #selector(togglePlaylist(_:)), "e", [.option])
+        let paksWindow = Menus.item("Expansion Paks", #selector(togglePaks(_:)), "k", [.option])
         let regroup = Menus.item("Regroup Windows", #selector(regroupWindows(_:)), "r", [.option])
         let minimize = Menus.item("Minimize", #selector(minimize(_:)), "m", [.command])
         let sizes = SkinnedView.scales.map { scale -> NSMenuItem in
@@ -262,9 +421,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let equalizerShade = Menus.item("Shade Equalizer", #selector(toggleEqualizerShade(_:)), "w", [.control, .option])
         let playlistShade = Menus.item("Shade Playlist", #selector(togglePlaylistShade(_:)), "w", [.control, .shift])
         let shadows = Menus.item("Window Shadows", #selector(toggleShadows(_:)))
-        for item in [mainWindow, equalizer, playlist, regroup, minimize, equalizerShade, playlistShade, shadows] { item.target = self }
+        for item in [mainWindow, equalizer, playlist, paksWindow, regroup, minimize, equalizerShade, playlistShade, shadows] { item.target = self }
         let windowMenu = Menus.menu("Window", [
-            mainWindow, equalizer, playlist, regroup, .separator(),
+            mainWindow, equalizer, playlist, paksWindow, regroup, .separator(),
             mainShade, equalizerShade, playlistShade, .separator(),
             Menus.submenu(Menus.menu("Size", sizes)), shadows, .separator(),
             minimize,
@@ -281,6 +440,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 extension AppDelegate: NSMenuDelegate {
     public func menuNeedsUpdate(_ menu: NSMenu) {
         if menu === skinsMenu { rebuildSkinsMenu() }
+        if menu === fileMenu { rebuildFileMenu() }
     }
 }
 
@@ -292,8 +452,12 @@ extension AppDelegate: NSMenuItemValidation {
             return windowGroup.map { !$0.isMainVisible || $0.canHideMain } ?? false
         case #selector(toggleEqualizer(_:)): item.state = windowGroup?.isVisible(.equalizer) == true ? .on : .off
         case #selector(togglePlaylist(_:)): item.state = windowGroup?.isVisible(.playlist) == true ? .on : .off
+        case #selector(togglePaks(_:)): item.state = windowGroup?.isVisible(.paks) == true ? .on : .off
         case #selector(setScale(_:)): item.state = item.tag == preferences.scale ? .on : .off
         case #selector(toggleShadows(_:)): item.state = preferences.windowShadows ? .on : .off
+        case #selector(searchPak(_:)):
+            guard let pak = pak(for: item) else { return false }
+            return pak.isAvailable && paks.isInserted(pak)
         case #selector(toggleEqualizerShade(_:)):
             item.state = windowGroup.map { $0.isShaded(.equalizer) } == true ? .on : .off
             return windowGroup?.isVisible(.equalizer) == true

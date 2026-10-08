@@ -124,8 +124,8 @@ final class PlaylistView: SkinnedView {
         let runningTime = PlaylistLayout.runningTime(in: size)
         drawPixelText(c, runningTimeText, Int(runningTime.x), Int(runningTime.y))
         let miniTime = PlaylistLayout.miniTime(in: size)
-        if controller.engine.state != .stopped {
-            drawPixelText(c, TimeFormat.clock(controller.engine.currentTime), Int(miniTime.x), Int(miniTime.y))
+        if controller.player.state != .stopped {
+            drawPixelText(c, TimeFormat.clock(controller.player.currentTime), Int(miniTime.x), Int(miniTime.y))
         }
     }
 
