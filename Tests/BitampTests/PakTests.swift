@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import Testing
+@testable import BitampAppleMusicPak
 @testable import BitampKit
 
 /// A Pak whose tracks are `fake://song/<n>` and that plays them on its own backend, as a
@@ -304,5 +305,25 @@ private final class FakeBackend: PlaybackBackend {
         }
         #expect(controller.info.displayName(for: one) == "Fake Artist - Song 1")
         #expect(controller.info.duration(for: one) == 180)
+    }
+}
+
+@Suite struct AppleMusicURLTests {
+    @Test func roundTrips() {
+        for reference in [
+            AppleMusicURL(source: .library, id: "i.JR6ot3zOR1O"),
+            AppleMusicURL(source: .library, id: "-7499768453939934178"),
+            AppleMusicURL(source: .catalog, id: "1440857781"),
+        ] {
+            #expect(AppleMusicURL(reference.url) == reference)
+        }
+        #expect(AppleMusicURL(source: .catalog, id: "1440857781").url.absoluteString == "applemusic://catalog/song/1440857781")
+    }
+
+    @Test func rejectsOtherURLs() {
+        for text in ["applemusic://catalog/album/1", "applemusic://radio/song/1", "applemusic://catalog/song/",
+                     "fake://catalog/song/1", "file:///catalog/song/1"] {
+            #expect(AppleMusicURL(URL(string: text)!) == nil, "\(text)")
+        }
     }
 }

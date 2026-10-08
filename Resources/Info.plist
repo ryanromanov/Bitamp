@@ -28,6 +28,8 @@
     <string>public.app-category.music</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAppleMusicUsageDescription</key>
+    <string>Bitamp plays songs from your Apple Music library and catalog.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSHumanReadableCopyright</key>
