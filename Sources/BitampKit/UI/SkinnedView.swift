@@ -17,6 +17,8 @@ class SkinnedView: NSView {
     weak var windowGroup: WindowGroup?
     /// Shows a message in the main window's marquee, or nil to clear it.
     var announce: ((String?) -> Void)?
+    /// Shows a message in the main window's marquee for a few seconds.
+    var flashMessage: ((String) -> Void)?
     private(set) var canvas: Canvas
     private(set) var frameCount = 0
     private var timer: Timer?

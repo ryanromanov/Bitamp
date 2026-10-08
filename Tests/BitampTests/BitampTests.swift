@@ -509,6 +509,23 @@ import Testing
 }
 
 @Suite struct M3UTests {
+    @Test func readsTitlesAndDurationsBack() {
+        let text = """
+        #EXTM3U
+        #EXTINF:61,X - One
+        /a/One.mp3
+        #EXTINF:-1,Two
+        /a/Two.mp3
+        /a/Three.mp3
+        #EXTINF:200,Moby - Heroes, Reprise
+        radio://station/i.RBWoDFZzENpE
+        """
+        let entries = M3U.parseEntries(text, relativeTo: URL(fileURLWithPath: "/"), schemes: ["radio"])
+        #expect(entries.map(\.title) == ["X - One", "Two", nil, "Moby - Heroes, Reprise"])
+        #expect(entries.map(\.duration) == [61, nil, nil, 200])
+        #expect(entries[3].url.absoluteString == "radio://station/i.RBWoDFZzENpE")
+    }
+
     @Test func parsesAbsoluteRelativeAndWindowsPaths() {
         let base = URL(fileURLWithPath: "/Users/me/Music/Lists")
         let text = """

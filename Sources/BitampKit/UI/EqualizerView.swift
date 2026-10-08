@@ -80,6 +80,10 @@ final class EqualizerView: SkinnedView {
         for (index, gain) in settings.bands.enumerated() {
             drawSlider(c, .band(index), gain)
         }
+        if controller.limitation(.equalizer) != nil {
+            c.dim(CGRect(x: 0, y: EQLayout.titleBar.maxY, width: EQLayout.size.width,
+                         height: EQLayout.size.height - EQLayout.titleBar.maxY))
+        }
     }
 
     private func renderShade(_ c: Canvas) {
@@ -93,6 +97,10 @@ final class EqualizerView: SkinnedView {
                Int(ShadeSlider.volume.geometry.thumbStart(for: volume)), y)
         c.draw(skin.image(for: .eqShadeBalanceThumb(ShadeThumb(balance))),
                Int(ShadeSlider.balance.geometry.thumbStart(for: balance)), y)
+        if controller.limitation(.volume) != nil {
+            c.dim(ShadeLayout.eqVolume)
+            c.dim(ShadeLayout.eqBalance)
+        }
     }
 
     private func isPressed(_ control: EQLayout.Control) -> Bool {
@@ -162,6 +170,15 @@ final class EqualizerView: SkinnedView {
             return false
         }
         switch control {
+        case .preamp, .band, .button:
+            if let limitation = controller.limitation(.equalizer) {
+                flashMessage?(limitation)
+                return true
+            }
+        default:
+            break
+        }
+        switch control {
         case .preamp, .band:
             let geometry = VerticalSliderGeometry(track: control.rect, thumbHeight: EQLayout.thumb.height)
             let thumbY = geometry.thumbY(for: value(of: control))
@@ -185,6 +202,10 @@ final class EqualizerView: SkinnedView {
             pressed = .shade
         } else if EQLayout.close.contains(point) {
             pressed = .close
+        } else if ShadeLayout.eqVolume.contains(point) || ShadeLayout.eqBalance.contains(point),
+                  let limitation = controller.limitation(.volume) {
+            flashMessage?(limitation)
+            return true
         } else if ShadeLayout.eqVolume.contains(point) {
             shadeSlider = .volume
         } else if ShadeLayout.eqBalance.contains(point) {

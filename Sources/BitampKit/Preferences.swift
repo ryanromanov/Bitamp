@@ -125,6 +125,12 @@ final class Preferences {
         set { encode(newValue, Key.customPresets) }
     }
 
+    /// Ids of the Expansion Paks the user has ejected. Every Pak starts inserted.
+    var ejectedPaks: Set<String> {
+        get { Set(defaults.stringArray(forKey: Key.ejectedPaks) ?? []) }
+        set { defaults.set(newValue.sorted(), forKey: Key.ejectedPaks) }
+    }
+
     /// The current track's index in the saved queue.
     var queueIndex: Int? {
         get { defaults.object(forKey: Key.queueIndex) as? Int }
@@ -181,5 +187,6 @@ final class Preferences {
         static let skinName = "skin"
         static let scale = "scale"
         static let windowShadows = "windowShadows"
+        static let ejectedPaks = "ejectedPaks"
     }
 }

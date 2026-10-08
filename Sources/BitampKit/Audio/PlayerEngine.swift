@@ -5,27 +5,20 @@ import AVFoundation
 /// Pausing and seeking stop the player node and reschedule from a frame, so the
 /// position is always `startFrame` plus however far the node has played since.
 @MainActor
-final class PlayerEngine {
-    enum State {
-        case stopped, playing, paused
-    }
-
-    struct Track {
-        let url: URL
-        var title: String
-        var artist: String?
-        let duration: Double
-        let sampleRate: Double
-        let channels: Int
-        var kbps: Int?
-    }
+final class PlayerEngine: PlaybackBackend {
+    typealias State = PlaybackState
+    typealias Track = NowPlaying
 
     static let eqFrequencies: [Float] = [60, 170, 310, 600, 1_000, 3_000, 6_000, 12_000, 14_000, 16_000]
 
     private(set) var state = State.stopped
     private(set) var track: Track?
+    var nowPlaying: NowPlaying? { track }
+    let capabilities = PlaybackCapabilities.all
     /// Called after a track plays to the end and the engine has stopped.
     var onTrackEnd: (() -> Void)?
+    /// Never called: the engine knows at `load` whether a file opens.
+    var onLoadFailure: ((Error) -> Void)?
     let analyzer = SpectrumAnalyzer()
 
     /// 0...1, applied on a squared curve so the slider feels even.
@@ -134,6 +127,25 @@ final class PlayerEngine {
     }
 
     private var stagedTime: Double?
+
+    /// Stops and forgets the loaded file, so nothing shows as loaded.
+    func unload() {
+        stop()
+        transcription?.cancel()
+        transcription = nil
+        file = nil
+        track = nil
+        stagedTime = nil
+    }
+
+    /// Shows a title and artist other than the file's own, such as a Pak's for a file it
+    /// fetched. Tags the file turns out to have still win.
+    func retitle(_ title: String?, artist: String?) {
+        guard var track else { return }
+        if let title { track.title = title }
+        if let artist { track.artist = artist }
+        self.track = track
+    }
 
     func load(_ url: URL) throws {
         stagedTime = nil

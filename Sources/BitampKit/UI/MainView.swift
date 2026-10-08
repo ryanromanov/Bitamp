@@ -12,8 +12,13 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     var onOpen: (() -> Void)?
     /// Installs and applies a dropped `.wsz` skin.
     var onSkinDropped: ((URL) -> Void)?
+    /// Shows the Expansion Paks window.
+    var onShowPaks: (() -> Void)?
+    /// Installs a dropped `.bitpak`.
+    var onPakDropped: ((URL) -> Void)?
 
-    private var engine: PlayerEngine { controller.engine }
+    /// Whatever plays the current track: Bitamp's engine or a Pak.
+    private var player: PlaybackBackend { controller.player }
     /// Light the EQ and PL buttons as if their windows were open, for screenshots.
     var drawsPanelsAsOpen = false
     private var marquee = Marquee(visibleWidth: Int(Layout.marquee.width))
@@ -72,11 +77,14 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     override func tick() {
         marquee.setText(titleText)
         marquee.tick()
-        engine.analyzer.advance()
+        controller.engine.analyzer.advance()
     }
 
     private var titleText: String {
-        guard let track = engine.track else {
+        if let fetching = controller.fetching {
+            return "LOADING \(controller.info.displayName(for: fetching))..."
+        }
+        guard let track = player.nowPlaying else {
             return "BITAMP - DROP FILES OR FOLDERS HERE, OR PRESS L TO OPEN"
         }
         let name = [track.artist, track.title].compactMap { $0 }.joined(separator: " - ")
@@ -127,9 +135,10 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         drawMarquee(c, in: OrbLayout.marquee)
 
         // Bitrate, sample rate and channels, one per line beside the time.
-        if let track = engine.track {
-            let khz = Int((track.sampleRate / 1000).rounded())
-            let lines = [track.kbps.map { "\($0) KBPS" } ?? "", "\(khz) KHZ", track.channels == 1 ? "MONO" : "STEREO"]
+        if let track = player.nowPlaying {
+            let khz = track.sampleRate.map { "\(Int(($0 / 1000).rounded())) KHZ" } ?? ""
+            let channels = track.channels.map { $0 == 1 ? "MONO" : "STEREO" } ?? ""
+            let lines = [track.kbps.map { "\($0) KBPS" } ?? "", khz, channels]
             for (index, line) in lines.enumerated() {
                 drawPixelText(c, line, Int(OrbLayout.info.x), Int(OrbLayout.info.y) + index * OrbLayout.infoLineHeight)
             }
@@ -137,8 +146,8 @@ final class MainView: SkinnedView, NSMenuItemValidation {
 
         // Seek: a filled groove up to the thumb.
         let groove = OrbLayout.positionGroove
-        if canSeek, let track = engine.track {
-            let progress = pendingSeek ?? engine.currentTime / track.duration
+        if canSeek, let track = player.nowPlaying {
+            let progress = pendingSeek ?? player.currentTime / track.duration
             let x = Int(geometry(for: .position).thumbStart(for: progress))
             c.fill(Int(groove.minX), Int(groove.minY), x - Int(groove.minX), Int(groove.height), orb.fill)
             c.fill(Int(groove.minX), Int(groove.minY), x - Int(groove.minX), 1, orb.fillShine)
@@ -153,6 +162,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         c.fill(Int(volumeGroove.minX), thumbBottom, Int(volumeGroove.width), filled, orb.fill)
         c.fill(Int(volumeGroove.minX), thumbBottom, 1, filled, orb.fillShine)
         c.draw(orb.volumeThumb(pressed: slider?.control == .volume), Int(OrbLayout.volume.minX), y)
+        if controller.limitation(.volume) != nil { c.dim(OrbLayout.volume) }
 
         for button in TransportButton.allCases {
             c.draw(orb.transport(button, pressed: isPressed(.transport(button))), at: OrbLayout.rect(of: button).origin)
@@ -176,8 +186,8 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         drawShadeVisualizer(c)
         drawShadeTime(c)
         c.draw(skin.image(for: .mainShadePosition), at: ShadeLayout.mainPosition.origin)
-        if canSeek, let track = engine.track {
-            let progress = pendingSeek ?? engine.currentTime / track.duration
+        if canSeek, let track = player.nowPlaying {
+            let progress = pendingSeek ?? player.currentTime / track.duration
             let x = geometry(for: .position).thumbStart(for: progress)
             c.draw(skin.image(for: .mainShadeThumb(ShadeThumb(progress))), Int(x), Int(ShadeLayout.mainPosition.minY))
         }
@@ -188,7 +198,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         let (x0, y0, height) = (Int(rect.minX), Int(rect.minY), Int(rect.height))
         let colors = skin.visColors
         c.fill(rect, colors[0])
-        let analyzer = engine.analyzer
+        let analyzer = controller.engine.analyzer
         switch preferences.visMode {
         case .spectrum:
             for i in 0..<SpectrumAnalyzer.barCount {
@@ -210,8 +220,8 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     }
 
     private func drawShadeTime(_ c: Canvas) {
-        let blinkOff = engine.state == .paused && frameCount / 15 % 2 == 1
-        guard let track = engine.track, engine.state != .stopped, !blinkOff else { return }
+        let blinkOff = player.state == .paused && frameCount / 15 % 2 == 1
+        guard let track = player.nowPlaying, player.state != .stopped, !blinkOff else { return }
         let elapsed = currentTime(of: track)
         let showRemaining = preferences.showRemaining
         let digits = TimeFormat.lcdDigits(showRemaining ? max(0, track.duration - elapsed) : elapsed)
@@ -236,7 +246,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
 
     private func drawTime(_ c: Canvas, status statusOrigin: CGPoint, minus: CGPoint, digits: [CGPoint]) {
         let status: PlayStatus
-        switch engine.state {
+        switch player.state {
         case .playing: status = .playing
         case .paused: status = .paused
         case .stopped: status = .stopped
@@ -244,8 +254,8 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         c.draw(skin.image(for: .playStatus(status)), at: statusOrigin)
 
         // Blank while stopped, and blinking while paused.
-        let blinkOff = engine.state == .paused && frameCount / 15 % 2 == 1
-        guard let track = engine.track, engine.state != .stopped, !blinkOff else {
+        let blinkOff = player.state == .paused && frameCount / 15 % 2 == 1
+        guard let track = player.nowPlaying, player.state != .stopped, !blinkOff else {
             for point in digits {
                 c.draw(skin.image(for: .digit(SkinElement.blankDigit)), at: point)
             }
@@ -262,10 +272,41 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         }
     }
 
-    /// The engine's position, or where the user is dragging the position thumb.
-    private func currentTime(of track: PlayerEngine.Track) -> Double {
+    /// The player's position, or where the user is dragging the position thumb.
+    private func currentTime(of track: NowPlaying) -> Double {
         if let pendingSeek { return pendingSeek * track.duration }
-        return engine.currentTime
+        return player.currentTime
+    }
+
+    /// The Pak playing audio Bitamp can't see, which the visualizer names instead of
+    /// lying flat.
+    private var badgePak: Pak? {
+        guard player.state != .stopped, !player.capabilities.contains(.visualizer) else { return nil }
+        return controller.playingPak
+    }
+
+    /// A small cartridge and the Pak's name, in the visualizer's colors so any skin suits it.
+    private func drawPakBadge(_ c: Canvas, _ pak: Pak, in rect: CGRect) {
+        let colors = skin.visColors
+        let (x0, y0, height) = (Int(rect.minX), Int(rect.minY), Int(rect.height))
+        let top = y0 + (height - 12) / 2
+        // The cartridge: 9×12, shoulders, ridges and a label.
+        let body = colors[2 + 15 / 2], label = colors[2]
+        c.fill(x0 + 3, top, 9, 12, body)
+        c.fill(x0 + 5, top + 1, 5, 1, colors[0])
+        c.fill(x0 + 4, top + 4, 7, 5, label)
+        c.fill(x0 + 3, top + 11, 1, 1, colors[0])
+        c.fill(x0 + 11, top + 11, 1, 1, colors[0])
+
+        let textX = x0 + 16
+        let fit = max(0, (Int(rect.width) - 17) / PixelFont.cellWidth)
+        let name = String(pak.name.uppercased().prefix(fit))
+        if height >= 14 {
+            c.text(name, textX, y0 + height / 2 - 6, colors[2])
+            c.text("PAK", textX, y0 + height / 2 + 1, colors[2 + 15 / 2])
+        } else {
+            c.text(name, textX, y0 + (height - 5) / 2, colors[2])
+        }
     }
 
     /// The analyzer or oscilloscope in `rect`, which is 16 pixels tall; wider rects get
@@ -274,6 +315,10 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         let (x0, y0) = (Int(rect.minX), Int(rect.minY))
         let colors = skin.visColors
         c.fill(rect, colors[0])
+        if let pak = badgePak {
+            drawPakBadge(c, pak, in: rect)
+            return
+        }
         let mode = preferences.visMode
         guard mode != .off else { return }
         for y in stride(from: 1, to: Int(rect.height), by: 2) {
@@ -283,7 +328,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         }
 
         let height = Int(rect.height)
-        let analyzer = engine.analyzer
+        let analyzer = controller.engine.analyzer
         switch mode {
         case .spectrum:
             let showPeaks = preferences.showPeaks
@@ -343,7 +388,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     }
 
     private func drawTrackInfo(_ c: Canvas) {
-        guard let track = engine.track else {
+        guard let track = player.nowPlaying else {
             c.draw(skin.image(for: .mono(active: false)), at: Layout.mono.origin)
             c.draw(skin.image(for: .stereo(active: false)), at: Layout.stereo.origin)
             return
@@ -353,10 +398,12 @@ final class MainView: SkinnedView, NSMenuItemValidation {
             let text = kbps < 1000 ? String(kbps) : "\(kbps / 100)H"
             drawRightAligned(c, text, in: Layout.kbps)
         }
-        let khz = Int((track.sampleRate / 1000).rounded())
-        drawRightAligned(c, String(String(khz).prefix(2)), in: Layout.khz)
+        if let sampleRate = track.sampleRate {
+            let khz = Int((sampleRate / 1000).rounded())
+            drawRightAligned(c, String(String(khz).prefix(2)), in: Layout.khz)
+        }
         c.draw(skin.image(for: .mono(active: track.channels == 1)), at: Layout.mono.origin)
-        c.draw(skin.image(for: .stereo(active: track.channels > 1)), at: Layout.stereo.origin)
+        c.draw(skin.image(for: .stereo(active: (track.channels ?? 0) > 1)), at: Layout.stereo.origin)
     }
 
     private func drawRightAligned(_ c: Canvas, _ text: String, in rect: CGRect) {
@@ -377,16 +424,21 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         let balanceX = SliderGeometry.balance.thumbStart(for: BalanceMapping.slider(fromBalance: controller.balance))
         c.draw(skin.image(for: .balanceThumb(pressed: slider?.control == .balance)), Int(balanceX), Int(Layout.balance.minY) + 1)
 
+        if controller.limitation(.volume) != nil {
+            c.dim(Layout.volume)
+            c.dim(Layout.balance)
+        }
+
         c.draw(skin.image(for: .positionBackground), at: Layout.position.origin)
-        if canSeek, let track = engine.track {
-            let progress = pendingSeek ?? engine.currentTime / track.duration
+        if canSeek, let track = player.nowPlaying {
+            let progress = pendingSeek ?? player.currentTime / track.duration
             let x = SliderGeometry.position.thumbStart(for: progress)
             c.draw(skin.image(for: .positionThumb(pressed: pendingSeek != nil)), Int(x), Int(Layout.position.minY))
         }
     }
 
     private var canSeek: Bool {
-        engine.state != .stopped && (engine.track?.duration ?? 0) > 0
+        player.state != .stopped && (player.nowPlaying?.duration ?? 0) > 0
     }
 
     // MARK: - Mouse
@@ -402,10 +454,18 @@ final class MainView: SkinnedView, NSMenuItemValidation {
             return false
         }
         switch control {
-        case .volume, .balance, .position:
+        case .volume, .balance:
+            if let limitation = controller.limitation(.volume) {
+                marquee.flash(limitation, for: 2)
+            } else {
+                beginSliderDrag(control, at: point)
+            }
+        case .position:
             beginSliderDrag(control, at: point)
         case .timeDisplay:
             preferences.showRemaining.toggle()
+        case .visualizer where badgePak != nil:
+            onShowPaks?()
         case .visualizer:
             let modes = VisMode.allCases
             preferences.visMode = modes[(modes.firstIndex(of: preferences.visMode)! + 1) % modes.count]
@@ -426,8 +486,8 @@ final class MainView: SkinnedView, NSMenuItemValidation {
 
     override func pixelMouseUp(at point: CGPoint, event: NSEvent) {
         if let slider {
-            if slider.control == .position, let pendingSeek, let track = engine.track {
-                engine.seek(to: pendingSeek * track.duration)
+            if slider.control == .position, let pendingSeek, let track = player.nowPlaying {
+                player.seek(to: pendingSeek * track.duration)
             }
             self.slider = nil
             pendingSeek = nil
@@ -477,8 +537,8 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         case .volume: return controller.volume
         case .balance: return BalanceMapping.slider(fromBalance: controller.balance)
         default:
-            guard let track = engine.track, track.duration > 0 else { return 0 }
-            return engine.currentTime / track.duration
+            guard let track = player.nowPlaying, track.duration > 0 else { return 0 }
+            return player.currentTime / track.duration
         }
     }
 
@@ -510,7 +570,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
                 ? "BALANCE: CENTER"
                 : "BALANCE: \(Int((abs(balance) * 100).rounded()))% \(balance < 0 ? "LEFT" : "RIGHT")"
         default:
-            guard let track = engine.track else { return }
+            guard let track = player.nowPlaying else { return }
             pendingSeek = value
             marquee.message = "SEEK TO: \(TimeFormat.clock(value * track.duration))/"
                 + "\(TimeFormat.clock(track.duration)) (\(Int((value * 100).rounded()))%)"
@@ -523,6 +583,10 @@ final class MainView: SkinnedView, NSMenuItemValidation {
 
     private func nudgeVolume(by amount: Double) {
         guard amount != 0 else { return }
+        if let limitation = controller.limitation(.volume) {
+            marquee.flash(limitation, for: 2)
+            return
+        }
         controller.volume += amount
         marquee.flash(volumeMessage, for: 1)
     }
@@ -560,8 +624,8 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     }
     @objc func previousTrack(_ sender: Any?) { controller.previous() }
     @objc func nextTrack(_ sender: Any?) { controller.next() }
-    @objc func pause(_ sender: Any?) { engine.pause() }
-    @objc func stop(_ sender: Any?) { engine.stop() }
+    @objc func pause(_ sender: Any?) { player.pause() }
+    @objc func stop(_ sender: Any?) { controller.stop() }
 
     @objc func play(_ sender: Any?) {
         if controller.queue.isEmpty {
@@ -594,14 +658,25 @@ final class MainView: SkinnedView, NSMenuItemValidation {
 
     /// How much of the song plays under the chiptune cover; it also switches the cover on.
     @objc func setChipBlend(_ sender: NSMenuItem) {
-        guard let blend = choice(ChipBlend.self, sender) else { return }
+        guard let blend = choice(ChipBlend.self, sender), retroSoundReachesTheSong() else { return }
         controller.chipBlend = blend
         controller.retroSound = .chiptune
         let names: [ChipBlend: String] = [.none: "NONE", .low: "20%", .medium: "40%"]
         marquee.flash("CHIPTUNE, ORIGINAL SONG: \(names[blend]!)", for: 1.5)
     }
 
+    /// The Retro Sound menu's note on why its choices are greyed out; never chosen.
+    @objc func retroSoundNote(_ sender: Any?) {}
+
+    /// False, after saying why, while a Pak that plays its own audio is on.
+    private func retroSoundReachesTheSong() -> Bool {
+        guard let limitation = controller.limitation(.retroSound) else { return true }
+        marquee.flash(limitation, for: 2)
+        return false
+    }
+
     private func applyRetroSound(_ sound: RetroSound) {
+        guard retroSoundReachesTheSong() else { return }
         controller.retroSound = sound
         let names: [RetroSound: String] = [.off: "OFF", .crush: "8-BIT CRUSH", .chiptune: "CHIPTUNE (EXPERIMENTAL)"]
         marquee.flash("RETRO SOUND: \(names[sound]!)", for: 1.5)
@@ -651,9 +726,9 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     }
 
     private func applyFalloff() {
-        engine.analyzer.barFall = preferences.barFalloff.barRate
-        engine.analyzer.peakFall = preferences.peakFalloff.peakRate
-        engine.analyzer.peakHoldFrames = preferences.peakFalloff.peakHoldFrames
+        controller.engine.analyzer.barFall = preferences.barFalloff.barRate
+        controller.engine.analyzer.peakFall = preferences.peakFalloff.peakRate
+        controller.engine.analyzer.peakHoldFrames = preferences.peakFalloff.peakHoldFrames
     }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
@@ -661,8 +736,18 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         switch item.action {
         case #selector(toggleShuffle(_:)): item.state = controller.shuffle ? .on : .off
         case #selector(toggleRepeat(_:)): item.state = controller.repeats ? .on : .off
-        case #selector(setRetroSound(_:)): item.state = selected == controller.retroSound.rawValue ? .on : .off
-        case #selector(setChipBlend(_:)): item.state = selected == controller.chipBlend.rawValue ? .on : .off
+        // Greyed out, still showing the setting, while a Pak plays its own audio.
+        case #selector(setRetroSound(_:)):
+            item.state = selected == controller.retroSound.rawValue ? .on : .off
+            return controller.limitation(.retroSound) == nil
+        case #selector(setChipBlend(_:)):
+            item.state = selected == controller.chipBlend.rawValue ? .on : .off
+            return controller.limitation(.retroSound) == nil
+        case #selector(retroSoundNote(_:)):
+            let limitation = controller.limitation(.retroSound)
+            item.isHidden = limitation == nil
+            item.title = "Not available while \(controller.playingPak?.name ?? "this song") plays"
+            return false
         case #selector(toggleShade(_:)):
             item.state = isShaded ? .on : .off
             return window?.isVisible == true
@@ -673,7 +758,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         case #selector(setOscilloscopeStyle(_:)):
             item.state = selected == preferences.oscilloscopeStyle.rawValue ? .on : .off
         case #selector(previousTrack(_:)), #selector(nextTrack(_:)): return controller.queue.count > 0
-        case #selector(pause(_:)), #selector(stop(_:)): return engine.track != nil
+        case #selector(pause(_:)), #selector(stop(_:)): return player.nowPlaying != nil
         default: break
         }
         return true
@@ -698,8 +783,8 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         case "t": cycleRetroSound(nil)
         default:
             switch event.specialKey {
-            case .leftArrow?: engine.seek(to: engine.currentTime - 5)
-            case .rightArrow?: engine.seek(to: engine.currentTime + 5)
+            case .leftArrow?: player.seek(to: player.currentTime - 5)
+            case .rightArrow?: player.seek(to: player.currentTime + 5)
             case .upArrow?: nudgeVolume(by: 0.02)
             case .downArrow?: nudgeVolume(by: -0.02)
             default: super.keyDown(with: event)
@@ -718,6 +803,10 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         // This runs repeatedly during a drag, so only scan dropped folders once.
         if droppedURLs(sender).contains(where: SkinLibrary.isSkin) {
             marquee.message = "DROP TO LOAD SKIN"
+            return .copy
+        }
+        if droppedURLs(sender).contains(where: PakLibrary.isPak) {
+            marquee.message = "DROP TO INSTALL EXPANSION PAK"
             return .copy
         }
         let changeCount = sender.draggingPasteboard.changeCount
@@ -743,6 +832,10 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         let urls = droppedURLs(sender)
         if let skin = urls.first(where: SkinLibrary.isSkin) {
             onSkinDropped?(skin)
+            return true
+        }
+        if let pak = urls.first(where: PakLibrary.isPak) {
+            DispatchQueue.main.async { [weak self] in self?.onPakDropped?(pak) }
             return true
         }
         if NSEvent.modifierFlags.contains(.shift) {

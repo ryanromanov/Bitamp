@@ -32,8 +32,40 @@
     <string>NSApplication</string>
     <key>NSHumanReadableCopyright</key>
     <string>MIT License. Not affiliated with Winamp or Nullsoft.</string>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>dev.bitamp.pak</string>
+            <key>UTTypeDescription</key>
+            <string>Bitamp Expansion Pak</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>com.apple.package</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>bitpak</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
     <key>CFBundleDocumentTypes</key>
     <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Bitamp Expansion Pak</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>dev.bitamp.pak</string>
+            </array>
+        </dict>
         <dict>
             <key>CFBundleTypeName</key>
             <string>Audio File</string>

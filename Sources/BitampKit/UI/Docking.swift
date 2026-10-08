@@ -72,7 +72,7 @@ enum Docking {
 @MainActor
 final class WindowGroup {
     enum Panel: String, CaseIterable {
-        case equalizer, playlist
+        case equalizer, playlist, paks
     }
 
     let main: NSWindow
@@ -87,8 +87,8 @@ final class WindowGroup {
         self.main = main
         self.panels = panels
         self.defaults = defaults
-        // All three windows show on first launch, like the classic layout.
-        defaults.register(defaults: Dictionary(uniqueKeysWithValues: Panel.allCases.map { (Self.visibilityKey($0), true) }))
+        // The classic three windows show on first launch; Expansion Paks waits to be opened.
+        defaults.register(defaults: Dictionary(uniqueKeysWithValues: Panel.allCases.map { (Self.visibilityKey($0), $0 != .paks) }))
         defaults.register(defaults: [Self.mainVisibilityKey: true])
     }
 

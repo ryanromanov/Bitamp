@@ -50,6 +50,9 @@ final class TrackInfoStore {
     private var waiting: [URL] = []
     private var requested: Set<URL> = []
     private var loading = 0
+    /// Looks up tracks that aren't files, such as a Pak's. Nil means it can't say now
+    /// (its Pak is ejected), so the track is asked about again after `retryMissing`.
+    var loadExternal: ((URL) async -> TrackMetadata?)?
 
     /// The cached metadata, or nil while it loads. Asking starts the load.
     func metadata(for url: URL) -> TrackMetadata? {
@@ -62,6 +65,17 @@ final class TrackInfoStore {
     func seed(_ metadata: TrackMetadata, for url: URL) {
         cache[url] = metadata
         requested.insert(url)
+    }
+
+    /// Sets `url`'s metadata from a saved playlist, unless something fresher is known.
+    func seedIfMissing(_ metadata: TrackMetadata, for url: URL) {
+        guard cache[url] == nil else { return }
+        seed(metadata, for: url)
+    }
+
+    /// Asks again about tracks that got no answer, such as an ejected Pak's once it's back.
+    func retryMissing() {
+        requested = requested.filter { cache[$0] != nil || waiting.contains($0) }
     }
 
     func displayName(for url: URL) -> String {
@@ -84,8 +98,11 @@ final class TrackInfoStore {
             let url = waiting.removeFirst()
             loading += 1
             Task {
-                let metadata = await TrackMetadata.load(from: url)
-                self.cache[url] = metadata
+                let metadata = url.isFileURL
+                    ? await TrackMetadata.load(from: url)
+                    : await self.loadExternal?(url)
+                // A file's seeded metadata may have arrived meanwhile; it wins.
+                if self.cache[url] == nil, let metadata { self.cache[url] = metadata }
                 self.loading -= 1
                 self.startLoads()
             }

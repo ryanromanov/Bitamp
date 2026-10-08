@@ -1,0 +1,11 @@
+{
+  "id": "demo",
+  "name": "Demo",
+  "version": "1.0",
+  "executable": "demo-pak",
+  "protocol": 1,
+  "description": "Public-domain tunes played as chiptunes, made on your Mac. Shows what an Expansion Pak can do.",
+  "settings": [
+    { "key": "waveform", "label": "Waveform", "type": "choice", "options": ["Square", "Triangle", "Sawtooth"], "default": "Square" }
+  ]
+}

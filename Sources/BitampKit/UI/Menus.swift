@@ -15,6 +15,8 @@ enum Menus {
             item("Shuffle", #selector(MainView.toggleShuffle(_:)), "s"),
             item("Repeat", #selector(MainView.toggleRepeat(_:)), "r"),
             submenu(menu("Retro Sound", [
+                // Shown only while a Pak plays audio Retro Sound can't reach.
+                item("", #selector(MainView.retroSoundNote(_:))),
                 choice("Off", #selector(MainView.setRetroSound(_:)), RetroSound.off),
                 choice("8-Bit Crush", #selector(MainView.setRetroSound(_:)), RetroSound.crush),
                 choice("Chiptune (Experimental)", #selector(MainView.setRetroSound(_:)), RetroSound.chiptune),
