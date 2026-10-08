@@ -6,6 +6,8 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [
         .executable(name: "Bitamp", targets: ["Bitamp"]),
+        // For spikes/musickit, which tries the Pak from a signed app of its own.
+        .library(name: "BitampAppleMusicPak", targets: ["BitampAppleMusicPak"]),
         // For third-party Paks written in Swift. See docs/PAK-SDK.md.
         .library(name: "BitampPakSDK", targets: ["BitampPakSDK"]),
         .executable(name: "BitampDemoPak", targets: ["BitampDemoPak"]),
@@ -25,9 +27,11 @@ let package = Package(
         .target(name: "BitampPakProtocol"),
         .target(name: "BitampPakSDK", dependencies: ["BitampPakProtocol"]),
         .executableTarget(name: "BitampDemoPak", dependencies: ["BitampPakSDK"], exclude: ["pak.json"]),
-        .executableTarget(name: "Bitamp", dependencies: ["BitampKit"]),
+        // Expansion Paks built into Bitamp. Each depends on BitampPakKit only.
+        .target(name: "BitampAppleMusicPak", dependencies: ["BitampPakKit"]),
+        .executableTarget(name: "Bitamp", dependencies: ["BitampKit", "BitampAppleMusicPak"]),
         .testTarget(name: "BitampTests", dependencies: [
-            "BitampKit", "BitampPakKit", "BitampPakSDK", "BitampDemoPak",
+            "BitampKit", "BitampPakKit", "BitampAppleMusicPak", "BitampPakSDK", "BitampDemoPak",
         ]),
     ]
 )
