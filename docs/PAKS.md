@@ -4,7 +4,7 @@ Optional add-ons that bring other music sources into Bitamp: Apple Music first, 
 
 ## Two kinds of source
 1. **Stream Paks** turn a track into a URL or cached file that `PlayerEngine` plays as usual. The EQ, visualizer and Retro Sound all work. Fits Subsonic/Navidrome, Jellyfin, Plex and internet radio.
-2. **Self-playing Paks** play the audio themselves. Bitamp sends play, pause, seek and next, and reads back the position and the end of each track. Apple Music (MusicKit; the tracks are copy-protected) and Spotify (only as a remote for its app) are this kind. The EQ, visualizer and Retro Sound can't reach their audio, so the skin dims them.
+2. **Self-playing Paks** play the audio themselves. Bitamp sends play, pause, seek and next, and reads back the position and the end of each track. Apple Music (MusicKit; the tracks are copy-protected) and Spotify (only as a remote for its app) are this kind. The EQ and Retro Sound can't reach their audio, so the skin dims them. The visualizer can listen in: on macOS 14.2+, `PakAudioListener` taps the process playing the audio with a Core Audio process tap (for MusicKit, `com.apple.MediaPlayer.RemotePlayerService`) and feeds the analyzer.
 
 ## Host side
 - **`PlaybackBackend`**: load, play, pause, stop, seek, state, current time, track end, and capabilities (`supportsEqualizer`, `supportsVisualizer`, `supportsRetroSound`). `PlayerEngine` becomes the local backend. `PlaybackController` picks a backend per queue item and moves between them at track changes.
@@ -14,7 +14,7 @@ Optional add-ons that bring other music sources into Bitamp: Apple Music first, 
   - account: status, `connect()` (sign in / authorize), `disconnect()`
   - browsing: search, library, playlists → `[PakTrack]` (URL + metadata)
   - `resolve(url)` → `.stream(URL)` or `.backend(PlaybackBackend)`
-- **UI**: "Add from Apple Music…" opens a search panel that adds to the playlist. A Media Library window can come later. The **Expansion Paks window** (Window ▸ Expansion Paks, ⌥K) shows each Pak as an N64-style cartridge in a slot: click it to search, click the slot's front plate to eject or insert it, right-click for a menu. Its frame borrows the playlist's title and side tiles, so `.wsz` skins dress it. While a Pak plays audio Bitamp can't see, the main window's visualizer shows a small cartridge and the Pak's name; clicking it opens the window. The playlist shows nothing extra.
+- **UI**: "Add from Apple Music…" opens a search panel that adds to the playlist. A Media Library window can come later. The **Expansion Paks window** (Window ▸ Expansion Paks, ⌥K) shows each Pak as an N64-style cartridge in a slot: click it to search, click the slot's front plate to eject or insert it, right-click for a menu. Its frame borrows the playlist's title and side tiles, so `.wsz` skins dress it. While a Pak plays audio Bitamp can't see or hear (before macOS 14.2, or without permission to listen), the main window's visualizer shows a small cartridge and the Pak's name; clicking it opens the window. The playlist shows nothing extra.
 - **Inserted or ejected**: every Pak starts inserted. Ejecting turns the service off: its tracks stay in playlists and the saved session, with their titles, but are skipped with "<NAME> PAK IS EJECTED", its search closes, and Bitamp doesn't contact it at all. Titles come from the playlist file (`#EXTINF`, read back since this change); a title never saved shows the track's ID until the Pak is inserted again.
 
 ## Packaging
