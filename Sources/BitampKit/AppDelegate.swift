@@ -85,6 +85,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// Clicking one window of an app in the background brings only that window forward.
+    /// Bitamp's windows go together, as in Winamp, so the rest come up just behind it, in
+    /// the order they were in.
+    public func applicationDidBecomeActive(_ notification: Notification) {
+        // Bitamp's windows on this Space, front to back, panels included.
+        let showing = (NSWindow.windowNumbers(options: []) ?? []).compactMap { NSApp.window(withWindowNumber: $0.intValue) }
+        guard var above = showing.first else { return }
+        for window in showing.dropFirst() {
+            window.order(.below, relativeTo: above.windowNumber)
+            above = window
+        }
+    }
+
     public func applicationWillTerminate(_ notification: Notification) {
         controller.saveSession()
         windowGroup?.saveLayout()
