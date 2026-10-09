@@ -44,7 +44,13 @@ To install a Pak, double-click its `.bitpak`, drop it on Bitamp, or use File ▸
 
 ## Download
 
-Get the latest `Bitamp-x.y.z.zip` from [Releases](https://github.com/ryanromanov/Bitamp/releases). It runs on macOS 13 or later, on Apple Silicon and Intel. From version 0.4, Bitamp is signed and notarized by Apple, so it opens like any other downloaded app. Older versions aren't: the first time you open one, allow it under **System Settings → Privacy & Security → Open Anyway**.
+With [Homebrew](https://brew.sh):
+
+```
+brew install --cask ryanromanov/tap/bitamp
+```
+
+`brew upgrade` keeps it current. Or get the latest `Bitamp-x.y.z.zip` from [Releases](https://github.com/ryanromanov/Bitamp/releases). It runs on macOS 13 or later, on Apple Silicon and Intel. From version 0.4, Bitamp is signed and notarized by Apple, so it opens like any other downloaded app. Older versions aren't: the first time you open one, allow it under **System Settings → Privacy & Security → Open Anyway**.
 
 ## Build
 
