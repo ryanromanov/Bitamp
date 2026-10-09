@@ -35,7 +35,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     init(controller: PlaybackController, preferences: Preferences, skin: Skin) {
         self.controller = controller
         self.preferences = preferences
-        super.init(pixelSize: skin.orb == nil ? Layout.size : OrbLayout.size, skin: skin, scale: CGFloat(preferences.scale))
+        super.init(pixelSize: skin.orb == nil ? Layout.size : OrbLayout.size, skin: skin, scale: preferences.scale)
         marquee.visibleWidth = Int(marqueeRect.width)
         registerForDraggedTypes([.fileURL])
         applyFalloff()

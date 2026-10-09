@@ -21,7 +21,7 @@ Bitamp isn't affiliated with or endorsed by Winamp or Nullsoft. Its default skin
 
 - Main window, 10-band equalizer and playlist, which snap together and move as a group. Window ▸ Main Window (⌥W) hides the main window and leaves the playlist, with its own little transport buttons, and Window ▸ Regroup Windows (⌥R) docks everything back into the classic stack
 - Three built-in skins: Bitamp Default, the glossy Bitamp Millennium, and Bitamp Orb, whose main window drops the rectangle for a freeform shape with a big round play button. Classic `.wsz` skins work too: drop one on the window or use Skins ▸ Install Skin…. Skins ▸ Export Current Skin… saves any skin as a `.wsz` (the Orb exports as the rectangular Millennium layout).
-- Shade mode for each window (double-click a title bar), and window sizes from 1× to 4×
+- Shade mode for each window (double-click a title bar), and three window sizes: 1×, 1.5× and 2× (the default)
 - Spectrum and oscilloscope visualizer, shuffle and repeat, `.m3u` playlists
 - Retro Sound (Playback ▸ Retro Sound, or T): an 8-bit crush that plays the song as 8-bit samples, or an experimental chiptune cover that transcribes the song, follows the sung melody for the lead, and plays it on pulse, triangle and noise voices, with some of the original mixed in if you like
 - [Expansion Paks](#expansion-paks): other music sources in Bitamp's playlist. Apple Music comes built in, and anyone can write more

@@ -39,7 +39,7 @@ final class PlaylistView: SkinnedView {
         self.preferences = preferences
         super.init(
             pixelSize: CGSize(width: PlaylistLayout.width, height: PlaylistLayout.defaultHeight),
-            skin: skin, scale: CGFloat(preferences.scale))
+            skin: skin, scale: preferences.scale)
         registerForDraggedTypes([.fileURL])
     }
 
