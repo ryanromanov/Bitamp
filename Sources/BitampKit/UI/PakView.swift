@@ -69,6 +69,16 @@ enum PakLayout {
     static func close(in size: CGSize) -> CGRect {
         PlaylistLayout.close(in: size)
     }
+
+    /// The close button and content in a `gen.bmp` frame, whose edges are thinner.
+    static func genClose(in size: CGSize) -> CGRect {
+        CGRect(x: size.width - 11, y: 3, width: 9, height: 9)
+    }
+
+    static func genContent(in size: CGSize) -> CGRect {
+        CGRect(x: GenArt.leftWidth, y: GenArt.topHeight, width: Int(size.width) - GenArt.leftWidth - GenArt.rightWidth,
+               height: Int(size.height) - GenArt.topHeight - GenArt.bottomHeight)
+    }
 }
 
 /// The Expansion Paks window: each Pak as an N64-style cartridge in a slot. Click a
@@ -166,10 +176,32 @@ final class PakView: SkinnedView {
 
     override func render(into c: Canvas) {
         let size = pixelSize
-        let (w, h) = (Int(size.width), Int(size.height))
         let colors = skin.playlistColors
 
-        // Frame: the playlist's top and side tiles, a closing strip from its bottom tile.
+        if let gen = skin.gen {
+            drawGenFrame(c, gen)
+            c.fill(PakLayout.genContent(in: size), colors.normalBackground)
+        } else {
+            drawPlaylistFrame(c, colors)
+            c.fill(PakLayout.content(in: size), colors.normalBackground)
+        }
+        for index in 0..<slotCount {
+            if index < paks.count {
+                drawSlot(c, index, pak: paks[index], colors)
+            } else {
+                drawEmptySlot(c, index, colors)
+            }
+        }
+    }
+
+    private var closeRect: CGRect {
+        skin.gen == nil ? PakLayout.close(in: pixelSize) : PakLayout.genClose(in: pixelSize)
+    }
+
+    /// The playlist's top and side tiles, and a closing strip from its bottom tile.
+    private func drawPlaylistFrame(_ c: Canvas, _ colors: PlaylistColors) {
+        let size = pixelSize
+        let (w, h) = (Int(size.width), Int(size.height))
         for x in stride(from: 0, to: w, by: 25) {
             c.draw(skin.image(for: .playlistBottomTile), x, h - PakLayout.bottom)
         }
@@ -185,21 +217,78 @@ final class PakView: SkinnedView {
         c.draw(skin.image(for: .playlistCloseButton(pressed: pressed == .close && pressedInside)),
                at: PakLayout.close(in: size).origin)
         drawTitle(c, colors)
+    }
 
-        c.fill(PakLayout.content(in: size), colors.normalBackground)
-        for index in 0..<slotCount {
-            if index < paks.count {
-                drawSlot(c, index, pak: paks[index], colors)
+    /// The skin's generic window frame, laid out like Webamp's: the title in its own
+    /// font between two end pieces, with the fill stretching out to the corners.
+    private func drawGenFrame(_ c: Canvas, _ gen: GenArt) {
+        let (w, h) = (Int(pixelSize.width), Int(pixelSize.height))
+        let top = gen.top(active: isActive)
+        // The title box: 4px before the letters, 3px after.
+        let titleWidth = gen.titleWidth(Self.title) + 7
+        let fill = max(0, w - 100 - titleWidth)
+        let leftFill = fill / 2
+        tile(c, top.centerFill, from: 0, to: w, y: 0)
+        tile(c, top.fill, from: 25, to: 25 + leftFill, y: 0)
+        tileFromRight(c, top.fill, from: w - 25 - (fill - leftFill), to: w - 25, y: 0)
+        c.draw(top.left, 0, 0)
+        c.draw(top.leftEnd, 25 + leftFill, 0)
+        var x = 50 + leftFill + 4
+        for character in Self.title.uppercased() {
+            if let letter = gen.letter(character, active: isActive) {
+                c.draw(letter, x, GenArt.letterY)
+                x += letter.width
             } else {
-                drawEmptySlot(c, index, colors)
+                x += GenArt.spaceWidth
             }
         }
+        c.draw(top.rightEnd, w - 50 - (fill - leftFill), 0)
+        c.draw(top.right, w - 25, 0)
+        if pressed == .close && pressedInside {
+            c.draw(gen.closePressed, at: PakLayout.genClose(in: pixelSize).origin)
+        }
+
+        // The sides, with their bottom pieces at the foot; then the bottom edge.
+        let sideBottom = h - GenArt.bottomHeight
+        for y in stride(from: GenArt.topHeight, to: sideBottom, by: gen.middleLeft.height) {
+            c.draw(gen.middleLeft, 0, y)
+            c.draw(gen.middleRight, w - GenArt.rightWidth, y)
+        }
+        c.draw(gen.middleLeftBottom, 0, sideBottom - gen.middleLeftBottom.height)
+        c.draw(gen.middleRightBottom, w - GenArt.rightWidth, sideBottom - gen.middleRightBottom.height)
+        tile(c, gen.bottomFill, from: 0, to: w, y: sideBottom)
+        c.draw(gen.bottomLeft, 0, sideBottom)
+        c.draw(gen.bottomRight, w - gen.bottomRight.width, sideBottom)
+    }
+
+    /// Repeats `image` across [from, to), clipping the last copy.
+    private func tile(_ c: Canvas, _ image: CGImage, from: Int, to: Int, y: Int) {
+        guard to > from else { return }
+        c.context.saveGState()
+        c.context.clip(to: CGRect(x: from, y: y, width: to - from, height: image.height))
+        for x in stride(from: from, to: to, by: image.width) { c.draw(image, x, y) }
+        c.context.restoreGState()
+    }
+
+    /// Like `tile`, but lined up with the right edge, as Webamp's right fill is.
+    private func tileFromRight(_ c: Canvas, _ image: CGImage, from: Int, to: Int, y: Int) {
+        guard to > from else { return }
+        c.context.saveGState()
+        c.context.clip(to: CGRect(x: from, y: y, width: to - from, height: image.height))
+        var x = to - image.width
+        while x + image.width > from {
+            c.draw(image, x, y)
+            x -= image.width
+        }
+        c.context.restoreGState()
     }
 
     /// "EXPANSION PAKS" in the middle of the title bar, styled like the playlist's title
     /// when the skin can draw it, or on a plate in the playlist's colors when it can't.
+    private static let title = "EXPANSION PAKS"
+
     private func drawTitle(_ c: Canvas, _ colors: PlaylistColors) {
-        let title = "EXPANSION PAKS"
+        let title = Self.title
         if let image = skin.titleImage(title, active: isActive) {
             c.draw(image, (Int(pixelSize.width) - image.width) / 2, 0)
             return
@@ -334,7 +423,7 @@ final class PakView: SkinnedView {
     // MARK: - Mouse
 
     private func press(at point: CGPoint) -> Press? {
-        if PakLayout.close(in: pixelSize).contains(point) { return .close }
+        if closeRect.contains(point) { return .close }
         for index in paks.indices {
             let plate = PakLayout.plate(index)
             if plate.contains(point) { return .plate(index) }

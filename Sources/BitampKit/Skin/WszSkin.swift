@@ -20,6 +20,7 @@ final class WszSkin: Skin {
     private let sheets: [String: CGImage]
     private var cache: [SkinElement: CGImage] = [:]
     private var glyphs: [Character: CGImage] = [:]
+    private(set) lazy var gen: GenArt? = sheets["gen"].flatMap(GenArt.init(sheet:))
 
     convenience init(url: URL, fallback: Skin = DefaultSkin()) throws {
         let archive = try ZipArchive(url: url)

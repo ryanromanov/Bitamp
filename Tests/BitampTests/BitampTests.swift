@@ -758,6 +758,34 @@ import Testing
         #expect(skin.playlistColors.selectedBackground.components?.prefix(3).map { ($0 * 255).rounded() } == [0, 0, 198])
     }
 
+    @Test func readsGenFrameAndMeasuresItsLetters() throws {
+        // A gen.bmp whose letters are 3, 4, 5, 3, 4, 5… wide, each followed by a column of
+        // the row's background color, as Winamp lays them out.
+        let c = Canvas(194, 109)
+        c.fill(0, 0, 194, 109, rgb(0x808080))
+        for y in [88, 96] {
+            c.fill(0, y, 194, 7, rgb(0x00c6ff))
+            var x = 1
+            for index in 0..<26 {
+                c.fill(x, y, 3 + index % 3, 7, rgb(0xffffff))
+                x += 3 + index % 3 + 1
+            }
+        }
+        let png = try #require(NSBitmapImageRep(cgImage: c.image()).representation(using: .png, properties: [:]))
+        let skin = try WszSkin(name: "Gen", files: ["gen.png": png])
+        let gen = try #require(skin.gen)
+        #expect(gen.letter("A", active: true)?.width == 3)
+        #expect(gen.letter("B", active: false)?.width == 4)
+        #expect(gen.letter("Z", active: true)?.width == 4)
+        #expect(gen.letter(" ", active: true) == nil)
+        #expect(gen.titleWidth("AB C") == 3 + 4 + GenArt.spaceWidth + 5)
+
+        // Too small to hold the frame: no gen art, so windows keep their fallback frame.
+        let small = try #require(NSBitmapImageRep(cgImage: Canvas(100, 50).image()).representation(using: .png, properties: [:]))
+        #expect(try WszSkin(name: "Small", files: ["gen.png": small]).gen == nil)
+        #expect(try WszSkin(name: "None", files: ["main.png": small]).gen == nil)
+    }
+
     @Test func spriteMapStaysInsideClassicSheets() {
         // The classic sheet sizes; every mapped sprite must fit inside its sheet.
         let sheets: [String: CGSize] = [
