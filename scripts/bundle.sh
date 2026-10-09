@@ -1,6 +1,7 @@
 #!/bin/sh
 # Builds a release binary and wraps it in a signed Bitamp.app, ad-hoc unless --sign names
 # an identity. It always signs with the hardened runtime, which notarization requires.
+# Signed with an identity, the app also gets Resources/Bitamp.provisionprofile.
 #
 #   scripts/bundle.sh                                # this Mac's architecture
 #   scripts/bundle.sh --universal --version 1.2.3    # Apple Silicon + Intel, stamped 1.2.3
@@ -43,8 +44,16 @@ swift scripts/make-icon.swift "$app/Contents/Resources/AppIcon.icns"
 if [ "$identity" = "-" ]; then
     codesign --force --options runtime --sign - "$app"
 else
+    # The profile lets the app claim its App ID, which MusicKit needs to reach the Apple
+    # Music catalog. It's only valid for team KL362RST7H; to sign as another team, swap in
+    # your own profile and entitlements, or delete the profile to build without them.
+    set --
+    if [ -f Resources/Bitamp.provisionprofile ]; then
+        cp Resources/Bitamp.provisionprofile "$app/Contents/embedded.provisionprofile"
+        set -- --entitlements Resources/Bitamp.entitlements
+    fi
     # A secure timestamp is required for notarization; ad-hoc signatures can't have one.
-    codesign --force --options runtime --timestamp --sign "$identity" "$app"
+    codesign --force --options runtime --timestamp "$@" --sign "$identity" "$app"
 fi
 
 echo "Built $app"
