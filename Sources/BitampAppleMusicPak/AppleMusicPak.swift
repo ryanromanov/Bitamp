@@ -5,8 +5,9 @@ import MusicKit
 /// Apple Music through MusicKit: songs from the listener's library, and from the catalog
 /// when the app is signed with a team whose App ID has MusicKit turned on.
 ///
-/// MusicKit plays the songs itself, copy-protected, so Bitamp's equalizer, visualizer and
-/// Retro Sound can't reach them. Playing needs macOS 14 (`ApplicationMusicPlayer`).
+/// MusicKit plays the songs itself, copy-protected, so Bitamp's equalizer and Retro Sound
+/// can't reach them; the visualizer listens in through `PakAudioListener` in BitampKit.
+/// Playing needs macOS 14 (`ApplicationMusicPlayer`).
 @MainActor
 public final class AppleMusicPak: Pak {
     public let id = "applemusic"
