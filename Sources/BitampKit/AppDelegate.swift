@@ -82,18 +82,31 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public func applicationDidFinishLaunching(_ notification: Notification) {
         windowGroup?.restore()
         windowGroup?.showAtLaunch()
+        raiseAllWindowsOnClick()
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// Clicking one window of an app in the background brings only that window forward.
-    /// With "Bring All Windows Forward" on, Bitamp's windows go together, as in Winamp: the
-    /// rest come up just behind it, in the order they were in.
-    public func applicationDidBecomeActive(_ notification: Notification) {
-        guard preferences.raiseAllWindows else { return }
-        // Bitamp's windows on this Space, front to back, panels included.
+    /// Clicking one of Bitamp's windows brings only that window forward, past other apps'
+    /// windows. With "Bring All Windows Forward" on, Bitamp's windows go together, as in
+    /// Winamp: the rest come up just behind it, in the order they were in. Cmd-Tab and the
+    /// Dock bring them all forward already.
+    private func raiseAllWindowsOnClick() {
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            if self?.preferences.raiseAllWindows == true, let clicked = event.window {
+                // After the click, which brings its window forward.
+                DispatchQueue.main.async { Self.orderBehind(clicked) }
+            }
+            return event
+        }
+    }
+
+    /// Stacks Bitamp's other windows on this Space directly behind `top`, keeping their order.
+    private static func orderBehind(_ top: NSWindow) {
+        // Front to back, panels included.
         let showing = (NSWindow.windowNumbers(options: []) ?? []).compactMap { NSApp.window(withWindowNumber: $0.intValue) }
-        guard var above = showing.first else { return }
-        for window in showing.dropFirst() {
+        guard showing.contains(where: { $0 === top }) else { return }
+        var above = top
+        for window in showing where window !== top {
             window.order(.below, relativeTo: above.windowNumber)
             above = window
         }

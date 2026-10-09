@@ -149,7 +149,7 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.windowShadows) }
     }
 
-    /// Whether clicking one of Bitamp's windows from another app brings all of them forward,
+    /// Whether clicking one of Bitamp's windows brings all of them forward, past other apps',
     /// as in Winamp. Off by default: macOS brings forward only the window clicked.
     var raiseAllWindows: Bool {
         get { defaults.bool(forKey: Key.raiseAllWindows) }
