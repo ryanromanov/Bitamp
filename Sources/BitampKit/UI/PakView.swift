@@ -196,10 +196,14 @@ final class PakView: SkinnedView {
         }
     }
 
-    /// "EXPANSION PAKS" on a plate in the middle of the title bar, where the playlist's
-    /// title sprite would go.
+    /// "EXPANSION PAKS" in the middle of the title bar, styled like the playlist's title
+    /// when the skin can draw it, or on a plate in the playlist's colors when it can't.
     private func drawTitle(_ c: Canvas, _ colors: PlaylistColors) {
         let title = "EXPANSION PAKS"
+        if let image = skin.titleImage(title, active: isActive) {
+            c.draw(image, (Int(pixelSize.width) - image.width) / 2, 0)
+            return
+        }
         let width = PixelFont.width(of: title) + 5
         let x = (Int(pixelSize.width) - width) / 2
         c.fill(x, 5, width, 10, colors.normalBackground)

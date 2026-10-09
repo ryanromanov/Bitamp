@@ -82,10 +82,14 @@ protocol Skin: AnyObject {
     var playlistColors: PlaylistColors { get }
     /// Art for a freeform Orb main window, or nil for the classic one.
     var orb: OrbArt? { get }
+    /// A title sprite like the playlist's, with any window name, to center on the top tiles.
+    /// Nil when the skin can't draw one, as `.wsz` skins only carry "PLAYLIST".
+    func titleImage(_ text: String, active: Bool) -> CGImage?
 }
 
 extension Skin {
     var orb: OrbArt? { nil }
+    func titleImage(_ text: String, active: Bool) -> CGImage? { nil }
 }
 
 /// The playlist's text colors, as in a skin's `pledit.txt`.
