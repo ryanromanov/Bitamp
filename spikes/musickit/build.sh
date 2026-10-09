@@ -20,7 +20,10 @@ cp Info.plist "$app/Contents/"
 if [ "$identity" = "-" ]; then
     codesign --force --options runtime --sign - "$app"
 else
-    codesign --force --options runtime --timestamp --sign "$identity" "$app"
+    # Bitamp's profile and entitlements, without which the catalog refuses a developer token.
+    cp ../../Resources/Bitamp.provisionprofile "$app/Contents/embedded.provisionprofile"
+    codesign --force --options runtime --timestamp --entitlements ../../Resources/Bitamp.entitlements \
+        --sign "$identity" "$app"
 fi
 codesign -dv "$app" 2>&1 | grep -E "Identifier|TeamIdentifier|Authority" || true
 echo "Built $app"
