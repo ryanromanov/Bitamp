@@ -174,16 +174,14 @@ final class DefaultSkin: Skin {
         return fromBottom == 0 ? 0.28 : fromBottom == 1 ? 0.14 : 0
     }
 
-    /// A window name on a title bar. Glossy bars get a dark outline around it, since the
-    /// bright shine behind the text is too close to the text's own color.
+    /// A window name on a title bar.
     private func titleLabel(_ c: Canvas, _ text: String, _ x: Int, _ y: Int, active: Bool) {
-        if case .gloss(_, let bottom, _, let inactiveBottom) = theme.titleStyle {
-            let outline = mix(active ? bottom : inactiveBottom, rgb(0x000000), 0.35)
-            for dy in -1...1 {
-                for dx in -1...1 where dx != 0 || dy != 0 { c.text(text, x + dx, y + dy, outline) }
-            }
+        if case .gloss(_, let bottom, _, _) = theme.titleStyle {
+            c.glossTitle(text, x, y, color: active ? theme.titleText : theme.titleTextInactive,
+                         shadow: mix(bottom, rgb(0x000000), 0.35), dark: !active)
+        } else {
+            c.text(text, x, y, active ? theme.titleText : theme.titleTextInactive)
         }
-        c.text(text, x, y, active ? theme.titleText : theme.titleTextInactive)
     }
 
     private var hasRidges: Bool {
