@@ -24,7 +24,7 @@ Bitamp isn't affiliated with or endorsed by Winamp or Nullsoft. Its default skin
 - Shade mode for each window (double-click a title bar), and window sizes from 1× to 4×
 - Spectrum and oscilloscope visualizer, shuffle and repeat, `.m3u` playlists
 - Retro Sound (Playback ▸ Retro Sound, or T): an 8-bit crush that plays the song as 8-bit samples, or an experimental chiptune cover that transcribes the song, follows the sung melody for the lead, and plays it on pulse, triangle and noise voices, with some of the original mixed in if you like
-- [Expansion Paks](#expansion-paks): add-ons that bring other music sources into Bitamp, which anyone can write
+- [Expansion Paks](#expansion-paks): other music sources in Bitamp's playlist. Apple Music comes built in, and anyone can write more
 
 ## Expansion Paks
 
@@ -32,7 +32,9 @@ Bitamp isn't affiliated with or endorsed by Winamp or Nullsoft. Its default skin
   <img src="docs/images/expansion-paks.png" width="307" alt="The Expansion Paks window: a Demo cartridge plugged into the first of three slots, marked Ready">
 </p>
 
-An Expansion Pak adds a music source to Bitamp: a music server, a radio directory, an archive, anything with songs. Each one is a cartridge in the Expansion Paks window (Window ▸ Expansion Paks, ⌥K). Click a cartridge to search it and add songs to your playlist; they play like local files, with the equalizer, visualizer and Retro Sound. Click the slot under a cartridge to eject it, which switches that source off until you put it back.
+An Expansion Pak adds a music source to Bitamp: a music server, a radio directory, an archive, anything with songs. Each one is a cartridge in the Expansion Paks window (Window ▸ Expansion Paks, ⌥K). Click a cartridge to search it and add songs to your playlist, next to your own files. Songs from Paks you install play like local files, with the equalizer, visualizer and Retro Sound. Click the slot under a cartridge to eject it, which switches that source off until you put it back.
+
+**Apple Music** comes plugged in. Search your library and the whole Apple Music catalog, and mix its songs into any playlist. It needs macOS 14 or later, and an Apple Music subscription for catalog songs. Apple Music plays its songs itself, protected, so the equalizer, visualizer and Retro Sound can't reach them, and they play at your Mac's volume; Bitamp dims those controls while one plays.
 
 To install a Pak, double-click its `.bitpak`, drop it on Bitamp, or use File ▸ Install Expansion Pak…. A Pak is a program, so Bitamp asks first; only install Paks from people you trust.
 
@@ -42,7 +44,7 @@ To install a Pak, double-click its `.bitpak`, drop it on Bitamp, or use File ▸
 
 ## Download
 
-Get the latest `Bitamp-x.y.z.zip` from [Releases](https://github.com/ryanromanov/Bitamp/releases). It runs on macOS 13 or later, on Apple Silicon and Intel. Bitamp isn't notarized yet, so the first time you open it, allow it under **System Settings → Privacy & Security → Open Anyway**.
+Get the latest `Bitamp-x.y.z.zip` from [Releases](https://github.com/ryanromanov/Bitamp/releases). It runs on macOS 13 or later, on Apple Silicon and Intel. From version 0.4, Bitamp is signed and notarized by Apple, so it opens like any other downloaded app. Older versions aren't: the first time you open one, allow it under **System Settings → Privacy & Security → Open Anyway**.
 
 ## Build
 
