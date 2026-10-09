@@ -45,7 +45,9 @@ final class Canvas {
     /// Draws what `body` draws into a layer, then lays it on in greys: each color turned
     /// grey, its contrast with what's behind it softened, so a control keeps all its detail
     /// but looks locked. For controls that do nothing right now, on light or dark skins.
-    func locked(_ body: (Canvas) -> Void) {
+    /// `contrast` is how much of the control's contrast with the background it keeps, and
+    /// `lighten` how far its greys are lifted toward white.
+    func locked(contrast: Double = 0.6, lighten: Double = 0, _ body: (Canvas) -> Void) {
         let layer = Canvas(width, height)
         body(layer)
         guard let source = layer.context.data, let target = context.data else { return }
@@ -60,7 +62,8 @@ final class Canvas {
                 let alpha = Double(from[i + 3]) / 255
                 guard alpha > 0 else { continue }
                 let behind = luminance(to, j, 1)
-                let grey = behind + (luminance(from, i, alpha) - behind) * 0.6
+                let shaded = behind + (luminance(from, i, alpha) - behind) * contrast
+                let grey = shaded + (255 - shaded) * lighten
                 for k in 0..<3 {
                     to[j + k] = UInt8(min(255, max(0, Double(to[j + k]) * (1 - alpha) + grey * alpha)).rounded())
                 }
