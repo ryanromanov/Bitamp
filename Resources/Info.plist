@@ -30,6 +30,8 @@
     <true/>
     <key>NSAppleMusicUsageDescription</key>
     <string>Bitamp plays songs from your Apple Music library and catalog.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Bitamp listens to the songs it plays from Apple Music so the visualizer can show them.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSHumanReadableCopyright</key>

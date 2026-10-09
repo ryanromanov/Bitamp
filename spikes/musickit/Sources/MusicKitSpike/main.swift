@@ -1,11 +1,13 @@
 import AppKit
+import CoreAudio
 import BitampAppleMusicPak
 import BitampPakKit
 import MusicKit
 
 // Each step logs what MusicKit returned, to the window and to stdout, so a run from the
 // terminal leaves a transcript. `--auto "term"` runs every step in order and quits;
-// `--pak "term"` does the same through Bitamp's Apple Music Pak.
+// `--pak "term"` does the same through Bitamp's Apple Music Pak. `--tap "term"` plays a song
+// and measures what Core Audio process taps hear of it (TapProbe.swift).
 
 @MainActor
 final class Spike: NSObject, NSApplicationDelegate {
@@ -18,10 +20,12 @@ final class Spike: NSObject, NSApplicationDelegate {
     private var player: ApplicationMusicPlayer { .shared }
     private let autoTerm: String?
     private let pakTerm: String?
+    private let tapTerm: String?
 
-    init(autoTerm: String?, pakTerm: String?) {
+    init(autoTerm: String?, pakTerm: String?, tapTerm: String?) {
         self.autoTerm = autoTerm
         self.pakTerm = pakTerm
+        self.tapTerm = tapTerm
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -51,6 +55,7 @@ final class Spike: NSObject, NSApplicationDelegate {
         watchPlayer()
         if let autoTerm { Task { await runAll(autoTerm) } }
         if let pakTerm { Task { await runPak(pakTerm) } }
+        if let tapTerm { Task { await runTap(tapTerm) } }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -138,6 +143,38 @@ final class Spike: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
+    /// Plays a song, then taps Bitamp's own process, each process sending audio out, and
+    /// everything, three seconds each, logging the level of what each tap heard.
+    private func runTap(_ term: String) async {
+        guard #available(macOS 14.2, *) else { log("tap: needs macOS 14.2"); NSApp.terminate(nil); return }
+        await authorizeAsync()
+        await searchAsync(term)
+        if songs.isEmpty { await libraryAsync() }
+        await playAsync()
+        try? await Task.sleep(for: .seconds(3))
+        log("tap: player \(player.state.playbackStatus) t=\(String(format: "%.1f", player.playbackTime))")
+
+        let me = ProcessInfo.processInfo.processIdentifier
+        let processes = TapProbe.processes()
+        for process in processes where process.isRunningOutput || process.pid == me {
+            log("tap: process \(process.pid) \(process.bundleID)\(process.isRunningOutput ? " [running output]" : "")")
+        }
+        if let mine = TapProbe.processObject(for: me) {
+            log("tap: own process → \(await TapProbe.measure(CATapDescription(stereoMixdownOfProcesses: [mine]), seconds: 3))")
+        } else {
+            log("tap: own process has no Core Audio process object")
+        }
+        for process in processes where process.isRunningOutput && process.pid != me {
+            let result = await TapProbe.measure(CATapDescription(stereoMixdownOfProcesses: [process.object]), seconds: 3)
+            log("tap: \(process.bundleID) (\(process.pid)) → \(result)")
+        }
+        log("tap: global → \(await TapProbe.measure(CATapDescription(stereoGlobalTapButExcludeProcesses: []), seconds: 3))")
+        log("tap: player \(player.state.playbackStatus) t=\(String(format: "%.1f", player.playbackTime))")
+        player.pause()
+        log("tap: done")
+        NSApp.terminate(nil)
+    }
+
     @objc private func authorize() { Task { await authorizeAsync() } }
     @objc private func subscription() { Task { await subscriptionAsync() } }
     @objc private func search() { Task { await searchAsync(term.stringValue) } }
@@ -217,9 +254,10 @@ func option(_ name: String) -> String? {
 }
 let autoTerm = option("--auto")
 let pakTerm = option("--pak")
+let tapTerm = option("--tap")
 MainActor.assumeIsolated {
     let app = NSApplication.shared
-    let delegate = Spike(autoTerm: autoTerm, pakTerm: pakTerm)
+    let delegate = Spike(autoTerm: autoTerm, pakTerm: pakTerm, tapTerm: tapTerm)
     app.delegate = delegate
     app.setActivationPolicy(.regular)
     app.run()
