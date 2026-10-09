@@ -6,7 +6,7 @@
     <string>MusicKitSpike</string>
     <!-- Bitamp's own ID, so the App ID with MusicKit enabled covers the spike too. -->
     <key>CFBundleIdentifier</key>
-    <string>dev.bitamp.Bitamp</string>
+    <string>com.ryanromanov.Bitamp</string>
     <key>CFBundleName</key>
     <string>MusicKit Spike</string>
     <key>CFBundlePackageType</key>

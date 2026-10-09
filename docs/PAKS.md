@@ -18,13 +18,13 @@ Optional add-ons that bring other music sources into Bitamp: Apple Music first, 
 - **Inserted or ejected**: every Pak starts inserted. Ejecting turns the service off: its tracks stay in playlists and the saved session, with their titles, but are skipped with "<NAME> PAK IS EJECTED", its search closes, and Bitamp doesn't contact it at all. Titles come from the playlist file (`#EXTINF`, read back since this change); a title never saved shows the track's ID until the Pak is inserted again.
 
 ## Packaging
-- **Built-in Paks** are separate SwiftPM targets that depend only on `BitampPakKit` (`BitampAppleMusicPak`). The app registers them at launch, inserted. Apple Music has to be built in: MusicKit access is tied to the signed app's bundle ID (`dev.bitamp.Bitamp`) and team.
+- **Built-in Paks** are separate SwiftPM targets that depend only on `BitampPakKit` (`BitampAppleMusicPak`). The app registers them at launch, inserted. Apple Music has to be built in: MusicKit access is tied to the signed app's bundle ID (`com.ryanromanov.Bitamp`) and team.
 - **Third-party Paks** (later) run as separate processes: a `.bitpak` bundle containing a helper executable that talks to Bitamp over JSON on stdin/stdout, installed into `~/Library/Application Support/Bitamp/Paks`. Running them in-process would mean turning off library validation in the hardened runtime and tying every Pak to Bitamp's Swift build. A separate process avoids both, survives a Pak crashing, and can be written in any language. Most third-party Paks are stream Paks, so the protocol can mostly return URLs plus metadata.
 
 ## Apple Music
 - `ApplicationMusicPlayer` is in the macOS 14 SDK, but forum reports say playback may not work on macOS, especially outside the Mac App Store. The spike (`spikes/musickit`) tests this.
 - **Spike results so far (2026-10-07, macOS 27.2, ad-hoc signed, no team):** authorization `.authorized`; subscription check works (`canPlayCatalogContent=true`); **library requests and library playback work** (audible; state, position, pause all report correctly); **catalog search fails with `developerTokenRequestFailed`**, as expected without a team signature. Still open: catalog search and catalog streaming from a Developer ID build with MusicKit enabled on the App ID. Fallbacks: MusicKit JS in a hidden web view (needs a developer token we sign, which lasts up to 6 months), or remote-controlling Music.app.
-- Needs: MusicKit enabled for the `dev.bitamp.Bitamp` App ID (developer portal → Identifiers → App Services), `NSAppleMusicUsageDescription` in Info.plist, Developer ID signing. The listener needs an Apple Music subscription to play catalog songs.
+- Needs: MusicKit enabled for the `com.ryanromanov.Bitamp` App ID (developer portal → Identifiers → App Services), `NSAppleMusicUsageDescription` in Info.plist, Developer ID signing. The listener needs an Apple Music subscription to play catalog songs.
 - Bitamp stays on macOS 13; the Apple Music Pak is checked at runtime and shows as unavailable before macOS 14.
 
 ## Spotify
