@@ -149,6 +149,13 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.windowShadows) }
     }
 
+    /// Whether clicking one of Bitamp's windows from another app brings all of them forward,
+    /// as in Winamp. Off by default: macOS brings forward only the window clicked.
+    var raiseAllWindows: Bool {
+        get { defaults.bool(forKey: Key.raiseAllWindows) }
+        set { defaults.set(newValue, forKey: Key.raiseAllWindows) }
+    }
+
     /// The skin in use: "builtin:<id>" for a built-in skin, an installed skin's name, or nil
     /// for the default.
     var skinName: String? {
@@ -187,6 +194,7 @@ final class Preferences {
         static let skinName = "skin"
         static let scale = "scale"
         static let windowShadows = "windowShadows"
+        static let raiseAllWindows = "raiseAllWindows"
         static let ejectedPaks = "ejectedPaks"
     }
 }

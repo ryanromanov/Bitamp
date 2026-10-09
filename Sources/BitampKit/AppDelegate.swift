@@ -86,9 +86,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Clicking one window of an app in the background brings only that window forward.
-    /// Bitamp's windows go together, as in Winamp, so the rest come up just behind it, in
-    /// the order they were in.
+    /// With "Bring All Windows Forward" on, Bitamp's windows go together, as in Winamp: the
+    /// rest come up just behind it, in the order they were in.
     public func applicationDidBecomeActive(_ notification: Notification) {
+        guard preferences.raiseAllWindows else { return }
         // Bitamp's windows on this Space, front to back, panels included.
         let showing = (NSWindow.windowNumbers(options: []) ?? []).compactMap { NSApp.window(withWindowNumber: $0.intValue) }
         guard var above = showing.first else { return }
@@ -334,6 +335,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowGroup?.setShadows(preferences.windowShadows)
     }
 
+    @objc private func toggleRaiseAllWindows(_ sender: Any?) {
+        preferences.raiseAllWindows.toggle()
+    }
+
     @objc private func setScale(_ sender: NSMenuItem) {
         preferences.scale = sender.tag
         windowGroup?.setScale(CGFloat(sender.tag))
@@ -434,11 +439,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let equalizerShade = Menus.item("Shade Equalizer", #selector(toggleEqualizerShade(_:)), "w", [.control, .option])
         let playlistShade = Menus.item("Shade Playlist", #selector(togglePlaylistShade(_:)), "w", [.control, .shift])
         let shadows = Menus.item("Window Shadows", #selector(toggleShadows(_:)))
-        for item in [mainWindow, equalizer, playlist, paksWindow, regroup, minimize, equalizerShade, playlistShade, shadows] { item.target = self }
+        let raiseAll = Menus.item("Bring All Windows Forward", #selector(toggleRaiseAllWindows(_:)))
+        for item in [mainWindow, equalizer, playlist, paksWindow, regroup, minimize, equalizerShade, playlistShade, shadows, raiseAll] { item.target = self }
         let windowMenu = Menus.menu("Window", [
             mainWindow, equalizer, playlist, paksWindow, regroup, .separator(),
             mainShade, equalizerShade, playlistShade, .separator(),
-            Menus.submenu(Menus.menu("Size", sizes)), shadows, .separator(),
+            Menus.submenu(Menus.menu("Size", sizes)), shadows, raiseAll, .separator(),
             minimize,
         ])
         NSApp.windowsMenu = windowMenu
@@ -468,6 +474,7 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(togglePaks(_:)): item.state = windowGroup?.isVisible(.paks) == true ? .on : .off
         case #selector(setScale(_:)): item.state = item.tag == preferences.scale ? .on : .off
         case #selector(toggleShadows(_:)): item.state = preferences.windowShadows ? .on : .off
+        case #selector(toggleRaiseAllWindows(_:)): item.state = preferences.raiseAllWindows ? .on : .off
         case #selector(searchPak(_:)):
             guard let pak = pak(for: item) else { return false }
             return pak.isAvailable && paks.isInserted(pak)
