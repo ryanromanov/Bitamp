@@ -58,4 +58,4 @@ cp "$bin" "$pak/$executable"
 # Developer ID instead to distribute it.
 codesign --force --sign - "$pak/$executable"
 echo "Built $PWD/$pak"
-echo "Check it with: /Applications/Bitamp.app/Contents/MacOS/Bitamp --check-pak \"$pak\""
+echo "Check it with: /Applications/Bitamp.app/Contents/MacOS/Bitamp --check-pak \"$pak\" (Bitamp after 0.5.0)"
