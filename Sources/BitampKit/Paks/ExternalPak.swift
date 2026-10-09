@@ -54,7 +54,7 @@ final class ExternalPak: Pak {
     /// Where the Pak keeps files, and where Bitamp puts what it downloads for it.
     var cacheDirectory: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("dev.bitamp.Bitamp/Paks/\(manifest.id)", isDirectory: true)
+            .appendingPathComponent("com.ryanromanov.Bitamp/Paks/\(manifest.id)", isDirectory: true)
     }
 
     func connect() async throws {

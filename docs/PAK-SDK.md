@@ -154,7 +154,7 @@ Save it as `hello.py` in `Hello.bitpak`, `chmod +x` it, and point `pak.json`'s `
 
 - Talk to the program by hand first: `printf '%s\n' '{"id":1,"method":"search","params":{"term":""}}' | ./radio-pak`.
 - Install by double-clicking the `.bitpak`, dropping it on Bitamp, or File ▸ Install Expansion Pak…. Installing a Pak with the same id replaces the old one.
-- Installed Paks live in `~/Library/Application Support/Bitamp/Paks`; their caches in `~/Library/Caches/dev.bitamp.Bitamp/Paks`.
+- Installed Paks live in `~/Library/Application Support/Bitamp/Paks`; their caches in `~/Library/Caches/com.ryanromanov.Bitamp/Paks`.
 - Right-click the cartridge to search, change settings, eject or remove it.
 
 ## Trust
