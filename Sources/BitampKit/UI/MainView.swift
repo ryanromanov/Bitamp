@@ -77,6 +77,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     override func tick() {
         marquee.setText(titleText)
         marquee.tick()
+        controller.updateListener(visualizerOn: preferences.visMode != .off)
         controller.engine.analyzer.advance()
     }
 
@@ -278,10 +279,10 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         return player.currentTime
     }
 
-    /// The Pak playing audio Bitamp can't see, which the visualizer names instead of
-    /// lying flat.
+    /// The Pak playing audio Bitamp can't see or hear, which the visualizer names instead
+    /// of lying flat.
     private var badgePak: Pak? {
-        guard player.state != .stopped, !player.capabilities.contains(.visualizer) else { return nil }
+        guard player.state != .stopped, !controller.canVisualize else { return nil }
         return controller.playingPak
     }
 

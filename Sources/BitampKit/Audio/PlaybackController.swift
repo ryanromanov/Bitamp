@@ -11,6 +11,8 @@ final class PlaybackController {
     private(set) var player: PlaybackBackend
     private(set) var queue = PlayQueue()
     let info = TrackInfoStore()
+    /// Listens to a Pak that plays its own audio, so the visualizer can show it too.
+    private lazy var listener = PakAudioListener(analyzer: engine.analyzer)
     private let preferences: Preferences
     /// Short, marquee-sized messages about files that couldn't be opened.
     var onError: ((String) -> Void)?
@@ -330,6 +332,17 @@ final class PlaybackController {
     var playingPak: Pak? {
         guard player.nowPlaying != nil || fetching != nil, let url = loadedURL else { return nil }
         return paks.owner(of: url)
+    }
+
+    /// Whether the visualizer shows the current track: always through the engine, and for
+    /// a Pak's own player while the listener hears it.
+    var canVisualize: Bool {
+        player.capabilities.contains(.visualizer) || listener.isHearing
+    }
+
+    /// Listens to a Pak's own player while it plays and the visualizer is on. Called every frame.
+    func updateListener(visualizerOn: Bool) {
+        listener.update(listening: visualizerOn && player.state == .playing && !player.capabilities.contains(.visualizer))
     }
 
     /// Why a control does nothing for the current track, or nil when it works: a Pak
