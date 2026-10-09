@@ -137,10 +137,10 @@ final class Preferences {
         set { defaults.set(newValue, forKey: Key.queueIndex) }
     }
 
-    /// Points per skin pixel, 1 to 4. 2 is the normal size.
-    var scale: Int {
-        get { min(max(defaults.integer(forKey: Key.scale), SkinnedView.scales.lowerBound), SkinnedView.scales.upperBound) }
-        set { defaults.set(newValue, forKey: Key.scale) }
+    /// Points per skin pixel, one of `SkinnedView.scales`. 2 is the normal size.
+    var scale: CGFloat {
+        get { SkinnedView.nearestScale(to: defaults.double(forKey: Key.scale)) }
+        set { defaults.set(Double(newValue), forKey: Key.scale) }
     }
 
     /// macOS's soft drop shadow around each window. Off by default: the classic windows had none.

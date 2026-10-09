@@ -40,10 +40,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             NSSound.beep()
             mainView?.flash(message)
         }
-        let equalizerView = EqualizerView(controller: controller, skin: skin, scale: CGFloat(preferences.scale))
+        let equalizerView = EqualizerView(controller: controller, skin: skin, scale: preferences.scale)
         let playlistView = PlaylistView(controller: controller, preferences: preferences, skin: skin)
         playlistView.keyFallback = mainView
-        let pakView = PakView(controller: controller, skin: skin, scale: CGFloat(preferences.scale))
+        let pakView = PakView(controller: controller, skin: skin, scale: preferences.scale)
         pakView.onSearch = { [weak self] pak in self?.showSearch(pak) }
         pakView.onSettings = { [weak self] pak in self?.showSettings(pak) }
         pakView.onInstall = { [weak self] url in self?.installPak(url) }
@@ -353,8 +353,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func setScale(_ sender: NSMenuItem) {
-        preferences.scale = sender.tag
-        windowGroup?.setScale(CGFloat(sender.tag))
+        guard let scale = sender.representedObject as? CGFloat else { return }
+        preferences.scale = scale
+        windowGroup?.setScale(scale)
     }
 
     @objc private func minimize(_ sender: Any?) {
@@ -441,9 +442,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let paksWindow = Menus.item("Expansion Paks", #selector(togglePaks(_:)), "k", [.option])
         let regroup = Menus.item("Regroup Windows", #selector(regroupWindows(_:)), "r", [.option])
         let minimize = Menus.item("Minimize", #selector(minimize(_:)), "m", [.command])
-        let sizes = SkinnedView.scales.map { scale -> NSMenuItem in
-            let item = Menus.item("\(scale)×", #selector(setScale(_:)), "\(scale)", [.command])
-            item.tag = scale
+        let sizes = SkinnedView.scales.enumerated().map { index, scale -> NSMenuItem in
+            let title = scale.rounded() == scale ? String(Int(scale)) : String(Double(scale))
+            let item = Menus.item("\(title)×", #selector(setScale(_:)), "\(index + 1)", [.command])
+            item.representedObject = scale
             item.target = self
             return item
         }
@@ -485,7 +487,7 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(toggleEqualizer(_:)): item.state = windowGroup?.isVisible(.equalizer) == true ? .on : .off
         case #selector(togglePlaylist(_:)): item.state = windowGroup?.isVisible(.playlist) == true ? .on : .off
         case #selector(togglePaks(_:)): item.state = windowGroup?.isVisible(.paks) == true ? .on : .off
-        case #selector(setScale(_:)): item.state = item.tag == preferences.scale ? .on : .off
+        case #selector(setScale(_:)): item.state = item.representedObject as? CGFloat == preferences.scale ? .on : .off
         case #selector(toggleShadows(_:)): item.state = preferences.windowShadows ? .on : .off
         case #selector(toggleRaiseAllWindows(_:)): item.state = preferences.raiseAllWindows ? .on : .off
         case #selector(searchPak(_:)):

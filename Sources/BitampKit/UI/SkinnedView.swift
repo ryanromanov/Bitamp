@@ -7,12 +7,20 @@ import AppKit
 /// text) in `drawOverlay(in:)`, and handle the mouse in the `pixel…` methods.
 class SkinnedView: NSView {
     static let framesPerSecond = 30.0
-    static let scales: ClosedRange<Int> = 1...4
+    /// The window sizes, in points per skin pixel. 2 is the default. On a Retina display
+    /// each is a whole number of screen pixels per skin pixel (2, 3 and 4), so all stay sharp.
+    static let scales: [CGFloat] = [1, 1.5, 2]
+
+    /// The size in `scales` closest to `scale`, for sizes saved by older versions (3× and 4×)
+    /// or worked out from a window's width.
+    static func nearestScale(to scale: CGFloat) -> CGFloat {
+        scales.min { abs($0 - scale) < abs($1 - scale) }!
+    }
 
     var skin: Skin {
         didSet { skinDidChange() }
     }
-    /// Points per skin pixel. 2 is the normal size; on a Retina display every value is crisp.
+    /// Points per skin pixel, one of `scales`. 2 is the normal size.
     private(set) var scale: CGFloat
     weak var windowGroup: WindowGroup?
     /// Shows a message in the main window's marquee, or nil to clear it.
@@ -173,7 +181,7 @@ class SkinnedView: NSView {
         }
         render(into: canvas)
         context.interpolationQuality = .none
-        context.draw(canvas.image(), in: bounds)
+        drawCanvas(canvas.image(), in: context)
         drawOverlay(in: context)
         if shadowIsStale {
             // The shadow follows the window's pixels, so redo it once they're drawn.
@@ -198,6 +206,31 @@ class SkinnedView: NSView {
                 c.draw(skin.glyph(for: character), glyphX, y)
             }
         }
+    }
+
+    /// Draws the canvas at exactly `scale` points per pixel from the top-left corner.
+    /// AppKit sizes windows in whole points, so at 1.5× an odd number of pixels leaves half
+    /// a point over on the right or bottom. Stretching the art across it would make one
+    /// pixel wider than the rest, so the art keeps its exact size and the edge pixels fill
+    /// the strip.
+    private func drawCanvas(_ image: CGImage, in context: CGContext) {
+        let art = CGRect(x: 0, y: bounds.height - CGFloat(canvas.height) * scale,
+                         width: CGFloat(canvas.width) * scale, height: CGFloat(canvas.height) * scale)
+        context.draw(image, in: art)
+        let right = bounds.width - art.maxX, below = art.minY
+        guard right > 0 || below > 0 else { return }
+        // Image coordinates run from the top-left; drawing coordinates from the bottom-left.
+        func fill(_ pixels: CGRect, _ rect: CGRect) {
+            guard rect.width > 0, rect.height > 0, let piece = image.cropping(to: pixels) else { return }
+            context.draw(piece, in: rect)
+        }
+        let lastX = CGFloat(canvas.width - 1), lastY = CGFloat(canvas.height - 1)
+        fill(CGRect(x: lastX, y: 0, width: 1, height: CGFloat(canvas.height)),
+             CGRect(x: art.maxX, y: art.minY, width: right, height: art.height))
+        fill(CGRect(x: 0, y: lastY, width: CGFloat(canvas.width), height: 1),
+             CGRect(x: 0, y: 0, width: art.width, height: below))
+        fill(CGRect(x: lastX, y: lastY, width: 1, height: 1),
+             CGRect(x: art.maxX, y: 0, width: right, height: below))
     }
 
     // MARK: - Mouse

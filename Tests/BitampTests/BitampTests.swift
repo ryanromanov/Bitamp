@@ -310,6 +310,24 @@ import Testing
 
 @MainActor
 @Suite struct PreferencesTests {
+    @Test func sizesSnapToTheThreeOnOffer() throws {
+        let suite = "BitampTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = Preferences(defaults: defaults)
+        #expect(preferences.scale == 2)
+        // 3× and 4× were offered before; they become 2×.
+        for (saved, expected): (Double, CGFloat) in [(4, 2), (3, 2), (1, 1), (1.5, 1.5), (1.2, 1), (0, 1)] {
+            defaults.set(saved, forKey: "scale")
+            #expect(preferences.scale == expected)
+        }
+        // Older versions stored a whole number.
+        defaults.set(1, forKey: "scale")
+        #expect(preferences.scale == 1)
+        preferences.scale = 1.5
+        #expect(Preferences(defaults: defaults).scale == 1.5)
+    }
+
     @Test func copiesSettingsFromTheOldBundleIDOnce() throws {
         let suite = "BitampTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -1055,6 +1073,72 @@ import Testing
         view.skin = DefaultSkin(theme: .millennium)
         #expect(view.pixelSize == Layout.size)
         #expect(!view.isShapedWindow)
+    }
+
+    /// Draws `view` as a Retina screen would and counts screen pixels that differ from the
+    /// top-left screen pixel of their skin pixel. Past the art, on a half-point edge, they
+    /// should match the edge.
+    @MainActor func unevenPixels(_ view: NSView) -> Int {
+        guard let skinned = view as? SkinnedView,
+              let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(view.bounds.width * 2),
+                                         pixelsHigh: Int(view.bounds.height * 2), bitsPerSample: 8, samplesPerPixel: 4,
+                                         hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 32),
+              let data = rep.bitmapData else { return -1 }
+        rep.size = view.bounds.size
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let step = Int(skinned.scale * 2)
+        let artWidth = skinned.canvas.width * step, artHeight = skinned.canvas.height * step
+        func pixel(_ x: Int, _ y: Int) -> UInt32 {
+            data.advanced(by: y * rep.bytesPerRow + x * 4).withMemoryRebound(to: UInt32.self, capacity: 1) { $0.pointee }
+        }
+        var uneven = 0
+        for y in 0..<rep.pixelsHigh {
+            for x in 0..<rep.pixelsWide {
+                let sourceX = min(x, artWidth - 1) / step * step, sourceY = min(y, artHeight - 1) / step * step
+                if pixel(x, y) != pixel(sourceX, sourceY) { uneven += 1 }
+            }
+        }
+        return uneven
+    }
+
+    /// 1.5× keeps the windows docked, and the layout comes back at 1.5× after a relaunch.
+    @MainActor @Test func oneAndAHalfTimesKeepsTheLayout() {
+        _ = NSApplication.shared
+        let defaults = UserDefaults(suiteName: "BitampScale-\(UUID().uuidString)")!
+        let preferences = Preferences(defaults: defaults)
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences)
+        func windows() -> (SkinnedWindow, SkinnedWindow, SkinnedWindow, WindowGroup) {
+            let main = SkinnedWindow(view: MainView(controller: controller, preferences: preferences, skin: DefaultSkin()),
+                                     layoutName: "MainWindow", isMain: true)
+            let equalizer = SkinnedWindow(view: EqualizerView(controller: controller, skin: DefaultSkin(), scale: preferences.scale),
+                                          layoutName: "EqualizerWindow", isMain: false)
+            let playlist = SkinnedWindow(view: PlaylistView(controller: controller, preferences: preferences, skin: DefaultSkin()),
+                                         layoutName: "PlaylistWindow", isMain: false)
+            let group = WindowGroup(main: main, panels: [.equalizer: equalizer, .playlist: playlist], defaults: defaults)
+            group.restore()
+            return (main, equalizer, playlist, group)
+        }
+
+        let (main, equalizer, playlist, group) = windows()
+        defer { for window in [main, equalizer, playlist] { window.orderOut(nil) } }
+        group.regroup()
+        preferences.scale = 1.5
+        group.setScale(1.5)
+        // AppKit rounds windows to whole points: 412.5 becomes 413.
+        #expect(abs(main.frame.width - Layout.size.width * 1.5) <= 0.5 && main.frame.height == Layout.size.height * 1.5)
+        // Every skin pixel is 3 × 3 screen pixels on a Retina display, including in a
+        // playlist whose height is an odd number of pixels.
+        #expect(unevenPixels(main.contentView!) == 0)
+        playlist.setContentSize(NSSize(width: PlaylistLayout.width * 1.5, height: (PlaylistLayout.minHeight + PlaylistLayout.heightStep) * 1.5))
+        #expect(playlist.contentView!.bounds.height == 218)
+        #expect(unevenPixels(playlist.contentView!) == 0)
+        #expect(equalizer.frame.maxY == main.frame.minY && playlist.frame.maxY == equalizer.frame.minY)
+        #expect(equalizer.frame.minX == main.frame.minX && playlist.frame.minX == main.frame.minX)
+        group.saveLayout()
+
+        let (main2, equalizer2, playlist2, _) = windows()
+        defer { for window in [main2, equalizer2, playlist2] { window.orderOut(nil) } }
+        #expect(main2.frame == main.frame && equalizer2.frame == equalizer.frame && playlist2.frame == playlist.frame)
     }
 
     /// The main window hides and shows like Winamp's (Alt+W), something always stays on

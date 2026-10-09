@@ -214,10 +214,9 @@ final class WindowGroup {
         let savedMain = savedFrame(main)
         // The size the frames were saved at, from the main window's saved width. The skin and
         // shade state are restored by now, so the main view is already its saved width in pixels.
-        // Rounded, since a frame saved with another skin's width gives an in-between ratio.
+        // The nearest size, since a frame saved with another skin's width gives an in-between ratio.
         let savedScale = savedMain.map { frame in
-            min(max((frame.width / mainView.pixelSize.width).rounded(), CGFloat(SkinnedView.scales.lowerBound)),
-                CGFloat(SkinnedView.scales.upperBound))
+            SkinnedView.nearestScale(to: frame.width / mainView.pixelSize.width)
         } ?? mainView.scale
         let ratio = mainView.scale / savedScale
         if savedMain == nil { main.center() }
