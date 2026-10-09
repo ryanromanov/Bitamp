@@ -183,7 +183,7 @@ Save it as `hello.py` in `Hello.bitpak`, `chmod +x` it, and point `pak.json`'s `
 ## Trying it
 
 - Talk to the program by hand first: `printf '%s\n' '{"id":1,"method":"search","params":{"term":""}}' | ./radio-pak`.
-- Then let Bitamp check it, without installing it. (`--check-pak` arrives in the release after 0.5.0; until then, build Bitamp from this repository and run `.build/debug/Bitamp --check-pak …`.)
+- Then let Bitamp 0.6.0 or later check it, without installing it. (An older Bitamp ignores `--check-pak` and just opens; `brew upgrade --cask bitamp` updates it.)
 
   ```
   $ /Applications/Bitamp.app/Contents/MacOS/Bitamp --check-pak Radio.bitpak --setting server=http://nas.local:4533
