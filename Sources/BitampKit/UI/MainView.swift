@@ -155,15 +155,19 @@ final class MainView: SkinnedView, NSMenuItemValidation {
             c.draw(orb.positionThumb(pressed: pendingSeek != nil), x, Int(OrbLayout.position.minY) + 1)
         }
 
-        // Volume: filled from the bottom up to the thumb.
-        let volumeGroove = OrbLayout.volumeGroove
-        let y = Int(geometry(for: .volume).thumbStart(for: controller.volume))
-        let thumbBottom = y + Int(OrbLayout.volumeThumb.height)
-        let filled = Int(volumeGroove.maxY) - thumbBottom
-        c.fill(Int(volumeGroove.minX), thumbBottom, Int(volumeGroove.width), filled, orb.fill)
-        c.fill(Int(volumeGroove.minX), thumbBottom, 1, filled, orb.fillShine)
-        c.draw(orb.volumeThumb(pressed: slider?.control == .volume), Int(OrbLayout.volume.minX), y)
-        if controller.limitation(.volume) != nil { c.dim(OrbLayout.volume) }
+        // Volume: filled from the bottom up to the thumb, all in greys when the volume isn't
+        // Bitamp's to set. The groove is redrawn so it turns grey with the rest.
+        let volume = { (c: Canvas) in
+            let volumeGroove = OrbLayout.volumeGroove
+            let y = Int(self.geometry(for: .volume).thumbStart(for: self.controller.volume))
+            let thumbBottom = y + Int(OrbLayout.volumeThumb.height)
+            let filled = Int(volumeGroove.maxY) - thumbBottom
+            c.fill(volumeGroove, orb.groove)
+            c.fill(Int(volumeGroove.minX), thumbBottom, Int(volumeGroove.width), filled, orb.fill)
+            c.fill(Int(volumeGroove.minX), thumbBottom, 1, filled, orb.fillShine)
+            c.draw(orb.volumeThumb(pressed: self.slider?.control == .volume), Int(OrbLayout.volume.minX), y)
+        }
+        if controller.limitation(.volume) != nil { c.locked(volume) } else { volume(c) }
 
         for button in TransportButton.allCases {
             c.draw(orb.transport(button, pressed: isPressed(.transport(button))), at: OrbLayout.rect(of: button).origin)
@@ -415,20 +419,21 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     private func drawSliders(_ c: Canvas) {
         let lastLevel = Double(SkinElement.sliderLevels - 1)
 
-        let volumeLevel = Int((controller.volume * lastLevel).rounded())
-        c.draw(skin.image(for: .volumeBackground(level: volumeLevel)), at: Layout.volume.origin)
-        let volumeX = SliderGeometry.volume.thumbStart(for: controller.volume)
-        c.draw(skin.image(for: .volumeThumb(pressed: slider?.control == .volume)), Int(volumeX), Int(Layout.volume.minY) + 1)
+        let volumeAndBalance = { (c: Canvas) in
+            let volumeLevel = Int((self.controller.volume * lastLevel).rounded())
+            c.draw(self.skin.image(for: .volumeBackground(level: volumeLevel)), at: Layout.volume.origin)
+            let volumeX = SliderGeometry.volume.thumbStart(for: self.controller.volume)
+            c.draw(self.skin.image(for: .volumeThumb(pressed: self.slider?.control == .volume)),
+                   Int(volumeX), Int(Layout.volume.minY) + 1)
 
-        let balanceLevel = Int((abs(controller.balance) * lastLevel).rounded())
-        c.draw(skin.image(for: .balanceBackground(level: balanceLevel)), at: Layout.balance.origin)
-        let balanceX = SliderGeometry.balance.thumbStart(for: BalanceMapping.slider(fromBalance: controller.balance))
-        c.draw(skin.image(for: .balanceThumb(pressed: slider?.control == .balance)), Int(balanceX), Int(Layout.balance.minY) + 1)
-
-        if controller.limitation(.volume) != nil {
-            c.dim(Layout.volume)
-            c.dim(Layout.balance)
+            let balanceLevel = Int((abs(self.controller.balance) * lastLevel).rounded())
+            c.draw(self.skin.image(for: .balanceBackground(level: balanceLevel)), at: Layout.balance.origin)
+            let balanceX = SliderGeometry.balance.thumbStart(for: BalanceMapping.slider(fromBalance: self.controller.balance))
+            c.draw(self.skin.image(for: .balanceThumb(pressed: self.slider?.control == .balance)),
+                   Int(balanceX), Int(Layout.balance.minY) + 1)
         }
+        // Both locked, in greys, when the volume isn't Bitamp's to set.
+        if controller.limitation(.volume) != nil { c.locked(volumeAndBalance) } else { volumeAndBalance(c) }
 
         c.draw(skin.image(for: .positionBackground), at: Layout.position.origin)
         if canSeek, let track = player.nowPlaying {
