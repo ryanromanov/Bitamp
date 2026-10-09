@@ -93,6 +93,9 @@ final class PakConnection {
         process.executableURL = executable
         process.currentDirectoryURL = executable.deletingLastPathComponent()
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
+        // A Pak that exits before reading its input would otherwise kill Bitamp with SIGPIPE
+        // on the next write; this way the write just fails.
+        _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = stderr
