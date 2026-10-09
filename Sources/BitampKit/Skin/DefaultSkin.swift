@@ -10,6 +10,7 @@ final class DefaultSkin: Skin {
     let orb: OrbArt?
     private var cache: [SkinElement: CGImage] = [:]
     private var glyphs: [Character: CGImage] = [:]
+    private var titles: [String: CGImage] = [:]
 
     init(theme: SkinTheme = .classic) {
         self.theme = theme
@@ -39,6 +40,15 @@ final class DefaultSkin: Skin {
         canvas.glyph(character, 0, 0, theme.lcdOn)
         let image = canvas.image()
         glyphs[character] = image
+        return image
+    }
+
+    func titleImage(_ text: String, active: Bool) -> CGImage? {
+        let key = "\(text)-\(active)"
+        if let image = titles[key] { return image }
+        // The playlist's 30px of ridges either side of the name.
+        let image = playlistTitle(text, width: PixelFont.width(of: text) - 1 + 60, active: active)
+        titles[key] = image
         return image
     }
 
@@ -84,7 +94,7 @@ final class DefaultSkin: Skin {
         case .playlistTopLeft(let active): return playlistTop(width: 25, active: active, leftEdge: true)
         case .playlistTopTile(let active): return playlistTop(width: 25, active: active)
         case .playlistTopRight(let active): return playlistTop(width: 25, active: active, rightEdge: true)
-        case .playlistTitle(let active): return playlistTitle(active: active)
+        case .playlistTitle(let active): return playlistTitle("PLAYLIST", width: 100, active: active)
         case .playlistLeftTile: return playlistSide(width: Int(PlaylistLayout.left), left: true)
         case .playlistRightTile: return playlistSide(width: Int(PlaylistLayout.right), left: false)
         case .playlistBottomLeft: return playlistBottomLeft()
@@ -586,12 +596,11 @@ final class DefaultSkin: Skin {
         return c.image()
     }
 
-    private func playlistTitle(active: Bool) -> CGImage {
-        let c = Canvas(100, Int(PlaylistLayout.top))
+    private func playlistTitle(_ name: String, width: Int, active: Bool) -> CGImage {
+        let c = Canvas(width, Int(PlaylistLayout.top))
         titlePanel(c, 0, 0, c.width, c.height, active: active)
         c.fill(0, 0, c.width, 1, theme.faceLight)
         c.fill(0, c.height - 1, c.width, 1, theme.faceDark)
-        let name = "PLAYLIST"
         let textWidth = PixelFont.width(of: name) - 1
         let textX = (c.width - textWidth) / 2
         ridges(c, 0, textX - 6, rows: [5, 8, 11], active: active)
