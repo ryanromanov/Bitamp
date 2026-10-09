@@ -74,6 +74,21 @@ final class Canvas {
         }
     }
 
+    /// Text with 1px between each glyph's lit columns instead of fixed cells, for labels
+    /// that need to fit a small button.
+    func compactText(_ text: String, _ x: Int, _ y: Int, _ color: CGColor) {
+        var x = x
+        for character in PixelFont.normalize(text) {
+            let rows = PixelFont.compactRows(for: character)
+            for (row, bits) in rows.enumerated() {
+                for (column, bit) in bits.enumerated() where bit == "#" {
+                    fill(x + column, y + row, 1, 1, color)
+                }
+            }
+            x += rows[0].count + 1
+        }
+    }
+
     func image() -> CGImage {
         context.makeImage()!
     }

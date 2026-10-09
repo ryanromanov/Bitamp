@@ -174,10 +174,14 @@ final class DefaultSkin: Skin {
         return fromBottom == 0 ? 0.28 : fromBottom == 1 ? 0.14 : 0
     }
 
-    /// A window name on a title bar. Glossy bars get a dark drop shadow behind it.
+    /// A window name on a title bar. Glossy bars get a dark outline around it, since the
+    /// bright shine behind the text is too close to the text's own color.
     private func titleLabel(_ c: Canvas, _ text: String, _ x: Int, _ y: Int, active: Bool) {
         if case .gloss(_, let bottom, _, let inactiveBottom) = theme.titleStyle {
-            c.text(text, x + 1, y + 1, mix(active ? bottom : inactiveBottom, rgb(0x000000), 0.35))
+            let outline = mix(active ? bottom : inactiveBottom, rgb(0x000000), 0.35)
+            for dy in -1...1 {
+                for dx in -1...1 where dx != 0 || dy != 0 { c.text(text, x + dx, y + dy, outline) }
+            }
         }
         c.text(text, x, y, active ? theme.titleText : theme.titleTextInactive)
     }
@@ -670,7 +674,12 @@ final class DefaultSkin: Skin {
 
     private func playlistButton(_ c: Canvas, _ x: Int, _ y: Int, _ label: String) {
         buttonFace(c, x, y, 22, 18, pressed: false)
-        buttonLabel(c, label, x + (22 - PixelFont.width(of: label) + 1) / 2, y + 7, on: false)
+        // Compact spacing and a shadow straight down, so four-letter labels clear the edge.
+        let textX = x + (22 - PixelFont.compactWidth(of: label)) / 2
+        if case .gel(_, _, _, _, let edge) = theme.buttonStyle {
+            c.compactText(label, textX, y + 8, edge)
+        }
+        c.compactText(label, textX, y + 7, buttonText(on: false))
     }
 
     /// A label on a button. Gel buttons get a 1-pixel dark drop shadow, so the text stays
