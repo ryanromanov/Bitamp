@@ -310,6 +310,21 @@ import Testing
 
 @MainActor
 @Suite struct PreferencesTests {
+    @Test func copiesSettingsFromTheOldBundleIDOnce() throws {
+        let suite = "BitampTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(0.2, forKey: "volume")
+        OldSettings.copy(["volume": 0.9, "skin": "Orb"], into: defaults)
+        #expect(defaults.double(forKey: "volume") == 0.2)
+        #expect(defaults.string(forKey: "skin") == "Orb")
+
+        defaults.removeObject(forKey: "skin")
+        OldSettings.copyIfNeeded(into: defaults)
+        #expect(defaults.string(forKey: "skin") == nil)
+    }
+
     @Test func defaultsAndRoundTrip() throws {
         let suite = "BitampTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

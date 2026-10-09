@@ -190,3 +190,23 @@ final class Preferences {
         static let ejectedPaks = "ejectedPaks"
     }
 }
+
+/// Bitamp 0.3 and earlier had the bundle ID dev.bitamp.Bitamp, and macOS keeps settings
+/// per bundle ID. This brings them over to the new ID once, before anything reads them.
+public enum OldSettings {
+    static let domain = "dev.bitamp.Bitamp"
+    static let copiedKey = "copiedSettingsFromDevBitamp"
+
+    public static func copyIfNeeded(into defaults: UserDefaults = .standard) {
+        guard !defaults.bool(forKey: copiedKey) else { return }
+        copy(defaults.persistentDomain(forName: domain) ?? [:], into: defaults)
+    }
+
+    /// Copies each old setting the new ID doesn't have yet.
+    static func copy(_ old: [String: Any], into defaults: UserDefaults) {
+        for (key, value) in old where defaults.object(forKey: key) == nil {
+            defaults.set(value, forKey: key)
+        }
+        defaults.set(true, forKey: copiedKey)
+    }
+}

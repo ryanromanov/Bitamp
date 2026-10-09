@@ -37,7 +37,7 @@ Sources/Bitamp/
                               pressed/hover states; drag-and-drop of audio files
   UI/Controls.swift           small button / toggle / slider models (volume, balance, position bar)
   UI/Marquee.swift            scrolling title text
-Resources/Info.plist          bundle id dev.bitamp.Bitamp, audio CFBundleDocumentTypes (open via Finder/Dock)
+Resources/Info.plist          bundle id com.ryanromanov.Bitamp, audio CFBundleDocumentTypes (open via Finder/Dock)
 scripts/bundle.sh             swift build -c release → Bitamp.app/Contents/{MacOS,Info.plist} → codesign -s - (ad hoc)
 Tests/BitampTests/            time formatting, FFT-bin→bar mapping, layout hit-testing (if the CLT ships XCTest)
 README.md  LICENSE (MIT)  .gitignore (.build/, .swiftpm/, *.app, DerivedData/)
