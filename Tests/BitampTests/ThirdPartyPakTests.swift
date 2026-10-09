@@ -155,6 +155,24 @@ private final class Marker {}
         #expect(errors.count == 5)
         #expect(errors.last == PakConnection.Failure.keepsCrashing.localizedDescription)
     }
+
+    @Test func theCheckCatchesStrayOutput() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Answers hello and search by their ids (1 and 2), with a debugging line in between.
+        let program = """
+            #!/bin/sh
+            read line; echo '{"id":1,"result":{"account":{"state":"connected"}}}'
+            read line; echo "searching"; echo '{"id":2,"result":{"tracks":[]}}'
+            read line
+
+            """
+        var lines: [String] = []
+        let check = PakCheck(folder: try makePak("Chatty", manifest(), program: program)) { lines.append($0) }
+        #expect(await check.run() == false)
+        #expect(check.problems == 1)
+        #expect(lines.contains { $0.hasPrefix("✗ It printed a line that isn't an answer: searching") })
+        #expect(lines.contains("✓ shutdown: exited"))
+    }
 }
 
 /// The demo Pak's real program, run by the host as Bitamp runs it.
@@ -162,7 +180,7 @@ private final class Marker {}
     private let root = FileManager.default.temporaryDirectory.appendingPathComponent("BitampDemoPak-\(UUID().uuidString)")
 
     /// Demo.bitpak, put together from the test build's program and the manifest.
-    private func demoPak() throws -> ExternalPak {
+    private func demoFolder() throws -> URL {
         let program = Bundle(for: Marker.self).bundleURL.deletingLastPathComponent().appendingPathComponent("BitampDemoPak")
         let manifest = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .appendingPathComponent("../../Sources/BitampDemoPak/pak.json").standardizedFileURL
@@ -170,10 +188,26 @@ private final class Marker {}
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: manifest, to: folder.appendingPathComponent("pak.json"))
         try FileManager.default.copyItem(at: program, to: folder.appendingPathComponent("demo-pak"))
+        return folder
+    }
+
+    /// The demo, installed in a library of its own.
+    private func demoPak() throws -> ExternalPak {
+        let folder = try demoFolder()
         let library = PakLibrary(folder: root.appendingPathComponent("installed"), settings: MemorySettingsStore(
             defaults: UserDefaults(suiteName: "BitampDemoPak-\(UUID().uuidString)")!))
         try library.install(folder, reservedIDs: [])
         return try #require(library.installed().first)
+    }
+
+    @Test func passesTheCheck() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        var lines: [String] = []
+        let check = PakCheck(folder: try demoFolder(), reservedIDs: ["applemusic"]) { lines.append($0) }
+        #expect(await check.run(), "\(lines.joined(separator: "\n"))")
+        #expect(lines.first == "✓ pak.json: Demo Pak 1.0, id “demo”, runs demo-pak")
+        #expect(lines.contains("✓ track “ode-to-joy”: “Ode to Joy”"))
+        #expect(lines.last == "The Demo Pak looks good. Double-click it to install it.")
     }
 
     @Test func searchesLooksUpAndPlays() async throws {

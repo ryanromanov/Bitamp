@@ -130,16 +130,20 @@ final class ExternalPak: Pak {
         return file
     }
 
-    func trackURL(_ trackID: String) -> URL {
+    func trackURL(_ trackID: String) -> URL { Self.trackURL(trackID, pak: manifest.id) }
+
+    func trackID(_ url: URL) -> String? { Self.trackID(url, pak: manifest.id) }
+
+    static func trackURL(_ trackID: String, pak: String) -> URL {
         var components = URLComponents()
-        components.scheme = Self.scheme(for: manifest.id)
+        components.scheme = scheme(for: pak)
         components.host = "track"
         components.path = "/" + trackID
         return components.url!
     }
 
-    func trackID(_ url: URL) -> String? {
-        guard url.scheme?.lowercased() == Self.scheme(for: manifest.id), url.host == "track" else { return nil }
+    static func trackID(_ url: URL, pak: String) -> String? {
+        guard url.scheme?.lowercased() == scheme(for: pak), url.host == "track" else { return nil }
         let id = String(url.path.dropFirst())
         return id.isEmpty ? nil : id
     }

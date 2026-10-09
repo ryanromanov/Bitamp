@@ -27,28 +27,37 @@ final class PakConnection {
         }
     }
 
-    static let timeout: TimeInterval = 30
+    nonisolated static let timeout: TimeInterval = 30
     /// More crashes than this within `crashWindow` and the program isn't started again.
     static let maxCrashes = 3
     static let crashWindow: TimeInterval = 60
 
     private let executable: URL
     private let name: String
+    private let timeout: TimeInterval
     /// Sent first each time the program starts. Its answer goes to `onHello`.
     var hello: () -> (method: String, params: PakMethod.Hello)
     var onHello: ((PakMethod.AccountResult) -> Void)?
+    /// A line the program wrote to standard error. Logged unless set (`PakCheck` shows them).
+    var onLog: ((String) -> Void)?
+    /// A line on standard output that isn't the answer to a request. Logged unless set.
+    var onUnexpectedOutput: ((String) -> Void)?
 
     private var process: Process?
     private var input: FileHandle?
     private var nextID = 1
     private var pending: [Int: (method: String, continuation: CheckedContinuation<Data, Error>)] = [:]
     private var crashes: [Date] = []
+    /// The shutdown request, whose answer nothing waits for.
+    private var shutdownID: Int?
     /// Set while the program is starting, so concurrent requests wait for the same hello.
     private var starting: Task<Void, Error>?
 
-    init(executable: URL, name: String, hello: @escaping () -> (method: String, params: PakMethod.Hello)) {
+    init(executable: URL, name: String, timeout: TimeInterval = PakConnection.timeout,
+         hello: @escaping () -> (method: String, params: PakMethod.Hello)) {
         self.executable = executable
         self.name = name
+        self.timeout = timeout
         self.hello = hello
     }
 
@@ -67,6 +76,7 @@ final class PakConnection {
         guard let process, process.isRunning else { return }
         let id = nextID
         nextID += 1
+        shutdownID = id
         write(PakRequest(id: id, method: PakMethod.shutdown, params: PakMethod.Empty()))
         // A program that ignores the request goes anyway, a moment later.
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak process] in
@@ -112,16 +122,15 @@ final class PakConnection {
                 Task { @MainActor in self?.received(line) }
             }
         }
-        let name = self.name
         let logLines = LineBuffer()
-        stderr.fileHandleForReading.readabilityHandler = { handle in
+        stderr.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty else {
                 handle.readabilityHandler = nil
                 return
             }
             for line in logLines.append(data) {
-                NSLog("Bitamp: %@ Pak: %@", name, String(decoding: line, as: UTF8.self))
+                Task { @MainActor in self?.logged(String(decoding: line, as: UTF8.self)) }
             }
         }
         process.terminationHandler = { [weak self] ended in
@@ -165,7 +174,7 @@ final class PakConnection {
         let data: Data = try await withCheckedThrowingContinuation { continuation in
             pending[id] = (method, continuation)
             write(PakRequest(id: id, method: method, params: params))
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.timeout) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
                 MainActor.assumeIsolated {
                     guard let request = self?.pending.removeValue(forKey: id) else { return }
                     request.continuation.resume(throwing: Failure.timedOut(method))
@@ -191,13 +200,18 @@ final class PakConnection {
     }
 
     private func received(_ line: Data) {
-        guard let header = try? JSONDecoder().decode(ResponseID.self, from: line),
-              let request = pending.removeValue(forKey: header.id)
-        else {
-            NSLog("Bitamp: \(name) Pak said something unexpected: \(String(decoding: line, as: UTF8.self))")
+        let header = try? JSONDecoder().decode(ResponseID.self, from: line)
+        if let header, header.id == shutdownID { return }
+        guard let header, let request = pending.removeValue(forKey: header.id) else {
+            let text = String(decoding: line, as: UTF8.self)
+            if let onUnexpectedOutput { onUnexpectedOutput(text) } else { NSLog("Bitamp: %@ Pak said something unexpected: %@", name, text) }
             return
         }
         request.continuation.resume(returning: line)
+    }
+
+    private func logged(_ line: String) {
+        if let onLog { onLog(line) } else { NSLog("Bitamp: %@ Pak: %@", name, line) }
     }
 
     private struct ResponseID: Decodable {

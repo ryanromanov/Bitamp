@@ -40,7 +40,7 @@ To install a Pak, double-click its `.bitpak`, drop it on Bitamp, or use File ▸
 
 **Try the demo Pak.** It plays a few public-domain tunes (Ode to Joy, Für Elise, Greensleeves…) as chiptunes, made on your Mac, with a choice of waveform. Build it with `scripts/make-pak.sh` and double-click the `Demo.bitpak` it makes.
 
-**Write your own.** A Pak is a folder with a small manifest and a program that answers a few questions in JSON: search, describe a track, and say where its audio is. Write it in Swift with the `BitampPakSDK` library in this package, or in any language. [Writing an Expansion Pak](docs/PAK-SDK.md) has everything, including a complete Pak in a few dozen lines of Python.
+**Write your own.** A Pak is a folder with a small manifest and a program that answers a few questions in JSON: search, describe a track, and say where its audio is. Write it in Swift with the `BitampPakSDK` library in this package, or in any language. [Writing an Expansion Pak](docs/PAK-SDK.md) has everything, including a complete Pak in a few dozen lines of Python, and `Bitamp --check-pak` tries a Pak and tells you what to fix.
 
 ## Download
 
@@ -61,7 +61,8 @@ swift build            # debug build
 scripts/test.sh        # run tests (wraps swift test; see below)
 scripts/bundle.sh      # release build → Bitamp.app (--universal, --version X.Y.Z)
 open Bitamp.app
-scripts/make-pak.sh    # the demo Expansion Pak → Demo.bitpak (--universal)
+scripts/make-pak.sh    # the demo Expansion Pak → Demo.bitpak (--universal; works in your own Pak's package too)
+.build/debug/Bitamp --check-pak Demo.bitpak   # try a Pak without installing it
 ```
 
 `scripts/screenshots.sh` renders the pictures above (and `social-preview.png`, for the repository's social preview) into `docs/images` from the app's own views, with a made-up playlist.
