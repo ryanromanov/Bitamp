@@ -74,6 +74,32 @@ final class Canvas {
         }
     }
 
+    /// A window name on a glossy title bar. White text on the bright shine gets a soft dark
+    /// halo and a drop shadow; dark text gets a light line beneath it, pressed into the bar.
+    func glossTitle(_ text: String, _ x: Int, _ y: Int, color: CGColor, shadow: CGColor, dark: Bool) {
+        if dark {
+            textHalo(text, x, y, offsets: [(0, 1)], CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.5))
+        } else {
+            textHalo(text, x, y, offsets: [(1, 0), (-1, 0), (0, 1), (0, -1)], shadow.copy(alpha: 0.55)!)
+            self.text(text, x + 1, y + 1, shadow)
+        }
+        self.text(text, x, y, color)
+    }
+
+    /// Fills each pixel within `offsets` of the text's lit pixels once, so a translucent
+    /// color doesn't build up where offsets overlap.
+    func textHalo(_ text: String, _ x: Int, _ y: Int, offsets: [(Int, Int)], _ color: CGColor) {
+        var pixels = Set<[Int]>()
+        for (index, character) in PixelFont.normalize(text).enumerated() {
+            for (row, bits) in PixelFont.rows(for: character).enumerated() {
+                for (column, bit) in bits.enumerated() where bit == "#" {
+                    for (dx, dy) in offsets { pixels.insert([x + index * PixelFont.cellWidth + column + dx, y + row + dy]) }
+                }
+            }
+        }
+        for pixel in pixels { fill(pixel[0], pixel[1], 1, 1, color) }
+    }
+
     /// Text with 1px between each glyph's lit columns instead of fixed cells, for labels
     /// that need to fit a small button.
     func compactText(_ text: String, _ x: Int, _ y: Int, _ color: CGColor) {

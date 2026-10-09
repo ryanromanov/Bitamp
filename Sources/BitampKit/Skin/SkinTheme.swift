@@ -120,7 +120,7 @@ struct SkinTheme {
         faceLight: rgb(0xf7f9fc), faceHighlight: rgb(0xffffff), faceDark: rgb(0x6c778a),
         thumbPressed: rgb(0xd9e7f8), title: rgb(0x1a4a9e), groove: rgb(0x3f4a60),
         label: rgb(0x22304d), icon: rgb(0xffffff), iconDim: rgb(0xdbe8fa),
-        titleText: rgb(0xffffff), titleTextInactive: rgb(0xe6ebf2), indicatorOff: rgb(0x8f9aad),
+        titleText: rgb(0xffffff), titleTextInactive: rgb(0x4c5769), indicatorOff: rgb(0x8f9aad),
         lcd: rgb(0x06142e), lcdGhost: rgb(0x102a52), lcdOn: rgb(0x7fd9ff), lcdDim: rgb(0x2d6c96),
         accent: rgb(0x5fe1ff), accentDim: rgb(0x26476b), stopRed: rgb(0xff6060),
         levelLow: rgb(0x1f5fc9), levelMid: rgb(0x3aa8f0), levelHigh: rgb(0xa8f2ff),
