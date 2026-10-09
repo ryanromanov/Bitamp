@@ -786,6 +786,65 @@ import Testing
         #expect(try WszSkin(name: "None", files: ["main.png": small]).gen == nil)
     }
 
+    /// A run-length encoded bitmap: `compression` 1 is RLE8, 2 is RLE4.
+    func rleBitmap(width: Int, height: Int, bitsPerPixel: Int, compression: Int, palette: [UInt32], pixels: [UInt8]) -> Data {
+        func u16(_ v: Int) -> [UInt8] { [UInt8(v & 0xFF), UInt8(v >> 8 & 0xFF)] }
+        func u32(_ v: Int) -> [UInt8] { u16(v & 0xFFFF) + u16(v >> 16 & 0xFFFF) }
+        let offset = 14 + 40 + palette.count * 4
+        var bytes: [UInt8] = [0x42, 0x4D] + u32(offset + pixels.count) + u32(0) + u32(offset)
+        bytes += u32(40) + u32(width) + u32(height) + u16(1) + u16(bitsPerPixel) + u32(compression)
+        bytes += u32(pixels.count) + u32(2835) + u32(2835) + u32(palette.count) + u32(0)
+        for color in palette {
+            bytes += [UInt8(color & 0xFF), UInt8(color >> 8 & 0xFF), UInt8(color >> 16 & 0xFF), 0]
+        }
+        return Data(bytes + pixels)
+    }
+
+    /// Each pixel as 0xRRGGBB, top row first.
+    func colors(_ image: CGImage) -> [UInt32] {
+        var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        bytes.withUnsafeMutableBytes { buffer in
+            let context = CGContext(
+                data: buffer.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8,
+                bytesPerRow: image.width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        }
+        return stride(from: 0, to: bytes.count, by: 4).map {
+            UInt32(bytes[$0]) << 16 | UInt32(bytes[$0 + 1]) << 8 | UInt32(bytes[$0 + 2])
+        }
+    }
+
+    @Test func decodesRLE8IncludingDeltasThatSkipRows() throws {
+        // Bottom-up rows: a run; three literal pixels (padded to an even length) and a run;
+        // then a delta that skips the third row entirely and lands two pixels into the
+        // fourth, the case ImageIO decodes into the wrong rows. Skipped pixels take color 0.
+        let pixels: [UInt8] = [
+            4, 1, 0, 0,
+            0, 3, 2, 3, 2, 0, 1, 3, 0, 0,
+            0, 2, 2, 1, 2, 2, 0, 1,
+        ]
+        let palette: [UInt32] = [0x00C6FF, 0x111111, 0x222222, 0x333333]
+        let data = rleBitmap(width: 4, height: 4, bitsPerPixel: 8, compression: 1, palette: palette, pixels: pixels)
+        let image = try #require(RLEBitmap.decode(data))
+        let (o, a, b, c) = (palette[0], palette[1], palette[2], palette[3])
+        #expect(colors(image) == [o, o, b, b,  o, o, o, o,  b, c, b, c,  a, a, a, a])
+    }
+
+    @Test func decodesRLE4() throws {
+        // A run of alternating nibbles, then three literal nibbles packed into two bytes.
+        let pixels: [UInt8] = [3, 0x12, 0, 3, 0x30, 0x10, 0, 1]
+        let palette: [UInt32] = [0x000000, 0x111111, 0x222222, 0x333333]
+        let data = rleBitmap(width: 6, height: 1, bitsPerPixel: 4, compression: 2, palette: palette, pixels: pixels)
+        let image = try #require(RLEBitmap.decode(data))
+        #expect(colors(image) == [1, 2, 1, 3, 0, 1].map { palette[$0] })
+    }
+
+    @Test func leavesUncompressedBitmapsToImageIO() throws {
+        #expect(RLEBitmap.decode(try bmp(width: 4, height: 4, color: 0x123456)) == nil)
+        #expect(RLEBitmap.decode(Data("not a bitmap".utf8)) == nil)
+    }
+
     @Test func spriteMapStaysInsideClassicSheets() {
         // The classic sheet sizes; every mapped sprite must fit inside its sheet.
         let sheets: [String: CGSize] = [

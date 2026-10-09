@@ -39,8 +39,8 @@ final class WszSkin: Skin {
         self.fallback = fallback
         var sheets: [String: CGImage] = [:]
         for (file, data) in files where file.hasSuffix(".bmp") || file.hasSuffix(".png") {
-            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+            guard let image = RLEBitmap.decode(data) ?? CGImageSourceCreateWithData(data as CFData, nil)
+                .flatMap({ CGImageSourceCreateImageAtIndex($0, 0, nil) })
             else { continue }
             sheets[(file as NSString).deletingPathExtension] = image
         }
