@@ -268,7 +268,12 @@ final class OrbArt {
             let tab = OrbLayout.titleTab
             paint(c, OrbShape.roundRect(tab, 9), in: tab, edge: ink, gloss(tab.minY, tab.minY + 16, title.0, title.1))
             let text = OrbLayout.titleText
-            c.text("BITAMP", Int(text.x) + 1, Int(text.y) + 1, gel.edge)
+            // A dark outline, as on the other windows' glossy title bars.
+            for dy in -1...1 {
+                for dx in -1...1 where dx != 0 || dy != 0 {
+                    c.text("BITAMP", Int(text.x) + dx, Int(text.y) + dy, mix(title.1, rgb(0x000000), 0.35))
+                }
+            }
             c.text("BITAMP", Int(text.x), Int(text.y), active ? theme.titleText : theme.titleTextInactive)
 
             // The foot tab, then the body over both tabs.

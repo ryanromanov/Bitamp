@@ -24,6 +24,21 @@ enum PixelFont {
         text.count * cellWidth
     }
 
+    /// A glyph trimmed to its lit columns, for tightly spaced labels. "I" drops its serifs.
+    static func compactRows(for character: Character) -> [String] {
+        if character == "I" { return Array(repeating: "#", count: 5) }
+        let rows = rows(for: character)
+        let lit = rows.flatMap { $0.enumerated().filter { $0.element == "#" }.map(\.offset) }
+        guard let first = lit.min(), let last = lit.max() else { return rows }
+        return rows.map { String(Array($0)[first...last]) }
+    }
+
+    /// Width of `text` laid out by `Canvas.compactText`, from the first lit pixel to the last.
+    static func compactWidth(of text: String) -> Int {
+        let widths = normalize(text).map { compactRows(for: $0)[0].count }
+        return widths.reduce(0, +) + max(0, widths.count - 1)
+    }
+
     /// Five rows of four pixels; "#" is lit.
     static func rows(for character: Character) -> [String] {
         glyphs[character] ?? glyphs["?"]!
