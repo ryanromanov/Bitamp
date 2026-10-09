@@ -13,11 +13,14 @@ final class PakAudioListener {
     static let playerBundleID = "com.apple.MediaPlayer.RemotePlayerService"
     /// How often to look for the player's process again while tapping, in case it restarts.
     static let rescanInterval: TimeInterval = 1
+    /// A running tap that hears nothing for this long stops counting as working.
+    static let giveUpAfter: TimeInterval = 5
 
     private let analyzer: SpectrumAnalyzer
     private var tap: AnyObject?
     private var tapped: [AudioObjectID] = []
     private var scannedAt: TimeInterval = 0
+    private var startedAt: TimeInterval = 0
     /// When the tap last heard something other than silence, shared with the tap's queue.
     private let heard = HeardClock()
 
@@ -30,18 +33,31 @@ final class PakAudioListener {
         tap != nil && ProcessInfo.processInfo.systemUptime - heard.time < SpectrumAnalyzer.staleAfter
     }
 
+    /// Whether listening works: the tap has heard the player, and hasn't since failed or
+    /// gone quiet for long. Kept while paused, so the visualizer stays rather than
+    /// switching back to the Pak's badge.
+    private(set) var works = false
+
     /// Starts or stops listening. Called every frame, so it only looks for the player's
     /// process once every `rescanInterval`.
     func update(listening: Bool) {
         guard #available(macOS 14.2, *) else { return }
         guard listening else { return stop() }
         let now = ProcessInfo.processInfo.systemUptime
+        if isHearing {
+            works = true
+        } else if tap != nil, now - max(startedAt, heard.time) > Self.giveUpAfter {
+            works = false
+        }
         guard tap == nil || now - scannedAt >= Self.rescanInterval else { return }
         scannedAt = now
         let players = AudioProcesses.objects(bundleID: Self.playerBundleID)
         guard players != tapped else { return }
         stop()
-        guard !players.isEmpty else { return }
+        guard !players.isEmpty else {
+            works = false
+            return
+        }
         do {
             let analyzer = self.analyzer, heard = self.heard
             let tap = try ProcessTap(processes: players) { buffer, loud in
@@ -51,9 +67,11 @@ final class PakAudioListener {
             analyzer.sampleRate = tap.sampleRate
             self.tap = tap
             tapped = players
+            startedAt = now
         } catch {
             NSLog("Bitamp: couldn't listen to \(Self.playerBundleID): \(error)")
             tapped = players  // Don't retry until the processes change.
+            works = false
         }
     }
 

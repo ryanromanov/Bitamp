@@ -335,9 +335,9 @@ final class PlaybackController {
     }
 
     /// Whether the visualizer shows the current track: always through the engine, and for
-    /// a Pak's own player while the listener hears it.
+    /// a Pak's own player once the listener has heard it.
     var canVisualize: Bool {
-        player.capabilities.contains(.visualizer) || listener.isHearing
+        player.capabilities.contains(.visualizer) || listener.works
     }
 
     /// Listens to a Pak's own player while it plays and the visualizer is on. Called every frame.
