@@ -71,19 +71,20 @@ final class EqualizerView: SkinnedView {
         c.draw(skin.image(for: .eqTitleBar(active: isActive)), 0, 0)
         c.draw(skin.image(for: .eqShadeButton(pressed: isPressed(.shade))), at: ShadeLayout.eqShadeButton.origin)
         c.draw(skin.image(for: .eqCloseButton(pressed: isPressed(.close))), at: EQLayout.close.origin)
-        for button in [EQButton.on, .auto, .presets] {
-            let on = button == .on && settings.enabled
-            c.draw(skin.image(for: .eqButton(button, on: on, pressed: isPressed(.button(button)))), at: EQLayout.button(button).origin)
+        let controls = { (c: Canvas) in
+            for button in [EQButton.on, .auto, .presets] {
+                let on = button == .on && self.settings.enabled
+                c.draw(self.skin.image(for: .eqButton(button, on: on, pressed: self.isPressed(.button(button)))),
+                       at: EQLayout.button(button).origin)
+            }
+            self.drawGraph(c)
+            self.drawSlider(c, .preamp, self.settings.preamp)
+            for (index, gain) in self.settings.bands.enumerated() {
+                self.drawSlider(c, .band(index), gain)
+            }
         }
-        drawGraph(c)
-        drawSlider(c, .preamp, settings.preamp)
-        for (index, gain) in settings.bands.enumerated() {
-            drawSlider(c, .band(index), gain)
-        }
-        if controller.limitation(.equalizer) != nil {
-            c.dim(CGRect(x: 0, y: EQLayout.titleBar.maxY, width: EQLayout.size.width,
-                         height: EQLayout.size.height - EQLayout.titleBar.maxY))
-        }
+        // Locked, in greys, when the EQ can't reach what's playing.
+        if controller.limitation(.equalizer) != nil { c.locked(controls) } else { controls(c) }
     }
 
     private func renderShade(_ c: Canvas) {
@@ -93,14 +94,14 @@ final class EqualizerView: SkinnedView {
         let volume = controller.volume
         let balance = BalanceMapping.slider(fromBalance: controller.balance)
         let y = Int(ShadeLayout.eqVolume.minY)
-        c.draw(skin.image(for: .eqShadeVolumeThumb(ShadeThumb(volume))),
-               Int(ShadeSlider.volume.geometry.thumbStart(for: volume)), y)
-        c.draw(skin.image(for: .eqShadeBalanceThumb(ShadeThumb(balance))),
-               Int(ShadeSlider.balance.geometry.thumbStart(for: balance)), y)
-        if controller.limitation(.volume) != nil {
-            c.dim(ShadeLayout.eqVolume)
-            c.dim(ShadeLayout.eqBalance)
+        let thumbs = { (c: Canvas) in
+            c.draw(self.skin.image(for: .eqShadeVolumeThumb(ShadeThumb(volume))),
+                   Int(ShadeSlider.volume.geometry.thumbStart(for: volume)), y)
+            c.draw(self.skin.image(for: .eqShadeBalanceThumb(ShadeThumb(balance))),
+                   Int(ShadeSlider.balance.geometry.thumbStart(for: balance)), y)
         }
+        // Locked, in greys, when the volume isn't Bitamp's to set.
+        if controller.limitation(.volume) != nil { c.locked(thumbs) } else { thumbs(c) }
     }
 
     private func isPressed(_ control: EQLayout.Control) -> Bool {

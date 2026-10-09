@@ -42,9 +42,30 @@ final class Canvas {
         fill(x + w - 1, y, 1, h, dark)
     }
 
-    /// Darkens `rect`, for controls that do nothing right now.
-    func dim(_ rect: CGRect) {
-        fill(rect, CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.6))
+    /// Draws what `body` draws into a layer, then lays it on in greys: each color turned
+    /// grey, its contrast with what's behind it softened, so a control keeps all its detail
+    /// but looks locked. For controls that do nothing right now, on light or dark skins.
+    func locked(_ body: (Canvas) -> Void) {
+        let layer = Canvas(width, height)
+        body(layer)
+        guard let source = layer.context.data, let target = context.data else { return }
+        let from = source.bindMemory(to: UInt8.self, capacity: layer.context.bytesPerRow * height)
+        let to = target.bindMemory(to: UInt8.self, capacity: context.bytesPerRow * height)
+        func luminance(_ p: UnsafeMutablePointer<UInt8>, _ i: Int, _ alpha: Double) -> Double {
+            (0.299 * Double(p[i]) + 0.587 * Double(p[i + 1]) + 0.114 * Double(p[i + 2])) / alpha
+        }
+        for y in 0..<height {
+            for x in 0..<width {
+                let i = y * layer.context.bytesPerRow + x * 4, j = y * context.bytesPerRow + x * 4
+                let alpha = Double(from[i + 3]) / 255
+                guard alpha > 0 else { continue }
+                let behind = luminance(to, j, 1)
+                let grey = behind + (luminance(from, i, alpha) - behind) * 0.6
+                for k in 0..<3 {
+                    to[j + k] = UInt8(min(255, max(0, Double(to[j + k]) * (1 - alpha) + grey * alpha)).rounded())
+                }
+            }
+        }
     }
 
     /// Draws `image` upright with its top-left corner at (x, y).

@@ -180,6 +180,7 @@ final class OrbArt {
     }
 
     /// The filled part of the seek and volume tracks, with a brighter shine on one edge.
+    var groove: CGColor { outline }
     var fill: CGColor { theme.levelMid }
     var fillShine: CGColor { theme.levelHigh }
 
