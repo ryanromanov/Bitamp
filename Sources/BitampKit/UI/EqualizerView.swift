@@ -100,8 +100,12 @@ final class EqualizerView: SkinnedView {
             c.draw(self.skin.image(for: .eqShadeBalanceThumb(ShadeThumb(balance))),
                    Int(ShadeSlider.balance.geometry.thumbStart(for: balance)), y)
         }
-        // Locked, in greys, when the volume isn't Bitamp's to set.
-        if controller.limitation(.volume) != nil { c.locked(thumbs) } else { thumbs(c) }
+        // Locked, in lighter greys, when the volume isn't Bitamp's to set.
+        if controller.limitation(.volume) != nil {
+            c.locked(contrast: 1, lighten: MainView.lockedThumbLift, thumbs)
+        } else {
+            thumbs(c)
+        }
     }
 
     private func isPressed(_ control: EQLayout.Control) -> Bool {
