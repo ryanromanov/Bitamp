@@ -75,7 +75,35 @@ Bitamp starts the program when it's first needed and keeps it running. It sends 
 
 ## In Swift
 
-Depend on the `BitampPakSDK` product of this package, implement four methods, and hand the rest to `PakRunner`:
+Make a Swift package for your Pak that depends on `BitampPakSDK` from this repository. Only the SDK and the message types it uses get built, not Bitamp itself. Keep `pak.json` next to the code and leave it out of the target:
+
+```
+Radio/
+  Package.swift
+  Sources/RadioPak/main.swift
+  Sources/RadioPak/pak.json
+```
+
+```swift
+// swift-tools-version:5.9
+import PackageDescription
+
+let package = Package(
+    name: "RadioPak",
+    platforms: [.macOS(.v13)],
+    dependencies: [
+        .package(url: "https://github.com/ryanromanov/Bitamp.git", from: "0.5.0"),
+    ],
+    targets: [
+        .executableTarget(
+            name: "RadioPak",
+            dependencies: [.product(name: "BitampPakSDK", package: "Bitamp")],
+            exclude: ["pak.json"]),
+    ]
+)
+```
+
+Then implement four methods and hand the rest to `PakRunner`:
 
 ```swift
 import BitampPakSDK
@@ -106,7 +134,9 @@ final class RadioPak: PakProvider {
 PakRunner.run(RadioPak())
 ```
 
-Throw `PakFailure("…")` for a message the listener should see. `PakRunner.log(_:)` writes to Bitamp's log. Put the built program and `pak.json` in a `.bitpak` folder, as `scripts/make-pak.sh` does for the demo.
+Throw `PakFailure("…")` for a message the listener should see. `PakRunner.log(_:)` writes to Bitamp's log.
+
+To package it, copy [`scripts/make-pak.sh`](../scripts/make-pak.sh) into your package and run it there. It builds the program in release mode, puts it and `pak.json` in `Radio.bitpak` (named after the manifest's `name`), and ad-hoc signs it, which Apple Silicon requires. Add `--universal` for a program that also runs on Intel Macs. When a package has more than one Pak, name the target: `./make-pak.sh RadioPak`.
 
 ## In another language
 
@@ -148,11 +178,25 @@ for line in sys.stdin:
         break
 ```
 
-Save it as `hello.py` in `Hello.bitpak`, `chmod +x` it, and point `pak.json`'s `executable` at it. Remember `flush=True`, or the equivalent in your language: Bitamp waits for each whole line.
+Save it as `hello.py` in `Hello.bitpak`, `chmod +x` it, and point `pak.json`'s `executable` at it. Remember `flush=True`, or the equivalent in your language: Bitamp waits for each whole line. There's nothing to build; check it with `--check-pak` (below) and install it.
 
 ## Trying it
 
 - Talk to the program by hand first: `printf '%s\n' '{"id":1,"method":"search","params":{"term":""}}' | ./radio-pak`.
+- Then let Bitamp check it, without installing it:
+
+  ```
+  $ /Applications/Bitamp.app/Contents/MacOS/Bitamp --check-pak Radio.bitpak --setting server=http://nas.local:4533
+  ✓ pak.json: Radio Pak 1.0, id “radio”, runs radio-pak
+  ✓ hello: connected
+  ✓ search "": 25 tracks, first “Take Five”
+  ✓ track “42”: “Take Five”
+  ✓ resolve “42”: http://nas.local:4533/stream/42 (not downloaded)
+  ✓ shutdown: exited
+  The Radio Pak looks good. Double-click it to install it.
+  ```
+
+  It reads `pak.json` as installing does, then starts the program and has the same conversation Bitamp has, using the first track it finds. It catches what usually goes wrong: answers that aren't flushed, other output on standard output, a `track` that forgets an id `search` gave, a file that isn't there, and a program that doesn't exit. Settings take their defaults unless you give `--setting key=value`, once per setting. What the program writes to standard error is shown as it runs. It exits with status 0 when there's nothing to fix.
 - Install by double-clicking the `.bitpak`, dropping it on Bitamp, or File ▸ Install Expansion Pak…. Installing a Pak with the same id replaces the old one.
 - Installed Paks live in `~/Library/Application Support/Bitamp/Paks`; their caches in `~/Library/Caches/com.ryanromanov.Bitamp/Paks`.
 - Right-click the cartridge to search, change settings, eject or remove it.
