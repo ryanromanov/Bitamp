@@ -85,10 +85,13 @@ protocol Skin: AnyObject {
     /// A title sprite like the playlist's, with any window name, to center on the top tiles.
     /// Nil when the skin can't draw one, as `.wsz` skins only carry "PLAYLIST".
     func titleImage(_ text: String, active: Bool) -> CGImage?
+    /// The frame for windows beyond the classic three, from a `.wsz` skin's `gen.bmp`.
+    var gen: GenArt? { get }
 }
 
 extension Skin {
     var orb: OrbArt? { nil }
+    var gen: GenArt? { nil }
     func titleImage(_ text: String, active: Bool) -> CGImage? { nil }
 }
 
