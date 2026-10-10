@@ -116,7 +116,7 @@ final class PakView: SkinnedView {
     var onInsertedChange: ((Pak, Bool) -> Void)?
 
     /// The most rows the window grows to, fixed for snapshots. Otherwise as many as fit
-    /// on its screen.
+    /// between its top and the bottom of its screen.
     var rowLimit: Int? {
         didSet { resizeKeepingTopLeft() }
     }
@@ -134,7 +134,7 @@ final class PakView: SkinnedView {
     private var scrollAccumulator: CGFloat = 0
     private var pressed: Press?
     private var pressedInside = false
-    private var screenObservers: [NSObjectProtocol] = []
+    private var windowObservers: [NSObjectProtocol] = []
 
     /// Cartridges and plates by their index in `paks`.
     private enum Press: Equatable {
@@ -189,7 +189,16 @@ final class PakView: SkinnedView {
     }
 
     override func normalizedPixelSize(_ proposed: CGSize) -> CGSize {
-        PakLayout.size(for: paks.count, maxRows: rowLimit ?? Self.rowsOnScreen(window?.screen, scale))
+        PakLayout.size(for: paks.count, maxRows: maxRows)
+    }
+
+    private var maxRows: Int {
+        if let rowLimit { return rowLimit }
+        guard let window, let screen = (window.screen ?? NSScreen.main)?.visibleFrame else {
+            return Self.rowsOnScreen(nil, scale)
+        }
+        // It grows down from its top, which is usually under the playlist.
+        return PakLayout.rowsThatFit((min(window.frame.maxY, screen.maxY) - screen.minY) / scale)
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -197,7 +206,7 @@ final class PakView: SkinnedView {
         scrollRow = min(scrollRow, maxScrollRow)
     }
 
-    /// The rows that fit on `screen` (or the main one) at `scale`, so the whole window can.
+    /// The rows that fit on `screen` (or the main one) at `scale`, for before there's a window.
     private static func rowsOnScreen(_ screen: NSScreen?, _ scale: CGFloat) -> Int {
         guard let screen = screen ?? NSScreen.main else { return .max }
         return PakLayout.rowsThatFit(screen.visibleFrame.height / scale)
@@ -210,16 +219,24 @@ final class PakView: SkinnedView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        screenObservers.forEach(NotificationCenter.default.removeObserver)
-        screenObservers = []
+        windowObservers.forEach(NotificationCenter.default.removeObserver)
+        windowObservers = []
         guard let window else { return }
+        // Placing, regrouping, dragging and the Dock all move it, which changes the room below.
         let refit: @Sendable (Notification) -> Void = { [weak self] _ in
-            MainActor.assumeIsolated { self?.resizeKeepingTopLeft() }
+            MainActor.assumeIsolated { self?.refit() }
         }
-        screenObservers = [
-            NotificationCenter.default.addObserver(forName: NSWindow.didChangeScreenNotification, object: window, queue: .main, using: refit),
-            NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main, using: refit),
+        windowObservers = [
+            NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: window, queue: nil, using: refit),
+            NotificationCenter.default.addObserver(forName: NSWindow.didChangeScreenNotification, object: window, queue: nil, using: refit),
+            NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: nil, using: refit),
         ]
+    }
+
+    /// Resizes to the rows that fit where the window is now, if that's changed.
+    private func refit() {
+        guard normalizedPixelSize(pixelSize) != pixelSize else { return }
+        resizeKeepingTopLeft()
     }
 
     private var visibleRows: Int {

@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Foundation
 import Testing
@@ -29,6 +30,26 @@ private final class FakePak: Pak {
         guard url.host == "song" else { throw CocoaError(.fileReadUnsupportedScheme) }
         return .backend(backend)
     }
+}
+
+/// One of many Paks, for filling the Expansion Paks window.
+@MainActor
+private final class ShelfPak: Pak {
+    let id: String
+    var name: String { id.uppercased() }
+    var schemes: Set<String> { [id] }
+    let isAvailable = true
+    let account = PakAccount.connected(name: nil)
+
+    init(id: String) {
+        self.id = id
+    }
+
+    func connect() async throws {}
+    func disconnect() {}
+    func search(_ term: String) async throws -> [PakTrack] { [] }
+    func metadata(for url: URL) async -> PakTrack? { nil }
+    func playback(for url: URL) throws -> PakPlayback { throw CocoaError(.fileReadUnsupportedScheme) }
 }
 
 @MainActor
@@ -279,6 +300,27 @@ private final class FakeBackend: PlaybackBackend {
         #expect(PakLayout.rowsThatFit(704) == 8)
         #expect(PakLayout.rowsThatFit(50) == 1)
         #expect(PakLayout.rowsThatFit(PakLayout.size(for: 10, maxRows: 2).height) == 2)
+    }
+
+    @Test func paksWindowFitsBelowItsTop() {
+        // Nothing to fit without a display.
+        guard let screen = NSScreen.main?.visibleFrame else { return }
+        let preferences = Preferences(defaults: UserDefaults(suiteName: "BitampPaks-\(UUID().uuidString)")!)
+        let paks = PakRegistry((1...30).map { ShelfPak(id: "pak-\($0)") })
+        let view = PakView(controller: PlaybackController(engine: PlayerEngine(), preferences: preferences, paks: paks),
+                           skin: DefaultSkin(), scale: 2)
+        let window = SkinnedWindow(view: view, layoutName: "PaksTest", isMain: false)
+
+        // Halfway down the screen, as under the playlist: it stops at the bottom.
+        window.setFrameTopLeftPoint(NSPoint(x: screen.minX, y: screen.midY))
+        #expect(window.frame.minY >= screen.minY)
+        #expect(abs(window.frame.maxY - screen.midY) <= 1)
+        let low = window.frame.height
+
+        // Moved to the top, it grows into the room.
+        window.setFrameTopLeftPoint(NSPoint(x: screen.minX, y: screen.maxY))
+        #expect(window.frame.minY >= screen.minY)
+        #expect(window.frame.height > low)
     }
 
     @Test func labelsSplitByWords() {
