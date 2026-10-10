@@ -78,7 +78,9 @@ final class WindowGroup {
     let main: NSWindow
     private let panels: [Panel: NSWindow]
     private let defaults: UserDefaults
-    private var drag: (lead: NSWindow, mouse: NSPoint, origins: [(NSWindow, NSPoint)])?
+    /// The windows being dragged and their top-left corners at the start. Tops, since the
+    /// Expansion Paks window can change height as it moves, and it grows down from its top.
+    private var drag: (lead: NSWindow, mouse: NSPoint, tops: [(NSWindow, NSPoint)])?
     /// While the main window is hidden: where it sits against each window that was docked
     /// to it when it hid, so it can come back with them wherever they've moved.
     private var hiddenMainOffsets: [Panel: CGVector] = [:]
@@ -378,22 +380,23 @@ final class WindowGroup {
             let visible = windows.filter { $0 !== main && $0.isVisible }
             moving += Docking.docked(to: main.frame, among: visible.map(\.frame)).map { visible[$0] }
         }
-        drag = (window, NSEvent.mouseLocation, moving.map { ($0, $0.frame.origin) })
+        drag = (window, NSEvent.mouseLocation, moving.map { ($0, NSPoint(x: $0.frame.minX, y: $0.frame.maxY)) })
     }
 
     func continueDrag() {
-        guard let drag, let start = drag.origins.first?.1 else { return }
+        guard let drag, let start = drag.tops.first?.1 else { return }
         let mouse = NSEvent.mouseLocation
+        let size = drag.lead.frame.size
         let proposed = CGRect(
-            origin: CGPoint(x: start.x + mouse.x - drag.mouse.x, y: start.y + mouse.y - drag.mouse.y),
-            size: drag.lead.frame.size)
+            origin: CGPoint(x: start.x + mouse.x - drag.mouse.x, y: start.y + mouse.y - drag.mouse.y - size.height),
+            size: size)
         let stationary = windows.filter { window in
-            window.isVisible && !drag.origins.contains { $0.0 === window }
+            window.isVisible && !drag.tops.contains { $0.0 === window }
         }
         let snapped = Docking.snap(proposed, to: stationary.map(\.frame), within: drag.lead.screen?.visibleFrame)
-        let (dx, dy) = (snapped.x - start.x, snapped.y - start.y)
-        for (window, origin) in drag.origins {
-            window.setFrameOrigin(NSPoint(x: origin.x + dx, y: origin.y + dy))
+        let (dx, dy) = (snapped.x - start.x, snapped.y + size.height - start.y)
+        for (window, top) in drag.tops {
+            window.setFrameTopLeftPoint(NSPoint(x: top.x + dx, y: top.y + dy))
         }
     }
 
