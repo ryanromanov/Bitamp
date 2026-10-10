@@ -68,6 +68,13 @@ struct SnapshotTests {
                                    skin: skin, scale: 2)
             try save(manyView, "\(name)-paks-rows")
 
+            // More than fit: two rows in view, and the scroll thumb.
+            let lots = PakRegistry((1...10).map { SnapshotPak(id: "pak-\($0)", name: "Pak \($0)") }, preferences: preferences())
+            let lotsView = PakView(controller: PlaybackController(engine: PlayerEngine(), preferences: preferences(), paks: lots),
+                                   skin: skin, scale: 2)
+            lotsView.rowLimit = 2
+            try save(lotsView, "\(name)-paks-scroll")
+
             // The shade strips.
             let views: [(String, SkinnedView)] = [
                 ("main", MainView(controller: controller, preferences: preferences(), skin: skin)),
