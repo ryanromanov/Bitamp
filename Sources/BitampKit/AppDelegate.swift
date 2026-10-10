@@ -171,6 +171,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let existing = paks.paks.first { $0.id == manifest.id } as? ExternalPak
+        // The installed Pak itself, dragged in from the Paks folder: nothing to replace.
+        if let existing, pakLibrary.contains(url) {
+            pakView?.paksChanged(revealing: existing)
+            windowGroup?.setVisible(.paks, true)
+            mainView?.flash("\(existing.name) PAK IS ALREADY INSTALLED", for: 2)
+            return
+        }
         let alert = NSAlert()
         alert.messageText = existing == nil
             ? "Install the “\(manifest.name)” Expansion Pak?"

@@ -121,6 +121,14 @@ private final class Marker {}
         #expect(library.installed().count == 1)
         #expect(throws: PakLibrary.InstallError.self) { try library.install(source, reservedIDs: ["radio"]) }
 
+        // The installed copy itself, as if dragged from the Paks folder: left as it is.
+        let copy = library.installed()[0].folder
+        #expect(library.contains(copy))
+        #expect(!library.contains(source))
+        try library.install(copy, reservedIDs: [])
+        #expect(library.installed().map(\.id) == ["radio"])
+        #expect(library.installed()[0].isAvailable)
+
         installed = library.installed()
         try library.remove(installed[0])
         #expect(library.installed().isEmpty)
