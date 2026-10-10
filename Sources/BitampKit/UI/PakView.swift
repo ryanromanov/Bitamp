@@ -29,9 +29,24 @@ enum PakLayout {
         max(1, (count + slotCount - 1) / slotCount)
     }
 
-    /// Room for `count` Paks, three to a row.
-    static func size(for count: Int) -> CGSize {
-        CGSize(width: size.width, height: size.height + CGFloat((rows(for: count) - 1) * rowHeight))
+    /// Room for `count` Paks, three to a row, but no more than `maxRows` rows; the rest
+    /// scroll.
+    static func size(for count: Int, maxRows: Int = .max) -> CGSize {
+        let rows = min(rows(for: count), max(1, maxRows))
+        return CGSize(width: size.width, height: size.height + CGFloat((rows - 1) * rowHeight))
+    }
+
+    /// How many rows a window `height` pixels tall shows, at least one.
+    static func rowsThatFit(_ height: CGFloat) -> Int {
+        max(1, Int(((height - size.height) / CGFloat(rowHeight)).rounded(.down)) + 1)
+    }
+
+    /// Where the scroll thumb runs, when there are more rows than fit: the playlist's
+    /// groove, or just inside a `gen.bmp` frame's right edge.
+    static func scrollTrack(in size: CGSize, gen: Bool) -> CGRect {
+        let (top, bottom) = gen ? (GenArt.topHeight, GenArt.bottomHeight) : (top, bottom)
+        return CGRect(x: Int(size.width) - (gen ? 16 : 15), y: top,
+                      width: Int(PlaylistLayout.scrollThumb.width), height: Int(size.height) - top - bottom)
     }
 
     static func content(in size: CGSize) -> CGRect {
@@ -100,18 +115,34 @@ final class PakView: SkinnedView {
     /// Called after a Pak is inserted (true) or ejected (false).
     var onInsertedChange: ((Pak, Bool) -> Void)?
 
+    /// The most rows the window grows to, fixed for snapshots. Otherwise as many as fit
+    /// on its screen.
+    var rowLimit: Int? {
+        didSet { resizeKeepingTopLeft() }
+    }
+
     private var paks: [Pak] { controller.paks.paks }
     /// How far each cartridge has risen out of its slot, animated toward 0 or `ejectRise`.
     private var rise: [String: Double] = [:]
-    /// Account states, read a few times a second rather than every frame.
+    /// Account states and whether each Pak can run here, read for the Paks in view a few
+    /// times a second while the window shows, rather than every frame.
     private var accounts: [String: PakAccount] = [:]
+    private var available: [String: Bool] = [:]
+    private var wasShown = false
+    /// The top row in view, when there are more than fit.
+    private var scrollRow = 0
+    private var scrollAccumulator: CGFloat = 0
     private var pressed: Press?
     private var pressedInside = false
+    private var screenObservers: [NSObjectProtocol] = []
 
+    /// Cartridges and plates by their index in `paks`.
     private enum Press: Equatable {
         case close
         case cartridge(Int)
         case plate(Int)
+        case scrollbar
+        case scrollThumb(grab: CGFloat)
     }
 
     // The cartridge's plastic and label.
@@ -128,17 +159,28 @@ final class PakView: SkinnedView {
 
     init(controller: PlaybackController, skin: Skin, scale: CGFloat) {
         self.controller = controller
-        super.init(pixelSize: PakLayout.size(for: controller.paks.paks.count), skin: skin, scale: scale)
-        refreshAccounts()
-        for pak in paks { rise[pak.id] = targetRise(pak) }
+        super.init(pixelSize: PakLayout.size(for: controller.paks.paks.count, maxRows: Self.rowsOnScreen(nil, scale)),
+                   skin: skin, scale: scale)
+        refresh()
+        snapRises()
         registerForDraggedTypes([.fileURL])
     }
 
-    /// Call after Paks are installed or removed: the window grows or shrinks to fit them.
-    func paksChanged() {
-        refreshAccounts()
-        for pak in paks where rise[pak.id] == nil { rise[pak.id] = targetRise(pak) }
+    /// Call after Paks are installed or removed: the window grows or shrinks to fit them,
+    /// and scrolls to `revealing`, if given.
+    func paksChanged(revealing pak: Pak? = nil) {
         resizeKeepingTopLeft()
+        if let pak, let index = paks.firstIndex(where: { $0 === pak }) {
+            let row = index / PakLayout.slotCount
+            if row < scrollRow {
+                scrollRow = row
+            } else if row >= scrollRow + visibleRows {
+                scrollRow = row - visibleRows + 1
+            }
+        }
+        scrollRow = min(scrollRow, maxScrollRow)
+        refresh()
+        snapRises()
         needsDisplay = true
     }
 
@@ -147,25 +189,101 @@ final class PakView: SkinnedView {
     }
 
     override func normalizedPixelSize(_ proposed: CGSize) -> CGSize {
-        PakLayout.size(for: paks.count)
+        PakLayout.size(for: paks.count, maxRows: rowLimit ?? Self.rowsOnScreen(window?.screen, scale))
     }
 
-    private var slotCount: Int {
-        PakLayout.rows(for: paks.count) * PakLayout.slotCount
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        scrollRow = min(scrollRow, maxScrollRow)
+    }
+
+    /// The rows that fit on `screen` (or the main one) at `scale`, so the whole window can.
+    private static func rowsOnScreen(_ screen: NSScreen?, _ scale: CGFloat) -> Int {
+        guard let screen = screen ?? NSScreen.main else { return .max }
+        return PakLayout.rowsThatFit(screen.visibleFrame.height / scale)
+    }
+
+    override func setScale(_ scale: CGFloat) {
+        super.setScale(scale)
+        resizeKeepingTopLeft()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        screenObservers.forEach(NotificationCenter.default.removeObserver)
+        screenObservers = []
+        guard let window else { return }
+        let refit: @Sendable (Notification) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated { self?.resizeKeepingTopLeft() }
+        }
+        screenObservers = [
+            NotificationCenter.default.addObserver(forName: NSWindow.didChangeScreenNotification, object: window, queue: .main, using: refit),
+            NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main, using: refit),
+        ]
+    }
+
+    private var visibleRows: Int {
+        PakLayout.rowsThatFit(pixelSize.height)
+    }
+
+    private var maxScrollRow: Int {
+        max(0, PakLayout.rows(for: paks.count) - visibleRows)
+    }
+
+    /// The indices into `paks` of the Paks in view.
+    private var visibleIndices: Range<Int> {
+        let first = min(scrollRow * PakLayout.slotCount, paks.count)
+        return first..<min(paks.count, first + visibleRows * PakLayout.slotCount)
+    }
+
+    /// Which slot in view the Pak at `index` sits in, counting from the top-left one.
+    private func position(_ index: Int) -> Int {
+        index - scrollRow * PakLayout.slotCount
+    }
+
+    private func isAvailable(_ pak: Pak) -> Bool {
+        available[pak.id] ?? pak.isAvailable
     }
 
     private func targetRise(_ pak: Pak) -> Double {
-        pak.isAvailable && controller.paks.isInserted(pak) ? 0 : Double(PakLayout.ejectRise)
+        isAvailable(pak) && controller.paks.isInserted(pak) ? 0 : Double(PakLayout.ejectRise)
     }
 
-    private func refreshAccounts() {
-        for pak in paks where pak.isAvailable { accounts[pak.id] = pak.account }
+    /// Rereads the Paks in view.
+    private func refresh() {
+        for pak in visibleIndices.map({ paks[$0] }) {
+            available[pak.id] = pak.isAvailable
+            if available[pak.id] == true { accounts[pak.id] = pak.account }
+        }
+    }
+
+    /// Puts the cartridges in view straight where they belong, without sliding.
+    private func snapRises() {
+        for index in visibleIndices { rise[paks[index].id] = targetRise(paks[index]) }
+    }
+
+    private func scroll(to row: Int) {
+        let row = min(max(row, 0), maxScrollRow)
+        guard row != scrollRow else { return }
+        scrollRow = row
+        refresh()
+        snapRises()
     }
 
     override func tick() {
-        if frameCount % 10 == 0 { refreshAccounts() }
+        // Nothing to read or animate while the window is hidden.
+        let shown = window?.isVisible == true
+        defer { wasShown = shown }
+        guard shown else { return }
+        if !wasShown {
+            refresh()
+            snapRises()
+        } else if frameCount % 10 == 0 {
+            refresh()
+        }
         // Slide toward inserted or ejected, a pixel or so a frame.
-        for pak in paks {
+        for index in visibleIndices {
+            let pak = paks[index]
             let target = targetRise(pak)
             let current = rise[pak.id] ?? target
             rise[pak.id] = abs(target - current) < 0.6 ? target : current + (target - current) * 0.35
@@ -183,19 +301,42 @@ final class PakView: SkinnedView {
             c.fill(PakLayout.genContent(in: size), colors.normalBackground)
         } else {
             drawPlaylistFrame(c, colors)
-            c.fill(PakLayout.content(in: size), colors.normalBackground)
+            var content = PakLayout.content(in: size)
+            // Leave the playlist's scrollbar groove showing when there's something to scroll.
+            if maxScrollRow > 0 { content.size.width = scrollTrack.minX - content.minX }
+            c.fill(content, colors.normalBackground)
         }
-        for index in 0..<slotCount {
+        for position in 0..<visibleRows * PakLayout.slotCount {
+            let index = scrollRow * PakLayout.slotCount + position
             if index < paks.count {
                 drawSlot(c, index, pak: paks[index], colors)
             } else {
-                drawEmptySlot(c, index, colors)
+                drawEmptySlot(c, position, colors)
             }
         }
+        if maxScrollRow > 0 {
+            c.draw(skin.image(for: .playlistScrollThumb(pressed: isDraggingThumb)), at: scrollThumbRect.origin)
+        }
+    }
+
+    private var isDraggingThumb: Bool {
+        if case .scrollThumb? = pressed { return true }
+        return false
     }
 
     private var closeRect: CGRect {
         skin.gen == nil ? PakLayout.close(in: pixelSize) : PakLayout.genClose(in: pixelSize)
+    }
+
+    private var scrollTrack: CGRect {
+        PakLayout.scrollTrack(in: pixelSize, gen: skin.gen != nil)
+    }
+
+    private var scrollThumbRect: CGRect {
+        let track = scrollTrack
+        let travel = track.height - PlaylistLayout.scrollThumb.height
+        let t = maxScrollRow == 0 ? 0 : CGFloat(scrollRow) / CGFloat(maxScrollRow)
+        return CGRect(origin: CGPoint(x: track.minX, y: track.minY + (travel * t).rounded()), size: PlaylistLayout.scrollThumb)
     }
 
     /// The playlist's top and side tiles, and a closing strip from its bottom tile.
@@ -300,14 +441,16 @@ final class PakView: SkinnedView {
     }
 
     private func drawSlot(_ c: Canvas, _ index: Int, pak: Pak, _ colors: PlaylistColors) {
-        let slot = PakLayout.slot(index)
-        let inserted = pak.isAvailable && controller.paks.isInserted(pak)
+        let position = position(index)
+        let slot = PakLayout.slot(position)
+        let available = isAvailable(pak)
+        let inserted = available && controller.paks.isInserted(pak)
         let rise = Int((rise[pak.id] ?? 0).rounded())
         drawSocket(c, slot, colors)
-        drawCartridge(c, PakLayout.cartridge(index, rise: rise), pak: pak, inserted: inserted,
+        drawCartridge(c, PakLayout.cartridge(position, rise: rise), pak: pak, inserted: inserted,
                       pressed: pressed == .cartridge(index) && pressedInside)
-        drawPlate(c, index, colors, inserted: inserted, pressed: pressed == .plate(index) && pressedInside)
-        drawStatus(c, index, status(of: pak, inserted: inserted), colors.normal)
+        drawPlate(c, position, colors, inserted: inserted, pressed: pressed == .plate(index) && pressedInside)
+        drawStatus(c, position, status(of: pak, available: available, inserted: inserted), colors.normal)
     }
 
     private func drawEmptySlot(_ c: Canvas, _ index: Int, _ colors: PlaylistColors) {
@@ -394,8 +537,8 @@ final class PakView: SkinnedView {
         c.text(text, x, PakLayout.statusY(index), color)
     }
 
-    private func status(of pak: Pak, inserted: Bool) -> String {
-        guard pak.isAvailable else { return "UNAVAILABLE" }
+    private func status(of pak: Pak, available: Bool, inserted: Bool) -> String {
+        guard available else { return "UNAVAILABLE" }
         guard inserted else { return "EJECTED" }
         if controller.playingPak === pak { return "PLAYING" }
         switch accounts[pak.id] {
@@ -424,11 +567,12 @@ final class PakView: SkinnedView {
 
     private func press(at point: CGPoint) -> Press? {
         if closeRect.contains(point) { return .close }
-        for index in paks.indices {
-            let plate = PakLayout.plate(index)
+        if maxScrollRow > 0, scrollTrack.contains(point) { return .scrollbar }
+        for index in visibleIndices {
+            let plate = PakLayout.plate(position(index))
             if plate.contains(point) { return .plate(index) }
             let rise = Int((rise[paks[index].id] ?? 0).rounded())
-            let cartridge = PakLayout.cartridge(index, rise: rise)
+            let cartridge = PakLayout.cartridge(position(index), rise: rise)
             let visible = CGRect(x: cartridge.minX, y: cartridge.minY, width: cartridge.width,
                                  height: plate.minY - cartridge.minY)
             if visible.contains(point) { return .cartridge(index) }
@@ -438,12 +582,29 @@ final class PakView: SkinnedView {
 
     override func pixelMouseDown(at point: CGPoint, event: NSEvent) -> Bool {
         guard let press = press(at: point) else { return false }
+        if press == .scrollbar {
+            // Grab the thumb, or page toward where the track was clicked.
+            let thumb = scrollThumbRect
+            if thumb.contains(point) {
+                pressed = .scrollThumb(grab: point.y - thumb.minY)
+            } else {
+                scroll(to: scrollRow + (point.y < thumb.minY ? -visibleRows : visibleRows))
+            }
+            return true
+        }
         pressed = press
         pressedInside = true
         return true
     }
 
     override func pixelMouseDragged(to point: CGPoint, event: NSEvent) {
+        if case .scrollThumb(let grab)? = pressed {
+            let track = scrollTrack
+            let travel = track.height - PlaylistLayout.scrollThumb.height
+            let t = travel > 0 ? min(max((point.y - grab - track.minY) / travel, 0), 1) : 0
+            scroll(to: Int((t * CGFloat(maxScrollRow)).rounded()))
+            return
+        }
         pressedInside = pressed != nil && press(at: point) == pressed
     }
 
@@ -451,6 +612,8 @@ final class PakView: SkinnedView {
         defer { pressed = nil }
         guard let pressed, press(at: point) == pressed else { return }
         switch pressed {
+        case .scrollbar, .scrollThumb:
+            break
         case .close:
             windowGroup?.setVisible(.paks, false)
         case .cartridge(let index):
@@ -509,7 +672,17 @@ final class PakView: SkinnedView {
 
     /// Right-clicking a slot's plate means its cartridge too.
     private func plateIndex(at point: CGPoint) -> Press? {
-        paks.indices.first { PakLayout.plate($0).contains(point) }.map { .cartridge($0) }
+        visibleIndices.first { PakLayout.plate(position($0)).contains(point) }.map { .cartridge($0) }
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard maxScrollRow > 0 else { return }
+        let rows = event.hasPreciseScrollingDeltas
+            ? event.scrollingDeltaY / (CGFloat(PakLayout.rowHeight) * scale) : event.scrollingDeltaY
+        scrollAccumulator -= rows
+        let whole = Int(scrollAccumulator.rounded(.towardZero))
+        scrollAccumulator -= CGFloat(whole)
+        scroll(to: scrollRow + whole)
     }
 
     @objc private func settingsItem(_ sender: NSMenuItem) {

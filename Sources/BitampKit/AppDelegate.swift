@@ -187,7 +187,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             try pakLibrary.install(url, reservedIDs: Set(builtInPaks.map(\.id)))
             guard let installed = pakLibrary.installed().first(where: { $0.id == manifest.id }) else { return }
             paks.register(installed)
-            pakView?.paksChanged()
+            pakView?.paksChanged(revealing: installed)
             windowGroup?.setVisible(.paks, true)
             mainView?.flash("\(installed.name) PAK INSTALLED", for: 2)
             if installed.hasSettings && installed.account == .disconnected { showSettings(installed) }

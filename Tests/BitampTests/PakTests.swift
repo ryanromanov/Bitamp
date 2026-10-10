@@ -268,6 +268,19 @@ private final class FakeBackend: PlaybackBackend {
         #expect(controller.limitation(.volume) != nil)
     }
 
+    @Test func paksWindowStopsGrowingAtTheScreen() {
+        // Three to a row, 116 pixels for the first and 84 for each after.
+        #expect(PakLayout.size(for: 3).height == 116)
+        #expect(PakLayout.size(for: 10).height == 368)
+        #expect(PakLayout.size(for: 10, maxRows: 2).height == 200)
+        #expect(PakLayout.size(for: 1, maxRows: 0).height == 116)
+        // A screen 700 pixels tall fits 7 rows (620), not 8 (704); a tiny one still gets one.
+        #expect(PakLayout.rowsThatFit(700) == 7)
+        #expect(PakLayout.rowsThatFit(704) == 8)
+        #expect(PakLayout.rowsThatFit(50) == 1)
+        #expect(PakLayout.rowsThatFit(PakLayout.size(for: 10, maxRows: 2).height) == 2)
+    }
+
     @Test func labelsSplitByWords() {
         #expect(PakView.labelLines("APPLE MUSIC", width: 49) == ["APPLE", "MUSIC"])
         #expect(PakView.labelLines("NAVIDROME", width: 49) == ["NAVIDROME"])
