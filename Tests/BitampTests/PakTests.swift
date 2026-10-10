@@ -315,12 +315,43 @@ private final class FakeBackend: PlaybackBackend {
         window.setFrameTopLeftPoint(NSPoint(x: screen.minX, y: screen.midY))
         #expect(window.frame.minY >= screen.minY)
         #expect(abs(window.frame.maxY - screen.midY) <= 1)
+        // Drawn at the window's size, not a stale one.
+        #expect(view.pixelSize.height * 2 == window.frame.height)
         let low = window.frame.height
 
         // Moved to the top, it grows into the room.
         window.setFrameTopLeftPoint(NSPoint(x: screen.minX, y: screen.maxY))
         #expect(window.frame.minY >= screen.minY)
         #expect(window.frame.height > low)
+        #expect(view.pixelSize.height * 2 == window.frame.height)
+    }
+
+    @Test func paksWindowScrolls() throws {
+        let preferences = Preferences(defaults: UserDefaults(suiteName: "BitampPaks-\(UUID().uuidString)")!)
+        let paks = PakRegistry((1...30).map { ShelfPak(id: "pak-\($0)") })
+        let view = PakView(controller: PlaybackController(engine: PlayerEngine(), preferences: preferences, paks: paks),
+                           skin: DefaultSkin(), scale: 2)
+        view.rowLimit = 2
+        let down = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: -1, wheel2: 0, wheel3: 0)
+            .flatMap(NSEvent.init(cgEvent:)))
+
+        // A notch of the wheel is a row; it stops with the last of the ten rows in view.
+        view.scrollWheel(with: down)
+        #expect(view.scrollRow == 1)
+        for _ in 0..<20 { view.scrollWheel(with: down) }
+        #expect(view.scrollRow == 8)
+
+        // Dragging the thumb from the bottom of the track to the top.
+        let track = PakLayout.scrollTrack(in: view.pixelSize, gen: false)
+        #expect(view.pixelMouseDown(at: CGPoint(x: track.midX, y: track.maxY - 2), event: down))
+        view.pixelMouseDragged(to: CGPoint(x: track.midX, y: track.minY), event: down)
+        view.pixelMouseUp(at: CGPoint(x: track.midX, y: track.minY), event: down)
+        #expect(view.scrollRow == 0)
+
+        // Clicking the track under the thumb pages down a window's worth.
+        _ = view.pixelMouseDown(at: CGPoint(x: track.midX, y: track.maxY - 2), event: down)
+        view.pixelMouseUp(at: CGPoint(x: track.midX, y: track.maxY - 2), event: down)
+        #expect(view.scrollRow == 2)
     }
 
     @Test func labelsSplitByWords() {
