@@ -83,6 +83,8 @@ final class PakLibrary {
     func install(_ bundle: URL, reservedIDs: Set<String>) throws -> PakManifest {
         let manifest = try Self.manifest(in: bundle)
         guard !reservedIDs.contains(manifest.id) else { throw InstallError.takenID(manifest.id) }
+        // Already here: replacing it would delete the very folder being copied.
+        guard !contains(bundle) else { return manifest }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let destination = folder.appendingPathComponent("\(manifest.id).\(Self.pathExtension)", isDirectory: true)
         if FileManager.default.fileExists(atPath: destination.path) {
@@ -91,6 +93,12 @@ final class PakLibrary {
         try FileManager.default.copyItem(at: bundle, to: destination)
         Self.removeQuarantine(destination)
         return manifest
+    }
+
+    /// Whether `bundle` is one of the installed Paks itself, rather than a copy to install.
+    func contains(_ bundle: URL) -> Bool {
+        func path(_ url: URL) -> String { url.resolvingSymlinksInPath().standardizedFileURL.path }
+        return path(bundle.deletingLastPathComponent()) == path(folder)
     }
 
     func remove(_ pak: ExternalPak) throws {
