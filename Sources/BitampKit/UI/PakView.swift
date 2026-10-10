@@ -118,8 +118,11 @@ final class PakView: SkinnedView {
     /// The most rows the window grows to, fixed for snapshots. Otherwise as many as fit
     /// between its top and the bottom of its screen.
     var rowLimit: Int? {
-        didSet { resizeKeepingTopLeft() }
+        didSet { refit() }
     }
+    /// The most rows for now. Changed only by `refit`, never while AppKit is mid-resize,
+    /// so the window and its canvas agree on the size.
+    private var maxRows: Int
 
     private var paks: [Pak] { controller.paks.paks }
     /// How far each cartridge has risen out of its slot, animated toward 0 or `ejectRise`.
@@ -130,7 +133,7 @@ final class PakView: SkinnedView {
     private var available: [String: Bool] = [:]
     private var wasShown = false
     /// The top row in view, when there are more than fit.
-    private var scrollRow = 0
+    private(set) var scrollRow = 0
     private var scrollAccumulator: CGFloat = 0
     private var pressed: Press?
     private var pressedInside = false
@@ -159,8 +162,8 @@ final class PakView: SkinnedView {
 
     init(controller: PlaybackController, skin: Skin, scale: CGFloat) {
         self.controller = controller
-        super.init(pixelSize: PakLayout.size(for: controller.paks.paks.count, maxRows: Self.rowsOnScreen(nil, scale)),
-                   skin: skin, scale: scale)
+        maxRows = Self.rowsOnScreen(nil, scale)
+        super.init(pixelSize: PakLayout.size(for: controller.paks.paks.count, maxRows: maxRows), skin: skin, scale: scale)
         refresh()
         snapRises()
         registerForDraggedTypes([.fileURL])
@@ -192,7 +195,8 @@ final class PakView: SkinnedView {
         PakLayout.size(for: paks.count, maxRows: maxRows)
     }
 
-    private var maxRows: Int {
+    /// The rows that fit where the window is now.
+    private var rowsThatFit: Int {
         if let rowLimit { return rowLimit }
         guard let window, let screen = (window.screen ?? NSScreen.main)?.visibleFrame else {
             return Self.rowsOnScreen(nil, scale)
@@ -214,7 +218,7 @@ final class PakView: SkinnedView {
 
     override func setScale(_ scale: CGFloat) {
         super.setScale(scale)
-        resizeKeepingTopLeft()
+        refit()
     }
 
     override func viewDidMoveToWindow() {
@@ -222,6 +226,7 @@ final class PakView: SkinnedView {
         windowObservers.forEach(NotificationCenter.default.removeObserver)
         windowObservers = []
         guard let window else { return }
+        refit()
         // Placing, regrouping, dragging and the Dock all move it, which changes the room below.
         let refit: @Sendable (Notification) -> Void = { [weak self] _ in
             MainActor.assumeIsolated { self?.refit() }
@@ -235,6 +240,7 @@ final class PakView: SkinnedView {
 
     /// Resizes to the rows that fit where the window is now, if that's changed.
     private func refit() {
+        maxRows = rowsThatFit
         guard normalizedPixelSize(pixelSize) != pixelSize else { return }
         resizeKeepingTopLeft()
     }
