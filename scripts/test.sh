@@ -1,10 +1,17 @@
 #!/bin/sh
-# Runs the test suite. Works around a Command Line Tools bug where an incremental
-# rebuild of the tests fails with "plugin for module 'TestingMacros' not found".
-# The plugin itself is fine; stale build state is the trigger. Clear the caches and
-# retry, and if that isn't enough, retry from a clean build.
+# Runs the test suite. Works around a Swift Build bug where an incremental rebuild
+# of the tests sometimes fails with "plugin for module 'TestingMacros' not found":
+# the explicit-module build forgets to load the swift-testing macros, which live in
+# a folder of their own. Naming that folder with -plugin-path stops it (7 of 16
+# rebuilds failed without it, 0 of 18 with it). If it ever comes back, clear the
+# caches and retry, and if that isn't enough, retry from a clean build.
 set -u
 cd "$(dirname "$0")/.."
+
+plugins="$(dirname "$(xcrun --find swift)")/../lib/swift/host/plugins/testing"
+if [ -d "$plugins" ]; then
+    set -- -Xswiftc -plugin-path -Xswiftc "$plugins" "$@"
+fi
 
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT
