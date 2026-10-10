@@ -335,23 +335,38 @@ private final class FakeBackend: PlaybackBackend {
         let down = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: -1, wheel2: 0, wheel3: 0)
             .flatMap(NSEvent.init(cgEvent:)))
 
-        // A notch of the wheel is a row; it stops with the last of the ten rows in view.
+        // A notch of the wheel is a third of an 84-pixel row; it stops with the last of the
+        // ten rows in view.
         view.scrollWheel(with: down)
-        #expect(view.scrollRow == 1)
-        for _ in 0..<20 { view.scrollWheel(with: down) }
-        #expect(view.scrollRow == 8)
+        #expect(view.scrollOffset == 28)
+        for _ in 0..<40 { view.scrollWheel(with: down) }
+        #expect(view.scrollOffset == 672)
 
         // Dragging the thumb from the bottom of the track to the top.
         let track = PakLayout.scrollTrack(in: view.pixelSize, gen: false)
         #expect(view.pixelMouseDown(at: CGPoint(x: track.midX, y: track.maxY - 2), event: down))
         view.pixelMouseDragged(to: CGPoint(x: track.midX, y: track.minY), event: down)
         view.pixelMouseUp(at: CGPoint(x: track.midX, y: track.minY), event: down)
-        #expect(view.scrollRow == 0)
+        #expect(view.scrollOffset == 0)
 
         // Clicking the track under the thumb pages down a window's worth.
         _ = view.pixelMouseDown(at: CGPoint(x: track.midX, y: track.maxY - 2), event: down)
         view.pixelMouseUp(at: CGPoint(x: track.midX, y: track.maxY - 2), event: down)
-        #expect(view.scrollRow == 2)
+        #expect(view.scrollOffset == 168)
+
+        // Scrolled part way into a row, clicks still find the right cartridge: the tenth
+        // Pak's, the first whole one in view.
+        _ = view.pixelMouseDown(at: CGPoint(x: track.midX, y: track.minY), event: down)
+        view.pixelMouseUp(at: CGPoint(x: track.midX, y: track.minY), event: down)
+        for _ in 0..<7 { view.scrollWheel(with: down) }  // 196: two rows and a third
+        #expect(view.scrollOffset == 196)
+        var searched: String?
+        view.onSearch = { searched = $0.id }
+        let cartridge = PakLayout.cartridge(9, rise: 0)
+        let click = CGPoint(x: cartridge.midX, y: cartridge.minY + 10 - 196)
+        #expect(view.pixelMouseDown(at: click, event: down))
+        view.pixelMouseUp(at: click, event: down)
+        #expect(searched == "pak-10")
     }
 
     @Test func labelsSplitByWords() {

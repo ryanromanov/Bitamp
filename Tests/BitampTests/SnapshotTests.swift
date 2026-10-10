@@ -74,6 +74,12 @@ struct SnapshotTests {
                                    skin: skin, scale: 2)
             lotsView.rowLimit = 2
             try save(lotsView, "\(name)-paks-scroll")
+            // Part way down, rows cut off at the frame.
+            if let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: -1, wheel2: 0, wheel3: 0)
+                .flatMap(NSEvent.init(cgEvent:)) {
+                for _ in 0..<4 { lotsView.scrollWheel(with: wheel) }
+                try save(lotsView, "\(name)-paks-scrolled")
+            }
 
             // The shade strips.
             let views: [(String, SkinnedView)] = [
