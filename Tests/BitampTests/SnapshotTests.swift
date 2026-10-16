@@ -95,6 +95,37 @@ struct SnapshotTests {
     }
 }
 
+extension SnapshotTests {
+    /// The Media Library on an invented library: the albums, an album, and a search, in
+    /// each skin, once the covers have loaded.
+    @Test func library() async throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var skins: [(String, Skin)] = [("default", DefaultSkin()), ("millennium", DefaultSkin(theme: .millennium)), ("orb", DefaultSkin(theme: .orb))]
+        if let path = ProcessInfo.processInfo.environment["BITAMP_SNAPSHOT_SKIN"] {
+            skins.append(("wsz", try WszSkin(url: URL(fileURLWithPath: path))))
+        }
+        func settle(_ view: MediaLibraryView, _ condition: () -> Bool) async throws {
+            for _ in 0..<200 where !condition() { try await Task.sleep(for: .milliseconds(5)) }
+            // Draw once so the covers in view are asked for, then let them arrive.
+            _ = view.bitmapImageRepForCachingDisplay(in: view.bounds).map { view.cacheDisplay(in: view.bounds, to: $0) }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        for (name, skin) in skins {
+            let pak = LibraryPak()
+            let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences(), paks: PakRegistry([pak]))
+            let view = MediaLibraryView(controller: controller, skin: skin, scale: 2)
+            view.show(pak)
+            try await settle(view) { view.shown?.items.isEmpty == false }
+            try save(view, "\(name)-library")
+            if let album = view.shown?.items.first?.place {
+                view.open(album)
+                try await settle(view) { view.shown?.header != nil }
+                try save(view, "\(name)-library-album")
+            }
+        }
+    }
+}
+
 /// A Pak that "plays" anything in its scheme, for the Expansion Paks snapshots.
 @MainActor
 private final class SnapshotPak: Pak, PlaybackBackend {

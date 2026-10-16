@@ -72,7 +72,7 @@ enum Docking {
 @MainActor
 final class WindowGroup {
     enum Panel: String, CaseIterable {
-        case equalizer, playlist, paks
+        case equalizer, playlist, paks, library
     }
 
     let main: NSWindow
@@ -89,8 +89,11 @@ final class WindowGroup {
         self.main = main
         self.panels = panels
         self.defaults = defaults
-        // The classic three windows show on first launch; Expansion Paks waits to be opened.
-        defaults.register(defaults: Dictionary(uniqueKeysWithValues: Panel.allCases.map { (Self.visibilityKey($0), $0 != .paks) }))
+        // The classic three windows show on first launch; Expansion Paks and the Media
+        // Library wait to be opened.
+        defaults.register(defaults: Dictionary(uniqueKeysWithValues: Panel.allCases.map {
+            (Self.visibilityKey($0), ![.paks, .library].contains($0))
+        }))
         defaults.register(defaults: [Self.mainVisibilityKey: true])
     }
 
@@ -110,11 +113,25 @@ final class WindowGroup {
         guard let window = panels[panel] else { return }
         defaults.set(visible, forKey: Self.visibilityKey(panel))
         if visible {
+            if panel == .library { bringOnScreen(window) }
             window.orderFront(nil)
         } else {
             window.orderOut(nil)
             // Never leave nothing on screen.
             if !main.isVisible && !anyPanelVisible { setMainVisible(true) }
+        }
+    }
+
+    /// Puts a window that would open off its screen (the first time, stacked under all the
+    /// others) beside the main window instead, or failing that, in the middle of the screen.
+    private func bringOnScreen(_ window: NSWindow) {
+        guard let screen = (main.screen ?? NSScreen.main)?.visibleFrame, !screen.contains(window.frame) else { return }
+        let beside = NSRect(x: main.frame.maxX, y: main.frame.maxY - window.frame.height,
+                            width: window.frame.width, height: window.frame.height)
+        if screen.contains(beside) {
+            window.setFrameOrigin(beside.origin)
+        } else {
+            window.setFrameOrigin(NSPoint(x: screen.midX - window.frame.width / 2, y: screen.midY - window.frame.height / 2))
         }
     }
 
@@ -223,7 +240,7 @@ final class WindowGroup {
         let ratio = mainView.scale / savedScale
         if savedMain == nil { main.center() }
         let anchor = savedMain.map { NSPoint(x: $0.minX, y: $0.maxY) } ?? NSPoint(x: main.frame.minX, y: main.frame.maxY)
-        place(main, topLeft: anchor, pixelHeight: nil)
+        place(main, topLeft: anchor, pixelSize: nil)
 
         var below = main.frame.minY
         for panel in Panel.allCases {
@@ -232,9 +249,9 @@ final class WindowGroup {
                 place(window, topLeft: NSPoint(
                     x: anchor.x + (saved.minX - anchor.x) * ratio,
                     y: anchor.y + (saved.maxY - anchor.y) * ratio),
-                      pixelHeight: saved.height / savedScale)
+                      pixelSize: CGSize(width: saved.width / savedScale, height: saved.height / savedScale))
             } else {
-                place(window, topLeft: NSPoint(x: main.frame.minX, y: below), pixelHeight: nil)
+                place(window, topLeft: NSPoint(x: main.frame.minX, y: below), pixelSize: nil)
             }
             below = window.frame.minY
             if defaults.bool(forKey: Self.visibilityKey(panel)) { window.orderFront(nil) }
@@ -268,12 +285,12 @@ final class WindowGroup {
         "\((window as? SkinnedWindow)?.layoutName ?? window.title)\(suffix)"
     }
 
-    /// Sizes a window for its view's scale (and, for the playlist, a height in skin pixels)
-    /// and puts its top-left corner at `topLeft`.
-    private func place(_ window: NSWindow, topLeft: NSPoint, pixelHeight: CGFloat?) {
+    /// Sizes a window for its view's scale (and, for the windows that resize, a saved size
+    /// in skin pixels) and puts its top-left corner at `topLeft`.
+    private func place(_ window: NSWindow, topLeft: NSPoint, pixelSize: CGSize?) {
         guard let view = window.contentView as? SkinnedView else { return }
         let pixels = view.normalizedPixelSize(CGSize(
-            width: view.pixelSize.width, height: (pixelHeight ?? view.pixelSize.height).rounded()))
+            width: (pixelSize?.width ?? view.pixelSize.width).rounded(), height: (pixelSize?.height ?? view.pixelSize.height).rounded()))
         window.setContentSize(NSSize(width: pixels.width * view.scale, height: pixels.height * view.scale))
         window.setFrameOrigin(NSPoint(x: topLeft.x, y: topLeft.y - window.frame.height))
     }
