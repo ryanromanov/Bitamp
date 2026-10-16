@@ -160,8 +160,11 @@ final class PlaylistView: SkinnedView {
         }
     }
 
+    /// The rows in view. The scroll position can be past the end for a moment, between the
+    /// playlist shrinking and the next frame's `tick`, so this stays inside the list.
     private var visibleRange: Range<Int> {
-        scrollRow..<min(queue.count, scrollRow + visibleRows)
+        let start = min(max(scrollRow, 0), queue.count)
+        return start..<min(queue.count, start + visibleRows)
     }
 
     private func rowRect(_ row: Int) -> CGRect {

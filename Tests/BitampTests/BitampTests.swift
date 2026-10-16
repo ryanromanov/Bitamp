@@ -1361,3 +1361,25 @@ import Testing
         }
     }
 }
+
+@MainActor @Suite struct PlaylistClearingTests {
+    /// Clearing a playlist scrolled down to its end used to crash on the next draw: the
+    /// scroll position was past the end until the next frame put it back.
+    @Test func clearingAScrolledPlaylistDraws() throws {
+        _ = NSApplication.shared
+        let preferences = Preferences(defaults: UserDefaults(suiteName: "BitampClear-\(UUID().uuidString)")!)
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences)
+        let view = PlaylistView(controller: controller, preferences: preferences, skin: DefaultSkin())
+        let end = String(UnicodeScalar(UInt32(NSEndFunctionKey))!)
+        // From the playlist's own Clear, and from anywhere else that empties it.
+        for clear in [{ view.clearPlaylist(nil) }, { controller.removeAll() }] {
+            controller.setQueueItems((0..<60).map { URL(fileURLWithPath: "/nonexistent/song \($0).mp3") })
+            view.keyDown(with: NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                                context: nil, characters: end, charactersIgnoringModifiers: end,
+                                                isARepeat: false, keyCode: 0)!)
+            clear()
+            let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+            view.cacheDisplay(in: view.bounds, to: rep)
+        }
+    }
+}
