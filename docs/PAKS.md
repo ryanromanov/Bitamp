@@ -28,7 +28,7 @@ Optional add-ons that bring other music sources into Bitamp: Apple Music first, 
 - Bitamp stays on macOS 13; the Apple Music Pak is checked at runtime and shows as unavailable before macOS 14.
 
 ## Media Library (planned)
-A skinned browser to replace the search panel, chosen over a native SwiftUI window: the playlist's frame, a tree sidebar (Search, Library, Playlists, Apple Music), a grid of covers and album pages. Spike results (branch `library-spike`, 2026-10-16):
+A skinned browser to replace the search panel, chosen over a native SwiftUI window: the playlist's frame, a tree sidebar (Search, Library, Playlists, Apple Music), a grid of covers and album pages. Spike results (2026-10-16; artwork from `spikes/musickit --art`, the search box from a throwaway window not kept in the repo):
 - **Artwork works.** Library items give `musicKit://` URLs that only `ArtworkImage` draws; captured from a never-shown window in 110–160 ms (some ~3 s, so load in the background and cache). Catalog items give https URLs plus background and text colors; library items have no colors. Covers shrink to 44 px by area averaging. Some library "albums" have empty titles and 16:9 art and need filtering and a square crop.
 - **Search box: a hidden `NSTextField` with the canvas drawing it** in the pixel font (selection, marked text and caret from the field editor; clicks mapped to offsets with `ListFont` widths). Typing, selection, clipboard, dead keys and the emoji picker work; Japanese input untested.
 - Text fields need Edit ▸ Undo/Redo/Cut/Copy/Paste in the main menu for their shortcuts (done, PR #31).
@@ -42,7 +42,9 @@ A skinned browser to replace the search panel, chosen over a native SwiftUI wind
 - Third-party Paks don't browse yet. When the window has settled the shape, the JSON protocol gets it without a version bump (0.6.1 refuses `protocol > 1`): advertised by an optional field in the hello reply, `browse` sent only to Paks that advertise it, artwork shaped like `PakSource` (`file`, or `url` with `headers`, for servers that need auth), defaults for new `PakProvider` methods, and `--check-pak` walking it.
 
 **Apple Music browsing** (`AppleMusicBrowser`): Library (Recently Added, Albums, Artists, Songs, Playlists, 100 a page) and, with a subscription, Apple Music (For You, Recently Played, Top Charts). Places are `section/<name>` or `<library|catalog>-<album|artist|playlist>/<id>`. What MusicKit returned on a real library (`spikes/musickit --browse`, 2026-10-16):
-- Most pages come back in 15–500 ms; For You takes ~1.7 s, search ~1 s. Covers average ~170 ms (one capture of 32 never loaded).
+- Most pages come back in 15–500 ms; For You takes ~1.7 s, search ~1 s. Covers average ~170–250 ms; about one in 35 never loads, even in a window ordered in off screen, and costs 6 s of trying.
+- Long playlists come in batches of 100; pages follow them (up to 1,000 tracks).
+- A fresh Pak, with nothing cached, opens every kind of saved place and looks up saved tracks, as after a relaunch.
 - Recently Played takes at most 10 a request. Library search ignores its limit (109 songs for a limit of 25).
 - Library and catalog ids are both often plain numbers, so a place keeps which it came from. Only playlists say: the listener's start `p.`, the catalog's `pl.`. For You and Recently Played can hold the listener's own playlists.
 - Search drops the catalog's copies of what's in the library, but keeps both artists (the catalog's page has top songs), labelling the library's "In Library".

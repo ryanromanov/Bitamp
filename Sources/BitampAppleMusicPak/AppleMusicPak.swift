@@ -111,7 +111,8 @@ public final class AppleMusicPak: Pak {
         self.browser = browser
         switch location {
         case .root:
-            if subscription == nil { subscription = try? await MusicSubscription.current }
+            // Asked again each time, so the Apple Music group follows the subscription.
+            subscription = (try? await MusicSubscription.current) ?? subscription
             return browser.root(catalog: subscription?.canPlayCatalogContent == true)
         case .place(let id):
             return try await browser.page(id, after: cursor)
