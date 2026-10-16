@@ -32,7 +32,12 @@ final class ArtworkStore {
         }
         await takeTurn()
         defer { endTurn() }
-        return await capture(artwork, size: size).map(Self.square)
+        guard !Task.isCancelled else { return nil }
+        // A window that's never shown usually works; some art only arrives in one that's
+        // ordered in, off screen.
+        if let image = await capture(artwork, size: size, orderedIn: false) { return Self.square(image) }
+        guard !Task.isCancelled else { return nil }
+        return await capture(artwork, size: size, orderedIn: true).map(Self.square)
     }
 
     private func takeTurn() async {
@@ -52,17 +57,24 @@ final class ArtworkStore {
     }
 
     /// `ArtworkImage` drawn at `size` pixels, once it has loaded: when some of its pixels
-    /// show and they aren't all one color, or after 3 s, whatever it shows then.
-    private func capture(_ artwork: Artwork, size: Int) async -> CGImage? {
+    /// show and they aren't all one color, or after 3 s, whatever it shows then. Nil if
+    /// nothing showed, or the task was cancelled.
+    private func capture(_ artwork: Artwork, size: Int, orderedIn: Bool) async -> CGImage? {
         let points = CGFloat(size) / 2
         let host = NSHostingView(rootView: ArtworkImage(artwork, width: points, height: points))
         host.frame = NSRect(x: 0, y: 0, width: points, height: points)
         let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
+        if orderedIn {
+            window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+            window.orderFrontRegardless()
+        }
+        defer { window.orderOut(nil) }
         var last: CGImage?
         for _ in 0..<30 {
             try? await Task.sleep(for: .milliseconds(100))
+            if Task.isCancelled { return nil }
             host.layoutSubtreeIfNeeded()
             guard let rep = NSBitmapImageRep(
                 bitmapDataPlanes: nil, pixelsWide: size, pixelsHigh: size, bitsPerSample: 8, samplesPerPixel: 4,

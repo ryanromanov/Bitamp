@@ -234,7 +234,7 @@ final class AppleMusicBrowser {
         guard !album.title.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
         let id = (library ? "library-album/" : "catalog-album/") + album.id.rawValue
         albums[id] = album
-        return .place(PakPlace(id: id, kind: .album, title: album.title, subtitle: album.artistName,
+        return .place(PakPlace(id: id, kind: .album, title: album.title, subtitle: nonEmpty(album.artistName),
                                artwork: art.reference(album.artwork)))
     }
 
@@ -251,7 +251,7 @@ final class AppleMusicBrowser {
     private func place(_ playlist: Playlist, library: Bool) -> PakItem? {
         let id = (library ? "library-playlist/" : "catalog-playlist/") + playlist.id.rawValue
         playlists[id] = playlist
-        return .place(PakPlace(id: id, kind: .playlist, title: playlist.name, subtitle: playlist.curatorName,
+        return .place(PakPlace(id: id, kind: .playlist, title: playlist.name, subtitle: nonEmpty(playlist.curatorName),
                                artwork: art.reference(playlist.artwork)))
     }
 
@@ -268,14 +268,14 @@ final class AppleMusicBrowser {
             }
         }
         guard let found = try await album?.with([.tracks]) else { throw PakBrowseError.notFound(id) }
-        let tracks = (found.tracks ?? []).compactMap { track -> PakItem? in
+        let tracks = try await everyTrack(found.tracks).compactMap { track -> PakItem? in
             guard case .song(let song) = track else { return nil }
             return .track(songs.remember(song, from: library ? .library : .catalog))
         }
         let year = found.releaseDate.map { String(Calendar.current.component(.year, from: $0)) }
         let detail = ([found.genreNames.first, year].compactMap { $0 } + [songCount(tracks.count)]).joined(separator: " · ")
         return PakPage(
-            header: PakHeader(title: found.title, subtitle: found.artistName, detail: detail, artwork: art.reference(found.artwork)),
+            header: PakHeader(title: found.title, subtitle: nonEmpty(found.artistName), detail: detail, artwork: art.reference(found.artwork)),
             shelves: [PakShelf(items: tracks)])
     }
 
@@ -323,14 +323,30 @@ final class AppleMusicBrowser {
             }
         }
         guard let found = try await playlist?.with([.tracks]) else { throw PakBrowseError.notFound(id) }
-        let tracks = (found.tracks ?? []).compactMap { track -> PakItem? in
+        let tracks = try await everyTrack(found.tracks).compactMap { track -> PakItem? in
             guard case .song(let song) = track else { return nil }
             return .track(songs.remember(song, from: library ? .library : .catalog))
         }
         return PakPage(
-            header: PakHeader(title: found.name, subtitle: found.curatorName, detail: songCount(tracks.count),
+            header: PakHeader(title: found.name, subtitle: nonEmpty(found.curatorName), detail: songCount(tracks.count),
                               artwork: art.reference(found.artwork)),
             shelves: [PakShelf(items: tracks)])
+    }
+
+    /// MusicKit gives a long playlist's tracks in batches; this follows them, up to 1,000.
+    private func everyTrack(_ first: MusicItemCollection<Track>?) async throws -> [Track] {
+        guard var batch = first else { return [] }
+        var tracks = Array(batch)
+        while batch.hasNextBatch, tracks.count < 1_000, let next = try await batch.nextBatch() {
+            tracks += next
+            batch = next
+        }
+        return tracks
+    }
+
+    private func nonEmpty(_ text: String?) -> String? {
+        guard let text, !text.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return text
     }
 
     private func songCount(_ count: Int) -> String {

@@ -17,6 +17,19 @@ struct BrowseProbe {
 
     func run(_ term: String) async {
         var covers: [(String, CGImage?)] = []
+        /// One place of each kind, and a track from each kind of page, for a fresh Pak
+        /// to look up with nothing cached, as after a relaunch.
+        var saved: [String: String] = [:]
+        var savedTracks: [String: URL] = [:]
+        func save(_ page: PakPage, from label: String) {
+            for place in page.shelves.flatMap({ $0.items.compactMap(\.place) }) where place.kind != .section {
+                let kind = String(place.id.split(separator: "/").first ?? "")
+                let key = place.id.contains("playlist/p.") && !place.id.hasPrefix("library") ? "\(kind) (p.)"
+                    : place.id.contains("/p.") ? "\(kind) (p.)" : kind
+                if saved[key] == nil { saved[key] = place.id }
+            }
+            if let track = page.tracks.first, savedTracks[label] == nil { savedTracks[label] = track.url }
+        }
         guard let root = await timed("root", { try await pak.browse(.root, after: nil) }) else { return }
         for shelf in root.shelves {
             log("browse: sidebar \(shelf.title ?? "-"): \(shelf.items.compactMap(\.place?.title).joined(separator: ", "))")
@@ -24,6 +37,7 @@ struct BrowseProbe {
         for section in root.shelves.flatMap({ $0.items.compactMap(\.place) }) {
             guard let page = await timed(section.title, { try await pak.browse(.place(section.id), after: nil) }) else { continue }
             describe(page)
+            save(page, from: section.title)
             if let cursor = page.cursor {
                 _ = await timed("\(section.title) after \(cursor)", { try await pak.browse(.place(section.id), after: cursor) })
             }
@@ -31,6 +45,12 @@ struct BrowseProbe {
             if let first = places.first,
                let opened = await timed("  open \(first.kind) “\(first.title)”", { try await pak.browse(.place(first.id), after: nil) }) {
                 describe(opened, indent: "    ")
+                save(opened, from: "\(section.title) ▸ \(first.kind)")
+            }
+            if section.id == "section/charts" {
+                for playlist in places.filter({ $0.kind == .playlist }).prefix(4) {
+                    _ = await timed("  big playlist “\(playlist.title)”", { try await pak.browse(.place(playlist.id), after: nil) })
+                }
             }
             for place in places.prefix(4) {
                 covers.append(("\(section.title): \(place.title)", await cover(place.artwork)))
@@ -48,6 +68,17 @@ struct BrowseProbe {
         }
         if let found = await timed("search “\(term)”", { try await pak.browse(.search(term), after: nil) }) {
             describe(found)
+            save(found, from: "search")
+        }
+
+        let fresh = AppleMusicPak()
+        for (kind, id) in saved.sorted(by: { $0.key < $1.key }) {
+            _ = await timed("fresh Pak opens \(kind)", { try await fresh.browse(.place(id), after: nil) })
+        }
+        for (label, url) in savedTracks.sorted(by: { $0.key < $1.key }) {
+            let start = Date()
+            let track = await fresh.metadata(for: url)
+            log("browse: fresh Pak metadata for a track from \(label) (\(url.host ?? "?")): \(track == nil ? "NONE" : "ok") in \(ms(start)) ms")
         }
         do {
             let url = folder.appendingPathComponent("browse-covers.png")
