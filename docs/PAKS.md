@@ -14,7 +14,7 @@ Optional add-ons that bring other music sources into Bitamp: Apple Music first, 
   - account: status, `connect()` (sign in / authorize), `disconnect()`
   - browsing: search, library, playlists → `[PakTrack]` (URL + metadata)
   - `resolve(url)` → `.stream(URL)` or `.backend(PlaybackBackend)`
-- **UI**: "Add from Apple Music…" opens a search panel that adds to the playlist. A Media Library window can come later. The **Expansion Paks window** (Window ▸ Expansion Paks, ⌥K) shows each Pak as an N64-style cartridge in a slot: click it to search, click the slot's front plate to eject or insert it, right-click for a menu. Its frame borrows the playlist's title and side tiles, so `.wsz` skins dress it. While a Pak plays audio Bitamp can't see or hear (before macOS 14.2, or without permission to listen), the main window's visualizer shows a small cartridge and the Pak's name; clicking it opens the window. The playlist shows nothing extra.
+- **UI**: "Add from Apple Music…" opens a search panel that adds to the playlist. A Media Library window will replace it (see below). The **Expansion Paks window** (Window ▸ Expansion Paks, ⌥K) shows each Pak as an N64-style cartridge in a slot: click it to search, click the slot's front plate to eject or insert it, right-click for a menu. Its frame borrows the playlist's title and side tiles, so `.wsz` skins dress it. While a Pak plays audio Bitamp can't see or hear (before macOS 14.2, or without permission to listen), the main window's visualizer shows a small cartridge and the Pak's name; clicking it opens the window. The playlist shows nothing extra.
 - **Inserted or ejected**: every Pak starts inserted. Ejecting turns the service off: its tracks stay in playlists and the saved session, with their titles, but are skipped with "<NAME> PAK IS EJECTED", its search closes, and Bitamp doesn't contact it at all. Titles come from the playlist file (`#EXTINF`, read back since this change); a title never saved shows the track's ID until the Pak is inserted again.
 
 ## Packaging
@@ -31,7 +31,21 @@ Optional add-ons that bring other music sources into Bitamp: Apple Music first, 
 A skinned browser to replace the search panel, chosen over a native SwiftUI window: the playlist's frame, a tree sidebar (Search, Library, Playlists, Apple Music), a grid of covers and album pages. Spike results (branch `library-spike`, 2026-10-16):
 - **Artwork works.** Library items give `musicKit://` URLs that only `ArtworkImage` draws; captured from a never-shown window in 110–160 ms (some ~3 s, so load in the background and cache). Catalog items give https URLs plus background and text colors; library items have no colors. Covers shrink to 44 px by area averaging. Some library "albums" have empty titles and 16:9 art and need filtering and a square crop.
 - **Search box: a hidden `NSTextField` with the canvas drawing it** in the pixel font (selection, marked text and caret from the field editor; clicks mapped to offsets with `ListFont` widths). Typing, selection, clipboard, dead keys and the emoji picker work; Japanese input untested.
-- Text fields need Edit ▸ Undo/Redo/Cut/Copy/Paste in the main menu for their shortcuts.
+- Text fields need Edit ▸ Undo/Redo/Cut/Copy/Paste in the main menu for their shortcuts (done, PR #31).
+
+**Browsing** (`BitampPakKit/Browsing.swift`). One entry point for every page the window shows:
+- `browse(_ location, after cursor) -> PakPage`. A location is `.root` (the sidebar, asked for each time the window opens, so playlists and the Apple Music group stay current), `.place(id)` or `.search(term)`.
+- A `PakPage` is an optional `PakHeader` (title, subtitle, detail line, artwork) and `PakShelf`s, each an optional title and `PakItem`s: a `PakTrack`, or a `PakPlace` to open (`section`, `album`, `artist`, `playlist`). An album page is a header and one untitled shelf; an artist page has "Top Songs" and "Albums"; For You is a shelf per recommendation. The page's `cursor` gives more of its last shelf.
+- `image(for: PakArtwork, size:)`: artwork is an opaque id the Pak hands out. The default fetches ids that are http(s) URLs; Apple Music captures `ArtworkImage` for library art.
+- `allTracks(at:limit:)` follows cursors, for playing or adding a whole album or playlist.
+- Paks that don't browse (`canBrowse` false) get defaults: `.search` gives their search's tracks, `.root` is empty. The requirements are declared in `protocol Pak` with defaults in an extension, so a Pak's own versions win through `any Pak`.
+- Third-party Paks don't browse yet. When the window has settled the shape, the JSON protocol gets it without a version bump (0.6.1 refuses `protocol > 1`): advertised by an optional field in the hello reply, `browse` sent only to Paks that advertise it, artwork shaped like `PakSource` (`file`, or `url` with `headers`, for servers that need auth), defaults for new `PakProvider` methods, and `--check-pak` walking it.
+
+**Apple Music browsing** (`AppleMusicBrowser`): Library (Recently Added, Albums, Artists, Songs, Playlists, 100 a page) and, with a subscription, Apple Music (For You, Recently Played, Top Charts). Places are `section/<name>` or `<library|catalog>-<album|artist|playlist>/<id>`. What MusicKit returned on a real library (`spikes/musickit --browse`, 2026-10-16):
+- Most pages come back in 15–500 ms; For You takes ~1.7 s, search ~1 s. Covers average ~170 ms (one capture of 32 never loaded).
+- Recently Played takes at most 10 a request. Library search ignores its limit (109 songs for a limit of 25).
+- Library and catalog ids are both often plain numbers, so a place keeps which it came from. Only playlists say: the listener's start `p.`, the catalog's `pl.`. For You and Recently Played can hold the listener's own playlists.
+- Search drops the catalog's copies of what's in the library, but keeps both artists (the catalog's page has top songs), labelling the library's "In Library".
 
 ## Spotify
 Since February 2026, Development Mode apps need a Premium owner and allow five users; extended access is for organizations with 250k+ monthly users. Spotify has no Mac SDK that plays audio in another app. At most this is a remote for the Spotify app. Last in line, maybe never.
