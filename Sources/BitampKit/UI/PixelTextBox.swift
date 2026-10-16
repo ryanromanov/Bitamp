@@ -18,6 +18,8 @@ final class PixelTextBox: NSObject, NSTextFieldDelegate {
     var onSubmit: ((String) -> Void)?
     /// Called when Escape is pressed in an empty box.
     var onCancel: (() -> Void)?
+    /// Called for Tab or the down arrow, to move on to what's below.
+    var onTab: (() -> Void)?
 
     private let field = ClearTextField()
     private weak var view: SkinnedView?
@@ -189,6 +191,9 @@ final class PixelTextBox: NSObject, NSTextFieldDelegate {
         case #selector(NSResponder.insertNewline(_:)):
             onSubmit?(textView.string)
             return true
+        case #selector(NSResponder.insertTab(_:)), #selector(NSResponder.moveDown(_:)):
+            onTab?()
+            return onTab != nil
         case #selector(NSResponder.cancelOperation(_:)):
             if textView.string.isEmpty {
                 view?.window?.makeFirstResponder(view)

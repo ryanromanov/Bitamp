@@ -159,6 +159,56 @@ final class LibraryPak: Pak {
         #expect(pak.browsed.count == asked)
     }
 
+    func key(_ special: Int, shift: Bool = false) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: shift ? [.shift] : [], timestamp: 0, windowNumber: 0,
+                         context: nil, characters: String(UnicodeScalar(UInt32(special))!),
+                         charactersIgnoringModifiers: String(UnicodeScalar(UInt32(special))!), isARepeat: false, keyCode: 0)!
+    }
+
+    /// Left and right go item by item; up and down keep to the column in rows of covers;
+    /// Shift extends the selection.
+    @Test func arrowKeysMoveThroughCovers() async throws {
+        _ = NSApplication.shared
+        let pak = LibraryPak()
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences(), paks: PakRegistry([pak]))
+        let view = MediaLibraryView(controller: controller, skin: DefaultSkin(), scale: 1)
+        view.show(pak)
+        try await settle { view.shown?.items.isEmpty == false }
+        // Eight albums at the default width: a row of six, then two.
+        view.keyDown(with: key(NSDownArrowFunctionKey))
+        #expect(view.focus == 0 && view.selection == [0])
+        view.keyDown(with: key(NSRightArrowFunctionKey))
+        view.keyDown(with: key(NSRightArrowFunctionKey))
+        #expect(view.focus == 2)
+        view.keyDown(with: key(NSDownArrowFunctionKey))
+        #expect(view.focus == 7, "the second row is shorter, so its last cover")
+        view.keyDown(with: key(NSUpArrowFunctionKey))
+        #expect(view.focus == 1)
+        view.keyDown(with: key(NSRightArrowFunctionKey, shift: true))
+        view.keyDown(with: key(NSRightArrowFunctionKey, shift: true))
+        #expect(view.selection == IndexSet(1...3))
+        view.keyDown(with: key(NSEndFunctionKey))
+        #expect(view.focus == 7 && view.selection == [7])
+    }
+
+    /// Dropped in the playlist, songs go in as they are and albums as all their songs,
+    /// where they were dropped.
+    @Test func dropsGoWhereTheyFall() async throws {
+        _ = NSApplication.shared
+        let pak = LibraryPak()
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences(), paks: PakRegistry([pak]))
+        controller.setQueueItems([URL(string: "shelf://track/9-0")!, URL(string: "shelf://track/9-1")!])
+        let view = MediaLibraryView(controller: controller, skin: DefaultSkin(), scale: 1)
+        view.show(pak)
+        try await settle { view.shown?.items.isEmpty == false }
+        view.insert([.track(pak.track(5, 1)), .place(pak.album(2))], at: 1)
+        try await settle { controller.queue.count == 7 }
+        #expect(controller.queue.items.map(\.absoluteString) == ["shelf://track/9-0", "shelf://track/5-1", "shelf://track/2-0",
+                                                                "shelf://track/2-1", "shelf://track/2-2", "shelf://track/2-3",
+                                                                "shelf://track/9-1"])
+        #expect(controller.info.displayName(for: controller.queue.items[1]) == "The Low Bits - Song 2 of Paper Planets")
+    }
+
     /// A cover is asked of the Pak once: after that it comes from memory, and with a
     /// folder, from disk in a new cache, as after a relaunch.
     @Test func coversAreKept() async throws {

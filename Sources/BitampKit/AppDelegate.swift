@@ -47,6 +47,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let pakView = PakView(controller: controller, skin: skin, scale: preferences.scale)
         let libraryView = MediaLibraryView(controller: controller, skin: skin, scale: preferences.scale, covers: .standard())
         libraryView.keyFallback = mainView
+        playlistView.onLibraryDrop = { [weak libraryView] index in libraryView?.dropDragged(at: index) }
         self.libraryView = libraryView
         pakView.onSearch = { [weak self] pak in self?.showSearch(pak) }
         pakView.onSettings = { [weak self] pak in self?.showSettings(pak) }
