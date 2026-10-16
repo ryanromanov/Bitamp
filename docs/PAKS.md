@@ -27,6 +27,12 @@ Optional add-ons that bring other music sources into Bitamp: Apple Music first, 
 - Needs: MusicKit enabled for the `com.ryanromanov.Bitamp` App ID (developer portal → Identifiers → App Services), `NSAppleMusicUsageDescription` in Info.plist, Developer ID signing. The listener needs an Apple Music subscription to play catalog songs.
 - Bitamp stays on macOS 13; the Apple Music Pak is checked at runtime and shows as unavailable before macOS 14.
 
+## Media Library (planned)
+A skinned browser to replace the search panel, chosen over a native SwiftUI window: the playlist's frame, a tree sidebar (Search, Library, Playlists, Apple Music), a grid of covers and album pages. Spike results (branch `library-spike`, 2026-10-16):
+- **Artwork works.** Library items give `musicKit://` URLs that only `ArtworkImage` draws; captured from a never-shown window in 110–160 ms (some ~3 s, so load in the background and cache). Catalog items give https URLs plus background and text colors; library items have no colors. Covers shrink to 44 px by area averaging. Some library "albums" have empty titles and 16:9 art and need filtering and a square crop.
+- **Search box: a hidden `NSTextField` with the canvas drawing it** in the pixel font (selection, marked text and caret from the field editor; clicks mapped to offsets with `ListFont` widths). Typing, selection, clipboard, dead keys and the emoji picker work; Japanese input untested.
+- Text fields need Edit ▸ Undo/Redo/Cut/Copy/Paste in the main menu for their shortcuts.
+
 ## Spotify
 Since February 2026, Development Mode apps need a Premium owner and allow five users; extended access is for organizations with 250k+ monthly users. Spotify has no Mac SDK that plays audio in another app. At most this is a remote for the Spotify app. Last in line, maybe never.
 
