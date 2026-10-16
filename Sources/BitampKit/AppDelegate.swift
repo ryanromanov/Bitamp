@@ -13,13 +13,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var libraryView: MediaLibraryView?
     private var settingsPanels: [String: PakSettingsPanel] = [:]
     private lazy var controller = PlaybackController(engine: PlayerEngine(), preferences: preferences, paks: paks)
-    /// "Add from…" panels, by Pak id, made when first opened.
-    private var searchPanels: [String: PakSearchPanel] = [:]
     private var windowGroup: WindowGroup?
     private var mainView: MainView?
     private var views: [SkinnedView] = []
     private let skinsMenu = NSMenu(title: "Skins")
-    /// Rebuilt as it opens, since its "Add from…" items follow the installed Paks.
+    /// Rebuilt as it opens, since its "Browse…" items follow the installed Paks.
     private let fileMenu = NSMenu(title: "File")
 
     /// `paks` are the Expansion Paks built into this copy of Bitamp.
@@ -49,17 +47,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         libraryView.keyFallback = mainView
         playlistView.onLibraryDrop = { [weak libraryView] index in libraryView?.dropDragged(at: index) }
         self.libraryView = libraryView
-        pakView.onSearch = { [weak self] pak in self?.showSearch(pak) }
+        pakView.onBrowse = { [weak self] pak in self?.showLibrary(pak) }
         pakView.onSettings = { [weak self] pak in self?.showSettings(pak) }
         pakView.onInstall = { [weak self] url in self?.installPak(url) }
         pakView.onRemove = { [weak self] pak in self?.removePak(pak) }
         mainView.onPakDropped = { [weak self] url in self?.installPak(url) }
         self.pakView = pakView
-        // An ejected Pak's search and library close with it.
+        // An ejected Pak's library closes with it.
         pakView.onInsertedChange = { [weak self] pak, inserted in
-            guard !inserted, let self else { return }
-            searchPanels[pak.id]?.close()
-            closeLibrary(showing: pak)
+            if !inserted { self?.closeLibrary(showing: pak) }
         }
         mainView.onShowPaks = { [weak self] in self?.windowGroup?.setVisible(.paks, true) }
         for view in [equalizerView, playlistView, pakView, libraryView] as [SkinnedView] {
@@ -240,7 +236,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func unloadPak(_ pak: ExternalPak) {
         if controller.playingPak === pak { controller.stop() }
         pak.disconnect()
-        searchPanels.removeValue(forKey: pak.id)?.close()
         closeLibrary(showing: pak)
         settingsPanels.removeValue(forKey: pak.id)?.close()
         paks.unregister(pak)
@@ -402,8 +397,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowGroup?.toggle(.playlist)
     }
 
-    @objc func searchPak(_ sender: NSMenuItem) {
-        if let pak = pak(for: sender) { showSearch(pak) }
+    @objc func browsePak(_ sender: NSMenuItem) {
+        if let pak = pak(for: sender) { showLibrary(pak) }
     }
 
     /// The Pak a File menu item names, by id.
@@ -413,19 +408,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func rebuildFileMenu() {
         let open = Menus.item("Open…", #selector(openDocument(_:)), "o", [.command])
-        let addFromPaks = paks.paks.map { pak -> NSMenuItem in
-            let item = Menus.item("Add from \(pak.name)…", #selector(searchPak(_:)))
+        let browsePaks = paks.paks.map { pak -> NSMenuItem in
+            let item = Menus.item("Browse \(pak.name)…", #selector(browsePak(_:)))
             item.representedObject = pak.id
             return item
         }
         // The first Pak gets ⇧⌘A.
-        if let first = addFromPaks.first {
+        if let first = browsePaks.first {
             first.keyEquivalent = "a"
             first.keyEquivalentModifierMask = [.command, .shift]
         }
         let installPak = Menus.item("Install Expansion Pak…", #selector(chooseExpansionPak(_:)))
         fileMenu.removeAllItems()
-        for item in [open, .separator()] + addFromPaks + [installPak] {
+        for item in [open, .separator()] + browsePaks + [installPak] {
             if !item.isSeparatorItem { item.target = self }
             fileMenu.addItem(item)
         }
@@ -436,7 +431,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Opens the Media Library on `pak`'s music.
-    private func showSearch(_ pak: Pak) {
+    private func showLibrary(_ pak: Pak) {
         guard pak.isAvailable, paks.isInserted(pak), let libraryView else { return }
         libraryView.show(pak)
         windowGroup?.setVisible(.library, true)
@@ -530,7 +525,7 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(setScale(_:)): item.state = item.representedObject as? CGFloat == preferences.scale ? .on : .off
         case #selector(toggleShadows(_:)): item.state = preferences.windowShadows ? .on : .off
         case #selector(toggleRaiseAllWindows(_:)): item.state = preferences.raiseAllWindows ? .on : .off
-        case #selector(searchPak(_:)):
+        case #selector(browsePak(_:)):
             guard let pak = pak(for: item) else { return false }
             return pak.isAvailable && paks.isInserted(pak)
         case #selector(toggleEqualizerShade(_:)):

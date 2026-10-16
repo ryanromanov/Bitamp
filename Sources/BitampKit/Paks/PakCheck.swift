@@ -149,7 +149,7 @@ public final class PakCheck {
 
     private func checkTracks(_ tracks: [PakTrackInfo], _ manifest: PakManifest) {
         guard !tracks.isEmpty else {
-            warn("search \"\": no tracks. Bitamp shows this list when its search opens, so it starts empty. "
+            warn("search \"\": no tracks. Bitamp shows this list when its Media Library opens, so it starts empty. "
                 + "The rest of the check needs a track.")
             return
         }

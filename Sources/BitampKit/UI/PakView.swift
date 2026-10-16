@@ -79,15 +79,15 @@ enum PakLayout {
 }
 
 /// The Expansion Paks window: each Pak as an N64-style cartridge in a slot. Click a
-/// cartridge to search it, click the slot's front plate to eject or insert it.
+/// cartridge to browse it in the Media Library, click the slot's front plate to eject or insert it.
 ///
 /// The frame borrows the playlist's title and side tiles, so `.wsz` skins dress it too;
 /// the cartridges are drawn in fixed colors, as the plastic things they are. Dropping a
 /// `.bitpak` on the window installs it.
 final class PakView: SkinnedView {
     let controller: PlaybackController
-    /// Opens the "Add from…" search for a Pak.
-    var onSearch: ((Pak) -> Void)?
+    /// Opens a Pak's music in the Media Library.
+    var onBrowse: ((Pak) -> Void)?
     /// Opens a third-party Pak's settings.
     var onSettings: ((ExternalPak) -> Void)?
     /// Installs a dropped `.bitpak`.
@@ -560,7 +560,7 @@ final class PakView: SkinnedView {
             } else if let external = pak as? ExternalPak, external.hasSettings, external.account == .disconnected {
                 onSettings?(external)
             } else if controller.paks.isInserted(pak) {
-                onSearch?(pak)
+                onBrowse?(pak)
             } else {
                 setInserted(true, pak)
             }
@@ -584,10 +584,10 @@ final class PakView: SkinnedView {
         let pak = paks[index]
         let menu = NSMenu(title: pak.name)
         let inserted = controller.paks.isInserted(pak)
-        let search = NSMenuItem(title: "Add from \(pak.name)…", action: inserted && pak.isAvailable ? #selector(searchItem(_:)) : nil, keyEquivalent: "")
+        let browse = NSMenuItem(title: "Browse \(pak.name)…", action: inserted && pak.isAvailable ? #selector(browseItem(_:)) : nil, keyEquivalent: "")
         let toggle = NSMenuItem(title: inserted ? "Eject \(pak.name) Pak" : "Insert \(pak.name) Pak",
                                 action: pak.isAvailable ? #selector(toggleItem(_:)) : nil, keyEquivalent: "")
-        var items = [search, toggle]
+        var items = [browse, toggle]
         if let external = pak as? ExternalPak {
             items.append(.separator())
             if external.hasSettings {
@@ -648,8 +648,8 @@ final class PakView: SkinnedView {
         return true
     }
 
-    @objc private func searchItem(_ sender: NSMenuItem) {
-        onSearch?(paks[sender.tag])
+    @objc private func browseItem(_ sender: NSMenuItem) {
+        onBrowse?(paks[sender.tag])
     }
 
     @objc private func toggleItem(_ sender: NSMenuItem) {
