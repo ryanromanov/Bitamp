@@ -1338,3 +1338,26 @@ import Testing
         #expect(SkinTheme.builtIn(named: "builtin:orb")?.mainShape == .orb)
     }
 }
+
+@MainActor
+@Suite struct EditMenuTests {
+    /// A text field's editor only cuts, copies, pastes and undoes through the main menu's
+    /// shortcuts, so each must be there and aimed at an action the editor takes.
+    @Test func textFieldShortcuts() {
+        let menu = Menus.editMenu()
+        let editor = NSTextView()
+        let shortcuts: [(String, NSEvent.ModifierFlags, String)] = [
+            ("z", [.command], "undo:"), ("z", [.command, .shift], "redo:"),
+            ("x", [.command], "cut:"), ("c", [.command], "copy:"), ("v", [.command], "paste:"),
+            ("a", [.command], "selectAll:"),
+        ]
+        for (key, modifiers, action) in shortcuts {
+            let item = menu.items.first { $0.keyEquivalent == key && $0.keyEquivalentModifierMask == modifiers }
+            #expect(item?.action == Selector((action)), "⌘\(key) \(modifiers)")
+            // Undo and redo go to the window's undo manager rather than the editor.
+            if !["undo:", "redo:"].contains(action) {
+                #expect(editor.responds(to: Selector((action))), "\(action)")
+            }
+        }
+    }
+}

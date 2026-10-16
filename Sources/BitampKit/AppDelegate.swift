@@ -436,10 +436,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildFileMenu()
         fileMenu.delegate = self
 
-        // Select All reaches the playlist when it has focus.
-        let editMenu = Menus.menu("Edit", [
-            Menus.item("Select All", #selector(NSResponder.selectAll(_:)), "a", [.command]),
-        ])
+        let editMenu = Menus.editMenu()
 
         // The classic shortcuts: Alt+W for the main window, Alt+G for the equalizer and
         // Alt+E for the playlist.
