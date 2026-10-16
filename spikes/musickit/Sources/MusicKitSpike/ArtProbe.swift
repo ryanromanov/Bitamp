@@ -7,14 +7,14 @@ import SwiftUI
 /// in order: loading an http(s) URL; capturing `ArtworkImage` from a window that's never
 /// shown, then from one ordered in off screen; and last, a tile in the artwork's
 /// background color. Each result is shrunk to 44 px (a skinned grid cover) and laid out
-/// on a contact sheet, written to `BITAMP_ART_OUT` (default: the current directory).
+/// on a contact sheet, written to `BITAMP_ART_OUT` (default: the temporary folder).
 ///
 /// The sheet shows the listener's own library, so keep it out of commits.
 @MainActor
 struct ArtProbe {
     let log: (String) -> Void
     let folder = URL(fileURLWithPath: ProcessInfo.processInfo.environment["BITAMP_ART_OUT"]
-        ?? FileManager.default.currentDirectoryPath)
+        ?? NSTemporaryDirectory())
 
     struct Item {
         let kind: String

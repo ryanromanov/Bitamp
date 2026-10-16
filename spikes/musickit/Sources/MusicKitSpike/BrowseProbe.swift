@@ -5,14 +5,14 @@ import BitampPakKit
 /// `--browse "term"`: walks the Apple Music Pak's browsing as the Media Library will:
 /// the sidebar, each section, the first place in each, a search, and some artwork,
 /// logging what came back and how long it took. The first covers of each section go on a
-/// sheet in `BITAMP_ART_OUT` (default: the current directory), shrunk to 44 px.
+/// sheet in `BITAMP_ART_OUT` (default: the temporary folder), shrunk to 44 px.
 ///
 /// The log and sheet show the listener's own library, so keep them out of commits.
 @MainActor
 struct BrowseProbe {
     let log: (String) -> Void
     let folder = URL(fileURLWithPath: ProcessInfo.processInfo.environment["BITAMP_ART_OUT"]
-        ?? FileManager.default.currentDirectoryPath)
+        ?? NSTemporaryDirectory())
     let pak = AppleMusicPak()
 
     func run(_ term: String) async {
