@@ -5,12 +5,10 @@ enum PakLayout {
     /// The window with one row of slots; each row past the first adds `rowHeight`.
     static let size = CGSize(width: 275, height: 116)
     static let rowHeight = 84
-    static let top = 20
-    static let bottom = 12
-    static let left = 12
-    /// The playlist's right tile is 20 wide, but the content covers its scrollbar groove.
-    static let rightTile = 20
-    static let right = 7
+    static let top = PanelFrame.top
+    static let bottom = PanelFrame.bottom
+    static let left = PanelFrame.left
+    static let right = PanelFrame.right
     static let slotCount = 3
     static let slotWidth = 76
     static let slotGap = 7
@@ -41,16 +39,13 @@ enum PakLayout {
         max(1, Int(((height - size.height) / CGFloat(rowHeight)).rounded(.down)) + 1)
     }
 
-    /// Where the scroll thumb runs, when there are more rows than fit: the playlist's
-    /// groove, or just inside a `gen.bmp` frame's right edge.
+    /// Where the scroll thumb runs, when there are more rows than fit.
     static func scrollTrack(in size: CGSize, gen: Bool) -> CGRect {
-        let (top, bottom) = gen ? (GenArt.topHeight, GenArt.bottomHeight) : (top, bottom)
-        return CGRect(x: Int(size.width) - (gen ? 16 : 15), y: top,
-                      width: Int(PlaylistLayout.scrollThumb.width), height: Int(size.height) - top - bottom)
+        PanelFrame.scrollTrack(in: size, gen: gen)
     }
 
     static func content(in size: CGSize) -> CGRect {
-        CGRect(x: left, y: top, width: Int(size.width) - left - right, height: Int(size.height) - top - bottom)
+        PanelFrame.content(in: size, gen: false)
     }
 
     static func slot(_ index: Int) -> CGRect {
@@ -81,19 +76,6 @@ enum PakLayout {
         Int(inRow(index, statusY))
     }
 
-    static func close(in size: CGSize) -> CGRect {
-        PlaylistLayout.close(in: size)
-    }
-
-    /// The close button and content in a `gen.bmp` frame, whose edges are thinner.
-    static func genClose(in size: CGSize) -> CGRect {
-        CGRect(x: size.width - 11, y: 3, width: 9, height: 9)
-    }
-
-    static func genContent(in size: CGSize) -> CGRect {
-        CGRect(x: GenArt.leftWidth, y: GenArt.topHeight, width: Int(size.width) - GenArt.leftWidth - GenArt.rightWidth,
-               height: Int(size.height) - GenArt.topHeight - GenArt.bottomHeight)
-    }
 }
 
 /// The Expansion Paks window: each Pak as an N64-style cartridge in a slot. Click a
@@ -282,7 +264,7 @@ final class PakView: SkinnedView {
 
     /// Where the slots show, inside the frame.
     private var slotArea: CGRect {
-        var area = skin.gen == nil ? PakLayout.content(in: pixelSize) : PakLayout.genContent(in: pixelSize)
+        var area = panelFrame(pixelSize).content
         if isScrollable { area.size.width = scrollTrack.minX - area.minX }
         return area
     }
@@ -348,14 +330,10 @@ final class PakView: SkinnedView {
         let size = pixelSize
         let colors = skin.playlistColors
 
-        if let gen = skin.gen {
-            drawGenFrame(c, gen)
-            c.fill(PakLayout.genContent(in: size), colors.normalBackground)
-        } else {
-            drawPlaylistFrame(c, colors)
-            // Leaving the playlist's scrollbar groove showing when there's something to scroll.
-            c.fill(slotArea, colors.normalBackground)
-        }
+        let frame = panelFrame(size)
+        frame.draw(c, closePressed: pressed == .close && pressedInside)
+        // With playlist tiles, leaving the scrollbar groove showing when there's something to scroll.
+        c.fill(frame.usesGen ? frame.content : slotArea, colors.normalBackground)
         // The slots, scrolled and cut off at the frame.
         c.context.saveGState()
         c.context.clip(to: slotArea)
@@ -379,7 +357,11 @@ final class PakView: SkinnedView {
     }
 
     private var closeRect: CGRect {
-        skin.gen == nil ? PakLayout.close(in: pixelSize) : PakLayout.genClose(in: pixelSize)
+        panelFrame(pixelSize).close
+    }
+
+    private func panelFrame(_ size: CGSize) -> PanelFrame {
+        PanelFrame(skin: skin, size: size, title: "EXPANSION PAKS", active: isActive)
     }
 
     private var scrollTrack: CGRect {
@@ -391,107 +373,6 @@ final class PakView: SkinnedView {
         let travel = track.height - PlaylistLayout.scrollThumb.height
         let t = isScrollable ? scrollOffset / maxScrollOffset : 0
         return CGRect(origin: CGPoint(x: track.minX, y: track.minY + (travel * t).rounded()), size: PlaylistLayout.scrollThumb)
-    }
-
-    /// The playlist's top and side tiles, and a closing strip from its bottom tile.
-    private func drawPlaylistFrame(_ c: Canvas, _ colors: PlaylistColors) {
-        let size = pixelSize
-        let (w, h) = (Int(size.width), Int(size.height))
-        for x in stride(from: 0, to: w, by: 25) {
-            c.draw(skin.image(for: .playlistBottomTile), x, h - PakLayout.bottom)
-        }
-        for x in stride(from: 25, to: w - 25, by: 25) {
-            c.draw(skin.image(for: .playlistTopTile(active: isActive)), x, 0)
-        }
-        c.draw(skin.image(for: .playlistTopLeft(active: isActive)), 0, 0)
-        c.draw(skin.image(for: .playlistTopRight(active: isActive)), w - 25, 0)
-        for y in stride(from: PakLayout.top, to: h - PakLayout.bottom, by: Int(PlaylistLayout.heightStep)) {
-            c.draw(skin.image(for: .playlistLeftTile), 0, y)
-            c.draw(skin.image(for: .playlistRightTile), w - PakLayout.rightTile, y)
-        }
-        c.draw(skin.image(for: .playlistCloseButton(pressed: pressed == .close && pressedInside)),
-               at: PakLayout.close(in: size).origin)
-        drawTitle(c, colors)
-    }
-
-    /// The skin's generic window frame, laid out like Webamp's: the title in its own
-    /// font between two end pieces, with the fill stretching out to the corners.
-    private func drawGenFrame(_ c: Canvas, _ gen: GenArt) {
-        let (w, h) = (Int(pixelSize.width), Int(pixelSize.height))
-        let top = gen.top(active: isActive)
-        // The title box: 4px before the letters, 3px after.
-        let titleWidth = gen.titleWidth(Self.title) + 7
-        let fill = max(0, w - 100 - titleWidth)
-        let leftFill = fill / 2
-        tile(c, top.centerFill, from: 0, to: w, y: 0)
-        tile(c, top.fill, from: 25, to: 25 + leftFill, y: 0)
-        tileFromRight(c, top.fill, from: w - 25 - (fill - leftFill), to: w - 25, y: 0)
-        c.draw(top.left, 0, 0)
-        c.draw(top.leftEnd, 25 + leftFill, 0)
-        var x = 50 + leftFill + 4
-        for character in Self.title.uppercased() {
-            if let letter = gen.letter(character, active: isActive) {
-                c.draw(letter, x, GenArt.letterY)
-                x += letter.width
-            } else {
-                x += GenArt.spaceWidth
-            }
-        }
-        c.draw(top.rightEnd, w - 50 - (fill - leftFill), 0)
-        c.draw(top.right, w - 25, 0)
-        if pressed == .close && pressedInside {
-            c.draw(gen.closePressed, at: PakLayout.genClose(in: pixelSize).origin)
-        }
-
-        // The sides, with their bottom pieces at the foot; then the bottom edge.
-        let sideBottom = h - GenArt.bottomHeight
-        for y in stride(from: GenArt.topHeight, to: sideBottom, by: gen.middleLeft.height) {
-            c.draw(gen.middleLeft, 0, y)
-            c.draw(gen.middleRight, w - GenArt.rightWidth, y)
-        }
-        c.draw(gen.middleLeftBottom, 0, sideBottom - gen.middleLeftBottom.height)
-        c.draw(gen.middleRightBottom, w - GenArt.rightWidth, sideBottom - gen.middleRightBottom.height)
-        tile(c, gen.bottomFill, from: 0, to: w, y: sideBottom)
-        c.draw(gen.bottomLeft, 0, sideBottom)
-        c.draw(gen.bottomRight, w - gen.bottomRight.width, sideBottom)
-    }
-
-    /// Repeats `image` across [from, to), clipping the last copy.
-    private func tile(_ c: Canvas, _ image: CGImage, from: Int, to: Int, y: Int) {
-        guard to > from else { return }
-        c.context.saveGState()
-        c.context.clip(to: CGRect(x: from, y: y, width: to - from, height: image.height))
-        for x in stride(from: from, to: to, by: image.width) { c.draw(image, x, y) }
-        c.context.restoreGState()
-    }
-
-    /// Like `tile`, but lined up with the right edge, as Webamp's right fill is.
-    private func tileFromRight(_ c: Canvas, _ image: CGImage, from: Int, to: Int, y: Int) {
-        guard to > from else { return }
-        c.context.saveGState()
-        c.context.clip(to: CGRect(x: from, y: y, width: to - from, height: image.height))
-        var x = to - image.width
-        while x + image.width > from {
-            c.draw(image, x, y)
-            x -= image.width
-        }
-        c.context.restoreGState()
-    }
-
-    /// "EXPANSION PAKS" in the middle of the title bar, styled like the playlist's title
-    /// when the skin can draw it, or on a plate in the playlist's colors when it can't.
-    private static let title = "EXPANSION PAKS"
-
-    private func drawTitle(_ c: Canvas, _ colors: PlaylistColors) {
-        let title = Self.title
-        if let image = skin.titleImage(title, active: isActive) {
-            c.draw(image, (Int(pixelSize.width) - image.width) / 2, 0)
-            return
-        }
-        let width = PixelFont.width(of: title) + 5
-        let x = (Int(pixelSize.width) - width) / 2
-        c.fill(x, 5, width, 10, colors.normalBackground)
-        c.text(title, x + 3, 7, isActive ? colors.current : colors.normal)
     }
 
     private func drawSlot(_ c: Canvas, _ index: Int, pak: Pak, _ colors: PlaylistColors) {
