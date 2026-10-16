@@ -105,7 +105,7 @@ final class PixelTextBox: NSObject, NSTextFieldDelegate {
         c.context.clip(to: inner)
         let left = Int(inner.minX) - scroll, top = Int(inner.minY)
         if text.isEmpty && editor == nil {
-            ListFont.draw(placeholder, in: c, x: left, y: top, color: dim)
+            ListFont.draw(ListFont.truncate(placeholder, toWidth: Int(inner.width)), in: c, x: left, y: top, color: dim)
         }
         if let editor {
             if selection.length > 0 {

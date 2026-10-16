@@ -79,7 +79,8 @@ enum PakLayout {
 }
 
 /// The Expansion Paks window: each Pak as an N64-style cartridge in a slot. Click a
-/// cartridge to browse it in the Media Library, click the slot's front plate to eject or insert it.
+/// cartridge to browse it in the Media Library, click the slot's front plate to eject or
+/// insert it.
 ///
 /// The frame borrows the playlist's title and side tiles, so `.wsz` skins dress it too;
 /// the cartridges are drawn in fixed colors, as the plastic things they are. Dropping a
