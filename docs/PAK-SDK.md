@@ -60,11 +60,12 @@ An `error` message is shown to the listener, so write it for them.
 |---|---|---|
 | `hello` | `protocol`, `settings` (key → value), `cacheDirectory` | `{"account": Account}` |
 | `configure` | `settings` | `{"account": Account}` |
-| `search` | `term` (may be empty: list what you'd show first) | `{"tracks": [Track]}` |
+| `search` | `term` (may be empty: list what you'd show first; see below) | `{"tracks": [Track]}` |
 | `track` | `id` | `{"track": Track or null}` |
 | `resolve` | `id` | `{"source": Source}` |
 | `shutdown` | none | `{}`, then exit |
 
+- **search** with an empty `term` is what the Media Library shows when your Pak opens in it, before the user has typed anything, so it's the first list people see: answer it with something worth playing, such as your newest, most played or favourite tracks. Bitamp sends one search per Return, never one per keystroke.
 - **hello** comes first, every time the program starts. `cacheDirectory` is a folder for the Pak's own files; Bitamp creates it.
 - **configure** comes when the user saves new settings.
 - **Account** is `{"state": "connected" | "disconnected" | "limited", "message": "…"}`. `disconnected` lights the cartridge amber and asks the user to set the Pak up. `limited` means it works with a catch, which `message` explains.
@@ -199,7 +200,7 @@ Save it as `hello.py` in `Hello.bitpak`, `chmod +x` it, and point `pak.json`'s `
   It reads `pak.json` as installing does, then starts the program and has the same conversation Bitamp has, using the first track it finds. It catches what usually goes wrong: answers that aren't flushed, other output on standard output, a `track` that forgets an id `search` gave, a file that isn't there, and a program that doesn't exit. Settings take their defaults unless you give `--setting key=value`, once per setting. What the program writes to standard error is shown as it runs. It exits with status 0 when there's nothing to fix.
 - Install by double-clicking the `.bitpak`, dropping it on Bitamp, or File ▸ Install Expansion Pak…. Installing a Pak with the same id replaces the old one.
 - Installed Paks live in `~/Library/Application Support/Bitamp/Paks`; their caches in `~/Library/Caches/com.ryanromanov.Bitamp/Paks`.
-- Click the cartridge to open the Pak in the Media Library, where it shows what `search ""` gives and searches as the user types. Right-click it to browse, change settings, eject or remove it.
+- Click the cartridge to open the Pak in the Media Library, where it shows what `search ""` gives and searches when the user presses Return. Right-click it to browse, change settings, eject or remove it.
 
 ## Trust
 
