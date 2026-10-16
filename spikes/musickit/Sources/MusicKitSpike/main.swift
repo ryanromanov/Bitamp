@@ -7,7 +7,9 @@ import MusicKit
 // Each step logs what MusicKit returned, to the window and to stdout, so a run from the
 // terminal leaves a transcript. `--auto "term"` runs every step in order and quits;
 // `--pak "term"` does the same through Bitamp's Apple Music Pak. `--tap "term"` plays a song
-// and measures what Core Audio process taps hear of it (TapProbe.swift).
+// and measures what Core Audio process taps hear of it (TapProbe.swift). `--art "term"`
+// tries every way of getting artwork for a skinned Media Library (ArtProbe.swift), and
+// `--browse "term"` walks the Apple Music Pak's browsing (BrowseProbe.swift).
 
 @MainActor
 final class Spike: NSObject, NSApplicationDelegate {
@@ -21,11 +23,15 @@ final class Spike: NSObject, NSApplicationDelegate {
     private let autoTerm: String?
     private let pakTerm: String?
     private let tapTerm: String?
+    private let artTerm: String?
+    private let browseTerm: String?
 
-    init(autoTerm: String?, pakTerm: String?, tapTerm: String?) {
+    init(autoTerm: String?, pakTerm: String?, tapTerm: String?, artTerm: String?, browseTerm: String?) {
         self.autoTerm = autoTerm
         self.pakTerm = pakTerm
         self.tapTerm = tapTerm
+        self.artTerm = artTerm
+        self.browseTerm = browseTerm
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -56,6 +62,19 @@ final class Spike: NSObject, NSApplicationDelegate {
         if let autoTerm { Task { await runAll(autoTerm) } }
         if let pakTerm { Task { await runPak(pakTerm) } }
         if let tapTerm { Task { await runTap(tapTerm) } }
+        if let artTerm {
+            Task {
+                await authorizeAsync()
+                await ArtProbe(log: log).run(artTerm)
+                NSApp.terminate(nil)
+            }
+        }
+        if let browseTerm {
+            Task {
+                await BrowseProbe(log: log).run(browseTerm)
+                NSApp.terminate(nil)
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -255,9 +274,11 @@ func option(_ name: String) -> String? {
 let autoTerm = option("--auto")
 let pakTerm = option("--pak")
 let tapTerm = option("--tap")
+let artTerm = option("--art")
+let browseTerm = option("--browse")
 MainActor.assumeIsolated {
     let app = NSApplication.shared
-    let delegate = Spike(autoTerm: autoTerm, pakTerm: pakTerm, tapTerm: tapTerm)
+    let delegate = Spike(autoTerm: autoTerm, pakTerm: pakTerm, tapTerm: tapTerm, artTerm: artTerm, browseTerm: browseTerm)
     app.delegate = delegate
     app.setActivationPolicy(.regular)
     app.run()

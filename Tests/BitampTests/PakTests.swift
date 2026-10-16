@@ -4,6 +4,7 @@ import Foundation
 import Testing
 @testable import BitampAppleMusicPak
 @testable import BitampKit
+import MusicKit
 
 /// A Pak whose tracks are `fake://song/<n>` and that plays them on its own backend, as a
 /// streaming service's own player would.
@@ -537,6 +538,12 @@ private final class PagedPak: Pak {
         for id in ["section/radio", "nonsense", "library-video/1"] {
             await #expect(throws: PakBrowseError.notFound(id)) { try await browser.page(id, after: nil) }
         }
+    }
+
+    @Test func theListenersPlaylistsAreToldFromTheCatalogs() {
+        guard #available(macOS 14, *) else { return }
+        #expect(AppleMusicBrowser.isLibraryPlaylist(MusicItemID("p.vXyz123")))
+        #expect(!AppleMusicBrowser.isLibraryPlaylist(MusicItemID("pl.f4d106fed2bd41149aaacabb233eb5eb")))
     }
 
     /// `ArtworkImage` fits wide art inside a square with clear bands above and below;
