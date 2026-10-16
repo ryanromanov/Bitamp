@@ -88,6 +88,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         windowGroup?.restore()
+        // A library left open at quit opens on the first Pak that can show it.
+        if windowGroup?.isVisible(.library) == true {
+            if let pak = paks.paks.first(where: { $0.isAvailable && paks.isInserted($0) }) {
+                libraryView?.show(pak)
+            } else {
+                windowGroup?.setVisible(.library, false)
+            }
+        }
         windowGroup?.showAtLaunch()
         raiseAllWindowsOnClick()
         NSApp.activate(ignoringOtherApps: true)

@@ -160,11 +160,16 @@ class SkinnedView: NSView {
     private func frameTick() {
         frameCount += 1
         tick()
-        if window?.isVisible == true { needsDisplay = true }
+        if window?.isVisible == true && redrawsEveryFrame { needsDisplay = true }
     }
 
     /// Called every frame before redrawing.
     func tick() {}
+
+    /// Whether to redraw every frame. A window whose pictures only change when something
+    /// happens returns false while nothing moves, and sets `needsDisplay` when it changes;
+    /// clicks, drags and key presses redraw it anyway.
+    var redrawsEveryFrame: Bool { true }
 
     // MARK: - Drawing
 

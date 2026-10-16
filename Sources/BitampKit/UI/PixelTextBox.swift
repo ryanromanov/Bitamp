@@ -178,6 +178,12 @@ final class PixelTextBox: NSObject, NSTextFieldDelegate {
 
     // MARK: - Return and Escape
 
+    /// The caret and focused edge go when editing ends, in a view that may not redraw by
+    /// itself.
+    func controlTextDidEndEditing(_ obj: Notification) {
+        view?.needsDisplay = true
+    }
+
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
         case #selector(NSResponder.insertNewline(_:)):

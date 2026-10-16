@@ -76,6 +76,26 @@ final class MediaLibraryView: SkinnedView {
         LibraryLayout.snapped(proposed)
     }
 
+    /// Nothing moves in the library but the search box's caret, so it redraws when it
+    /// changes: loads, covers, scrolling, and the events `SkinnedView` redraws for.
+    override var redrawsEveryFrame: Bool { search?.isEditing == true }
+
+    private var keyObservers: [NSObjectProtocol] = []
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        keyObservers.forEach(NotificationCenter.default.removeObserver)
+        keyObservers = []
+        guard let window else { return }
+        // The title bar shows whether the window has focus, and the caret stops blinking.
+        let redraw: @Sendable (Notification) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated { self?.needsDisplay = true }
+        }
+        keyObservers = [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification].map {
+            NotificationCenter.default.addObserver(forName: $0, object: window, queue: nil, using: redraw)
+        }
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         guard search != nil else { return }
@@ -635,6 +655,7 @@ final class MediaLibraryView: SkinnedView {
         let point = pixel(for: event)
         guard let index = item(at: point) else { return Menus.context() }
         if !selection.contains(index) { selection = [index] }
+        needsDisplay = true
         let menu = NSMenu()
         if case .place(let place) = items[index], selection.count == 1 {
             let open = NSMenuItem(title: "Open “\(place.title)”", action: #selector(openSelected(_:)), keyEquivalent: "")
@@ -660,6 +681,7 @@ final class MediaLibraryView: SkinnedView {
     // MARK: - Keyboard
 
     override func keyDown(with event: NSEvent) {
+        defer { needsDisplay = true }
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "f" {
             search.focus()
             return
