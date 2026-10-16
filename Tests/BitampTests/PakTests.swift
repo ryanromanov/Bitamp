@@ -362,7 +362,7 @@ private final class FakeBackend: PlaybackBackend {
         for _ in 0..<7 { view.scrollWheel(with: down) }  // 196: two rows and a third
         #expect(view.scrollOffset == 196)
         var searched: String?
-        view.onSearch = { searched = $0.id }
+        view.onBrowse = { searched = $0.id }
         let cartridge = PakLayout.cartridge(9, rise: 0)
         let click = CGPoint(x: cartridge.midX, y: cartridge.minY + 10 - 196)
         #expect(view.pixelMouseDown(at: click, event: down))
