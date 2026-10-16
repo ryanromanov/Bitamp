@@ -9,7 +9,10 @@ import AppKit
 /// browse shows its search, starting with an empty one.
 ///
 /// Everything is drawn in skin pixels in the frame the Expansion Paks window wears.
-final class MediaLibraryView: SkinnedView {
+final class MediaLibraryView: SkinnedView, NSDraggingSource {
+    /// What a drag from the library carries; the items themselves stay with the view.
+    static let draggedItems = NSPasteboard.PasteboardType("com.ryanromanov.bitamp.library-items")
+
     let controller: PlaybackController
     /// Gets keys the library doesn't use, such as the transport letters.
     weak var keyFallback: NSResponder?
@@ -40,6 +43,17 @@ final class MediaLibraryView: SkinnedView {
     private var laidOutWidth = 0
     private(set) var selection = IndexSet()
     private var anchor: Int?
+    /// The item the arrow keys move from.
+    private(set) var focus: Int?
+    /// Each item's block and column, for moving up and down through rows of covers.
+    private var positions: [(block: Int, column: Int)] = []
+    /// How far the sidebar is scrolled, for a Pak with more sections than fit.
+    private var sidebarScroll: CGFloat = 0
+    /// A click on an item, until it becomes a drag or a click. `collapse` is a selected
+    /// item that becomes the only selection if the mouse comes up without dragging.
+    private var itemPress: (point: CGPoint, index: Int, collapse: Bool)?
+    /// What's being dragged out, for `dropDragged(at:)`.
+    private var dragged: [PakItem] = []
     /// What the pane says instead of a page: loading, an error, nothing there.
     private(set) var message: String?
     /// Bumped by every navigation, so answers about an earlier page are dropped.
@@ -64,6 +78,11 @@ final class MediaLibraryView: SkinnedView {
         super.init(pixelSize: LibraryLayout.defaultSize, skin: skin, scale: scale)
         search = PixelTextBox(in: self, rect: parts.search, placeholder: "Search")
         search.onSubmit = { [weak self] term in self?.runSearch(term) }
+        search.onTab = { [weak self] in
+            guard let self else { return }
+            window?.makeFirstResponder(self)
+            if focus == nil { moveFocus(to: 0) }
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -200,6 +219,7 @@ final class MediaLibraryView: SkinnedView {
         let generation = generation
         shown = Shown(location: location, title: title)
         selection = []
+        focus = nil
         loadingMore = false
         message = "Loading…"
         relayout()
@@ -224,6 +244,7 @@ final class MediaLibraryView: SkinnedView {
         generation += 1
         shown = previous
         selection = []
+        focus = nil
         message = previous.items.isEmpty ? "Nothing here." : nil
         relayout()
         scroll = previous.scroll
@@ -269,7 +290,16 @@ final class MediaLibraryView: SkinnedView {
         let width = Int(parts.list.width)
         (blocks, contentHeight) = LibraryLayout.blocks(header: shown?.header != nil, shelves: shown?.shelves ?? [], width: width)
         laidOutWidth = width
+        positions = Array(repeating: (0, 0), count: items.count)
+        for (number, block) in blocks.enumerated() {
+            switch block.kind {
+            case .track(let index): positions[index] = (number, 0)
+            case .grid(let indices): for (column, index) in indices.enumerated() { positions[index] = (number, column) }
+            case .header, .shelfTitle: break
+            }
+        }
         selection = selection.filteredIndexSet { $0 < items.count }
+        if let focus, focus >= items.count { self.focus = nil }
         scroll = scroll
         needsDisplay = true
     }
@@ -357,8 +387,9 @@ final class MediaLibraryView: SkinnedView {
 
     private func drawSidebar(_ c: Canvas, _ parts: LibraryLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor) {
         c.context.saveGState()
-        c.context.clip(to: parts.sidebar)
-        var y = parts.sectionsTop
+        c.context.clip(to: CGRect(x: parts.sidebar.minX, y: CGFloat(parts.sectionsTop), width: parts.sidebar.width,
+                                  height: parts.sidebar.maxY - CGFloat(parts.sectionsTop)))
+        var y = parts.sectionsTop - Int(sidebarScroll)
         for (index, entry) in sidebar.enumerated() {
             if entry.place == nil, index > 0 { y += 3 }
             let x = Int(parts.sidebar.minX) + 3
@@ -495,8 +526,8 @@ final class MediaLibraryView: SkinnedView {
 
     private func sidebarPlace(at point: CGPoint) -> PakPlace? {
         let parts = self.parts
-        guard parts.sidebar.contains(point) else { return nil }
-        var y = parts.sectionsTop
+        guard parts.sidebar.contains(point), Int(point.y) >= parts.sectionsTop else { return nil }
+        var y = parts.sectionsTop - Int(sidebarScroll)
         for (index, entry) in sidebar.enumerated() {
             if entry.place == nil, index > 0 { y += 3 }
             if Int(point.y) >= y, Int(point.y) < y + LibraryLayout.sidebarRow { return entry.place }
@@ -550,10 +581,20 @@ final class MediaLibraryView: SkinnedView {
             if let place = sidebarPlace(at: point) {
                 openSection(place)
             } else if let index = item(at: point) {
-                select(index, event: event)
+                let plain = event.modifierFlags.isDisjoint(with: [.command, .shift])
+                // A plain click on a selected item keeps the rest selected, in case it's dragged.
+                if plain && selection.contains(index) {
+                    focus = index
+                    anchor = index
+                } else {
+                    select(index, event: event)
+                }
+                itemPress = (point, index, plain && selection.count > 1)
+                pressed = .items
                 if event.clickCount == 2 { activate(index) }
             } else if parts.list.contains(point) {
                 selection = []
+                focus = nil
             }
             return true
         default:
@@ -564,6 +605,7 @@ final class MediaLibraryView: SkinnedView {
     }
 
     private func select(_ index: Int, event: NSEvent) {
+        focus = index
         let modifiers = event.modifierFlags
         if modifiers.contains(.command) {
             if selection.contains(index) { selection.remove(index) } else { selection.insert(index) }
@@ -603,6 +645,10 @@ final class MediaLibraryView: SkinnedView {
             guard size != window.frame.size else { return }
             window.setFrame(NSRect(x: window.frame.minX, y: window.frame.maxY - size.height, width: size.width, height: size.height),
                             display: true)
+        case .items?:
+            guard let press = itemPress, hypot(point.x - press.point.x, point.y - press.point.y) >= 3 else { return }
+            itemPress = nil
+            beginDrag(event)
         case .thumb(let grab)?:
             let track = parts.scrollTrack
             let travel = track.height - PlaylistLayout.scrollThumb.height
@@ -620,6 +666,10 @@ final class MediaLibraryView: SkinnedView {
             pressed = nil
             pressedInside = false
         }
+        if let press = itemPress, press.collapse {
+            selection = [press.index]
+        }
+        itemPress = nil
         switch pressed {
         case .search?: search.mouseUp()
         case .close? where pressedInside: windowGroup?.setVisible(.library, false)
@@ -633,7 +683,19 @@ final class MediaLibraryView: SkinnedView {
     override func scrollWheel(with event: NSEvent) {
         let pixels = event.hasPreciseScrollingDeltas
             ? event.scrollingDeltaY / scale : event.scrollingDeltaY * CGFloat(LibraryLayout.rowHeight) * 3
-        scroll -= pixels
+        if parts.sidebar.contains(pixel(for: event)) {
+            let parts = self.parts
+            let room = parts.sidebar.maxY - CGFloat(parts.sectionsTop)
+            sidebarScroll = min(max(sidebarScroll - pixels, 0), max(0, sidebarHeight - room))
+            needsDisplay = true
+        } else {
+            scroll -= pixels
+        }
+    }
+
+    /// The sections' height, headings' gaps included.
+    private var sidebarHeight: CGFloat {
+        CGFloat(sidebar.count * LibraryLayout.sidebarRow + max(0, sidebar.filter { $0.place == nil }.count - 1) * 3 + 4)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -671,6 +733,7 @@ final class MediaLibraryView: SkinnedView {
             search.focus()
             return
         }
+        let extend = event.modifierFlags.contains(.shift)
         switch event.specialKey {
         case .carriageReturn?, .enter?:
             if selection.count == 1, let index = selection.first, case .place = items[index] {
@@ -680,8 +743,125 @@ final class MediaLibraryView: SkinnedView {
             }
         case .delete?, .backspace?:
             goBack()
+        case .leftArrow?: moveFocus(to: (focus ?? 1) - 1, extend: extend)
+        case .rightArrow?: moveFocus(to: focus.map { $0 + 1 } ?? 0, extend: extend)
+        case .upArrow?: moveFocus(to: focus.map { row(from: $0, by: -1) } ?? 0, extend: extend)
+        case .downArrow?: moveFocus(to: focus.map { row(from: $0, by: 1) } ?? 0, extend: extend)
+        case .pageUp?: moveFocus(to: focus.map { page(from: $0, by: -1) } ?? 0, extend: extend)
+        case .pageDown?: moveFocus(to: focus.map { page(from: $0, by: 1) } ?? 0, extend: extend)
+        case .home?: moveFocus(to: 0, extend: extend)
+        case .end?: moveFocus(to: items.count - 1, extend: extend)
+        case .tab?: search.focus()
         default:
             if let keyFallback { keyFallback.keyDown(with: event) } else { super.keyDown(with: event) }
+        }
+    }
+
+    /// Moves the focus, and the selection with it (or from the anchor, extending), and
+    /// scrolls it into view.
+    func moveFocus(to index: Int, extend: Bool = false) {
+        guard !items.isEmpty else { return }
+        let index = min(max(index, 0), items.count - 1)
+        if extend {
+            let start = anchor ?? index
+            selection = IndexSet(integersIn: min(start, index)...max(start, index))
+            anchor = start
+        } else {
+            selection = [index]
+            anchor = index
+        }
+        focus = index
+        let block = blocks[positions[index].block]
+        let top = CGFloat(block.y), bottom = CGFloat(block.y + block.height)
+        if top < scroll {
+            scroll = top
+        } else if bottom > scroll + parts.list.height {
+            scroll = bottom - parts.list.height
+        }
+    }
+
+    /// The item a row above or below `index` (`step` -1 or 1): in the same column of a row
+    /// of covers, or the nearest one when that row is shorter.
+    private func row(from index: Int, by step: Int) -> Int {
+        let (block, column) = positions[index]
+        var number = block + step
+        while blocks.indices.contains(number) {
+            switch blocks[number].kind {
+            case .track(let target): return target
+            case .grid(let indices): return indices[min(column, indices.count - 1)]
+            case .header, .shelfTitle: number += step
+            }
+        }
+        return index
+    }
+
+    /// The item about a list's height above or below `index`.
+    private func page(from index: Int, by step: Int) -> Int {
+        let start = blocks[positions[index].block].y
+        var target = index
+        while true {
+            let next = row(from: target, by: step)
+            guard next != target else { return target }
+            target = next
+            if abs(blocks[positions[target].block].y - start) >= Int(parts.list.height) - LibraryLayout.rowHeight { return target }
+        }
+    }
+
+    // MARK: - Dragging into the playlist
+
+    private func beginDrag(_ event: NSEvent) {
+        guard canAsk, !selection.isEmpty else { return }
+        dragged = selection.map { items[$0] }
+        let item = NSPasteboardItem()
+        item.setString(String(dragged.count), forType: Self.draggedItems)
+        let draggingItem = NSDraggingItem(pasteboardWriter: item)
+        let image = dragImage()
+        let location = convert(event.locationInWindow, from: nil)
+        draggingItem.setDraggingFrame(NSRect(x: location.x - image.size.width / 2, y: location.y - image.size.height / 2,
+                                             width: image.size.width, height: image.size.height), contents: image)
+        beginDraggingSession(with: [draggingItem], event: event, source: self)
+    }
+
+    /// The first dragged item's cover with how many there are, or just the count.
+    private func dragImage() -> NSImage {
+        let colors = skin.playlistColors
+        let label = dragged.count == 1 ? (dragged[0].track?.title ?? dragged[0].place?.title ?? "") : "\(dragged.count) items"
+        let text = ListFont.truncate(label, toWidth: 120)
+        let artwork = dragged.first.flatMap { $0.place?.artwork ?? $0.track?.artwork }
+        let cover = pak.flatMap { pak in artwork.flatMap { covers.cached(CoverCache.Key(pak: pak.id, artwork: $0, size: LibraryLayout.cover)) } }
+        let size = LibraryLayout.cover
+        let canvas = Canvas(max(size, ListFont.width(of: text) + 6), size + ListFont.lineHeight + 4)
+        if let cover { canvas.draw(cover, (canvas.width - size) / 2, 0) }
+        canvas.fill(0, size + 1, canvas.width, ListFont.lineHeight + 2, colors.selectedBackground)
+        ListFont.draw(text, in: canvas, x: 3, y: size + 2, color: colors.current)
+        return NSImage(cgImage: canvas.image(), size: NSSize(width: CGFloat(canvas.width) * scale, height: CGFloat(canvas.height) * scale))
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .withinApplication ? .copy : []
+    }
+
+    /// Puts what was dragged out into the playlist at `index`: songs as they are, albums and
+    /// playlists as all their songs.
+    func dropDragged(at index: Int) {
+        let items = dragged
+        dragged = []
+        insert(items, at: index)
+    }
+
+    func insert(_ items: [PakItem], at index: Int) {
+        guard let pak, canAsk, !items.isEmpty else { return }
+        Task {
+            var tracks: [PakTrack] = []
+            for item in items {
+                switch item {
+                case .track(let track): tracks.append(track)
+                case .place(let place): tracks += (try? await pak.allTracks(at: .place(place.id))) ?? []
+                }
+            }
+            guard !tracks.isEmpty else { return }
+            remember(tracks)
+            controller.insert(tracks.map(\.url), at: min(index, controller.queue.count))
         }
     }
 
@@ -711,14 +891,19 @@ final class MediaLibraryView: SkinnedView {
         }
     }
 
+    /// Seeds the playlist's titles, so new rows show names before the Pak is asked.
+    private func remember(_ tracks: [PakTrack]) {
+        for track in tracks {
+            controller.info.seed(TrackMetadata(title: track.title, artist: track.artist, duration: track.duration), for: track.url)
+        }
+    }
+
     private func add(_ tracks: [PakTrack], play: Bool) {
         guard !tracks.isEmpty else {
             flashMessage?("NOTHING TO \(play ? "PLAY" : "ADD")")
             return
         }
-        for track in tracks {
-            controller.info.seed(TrackMetadata(title: track.title, artist: track.artist, duration: track.duration), for: track.url)
-        }
+        remember(tracks)
         let first = controller.queue.count
         controller.enqueue(tracks.map(\.url))
         if play {

@@ -11,6 +11,8 @@ final class PlaylistView: SkinnedView {
     let preferences: Preferences
     /// Gets keys the playlist doesn't use, such as the transport letters.
     weak var keyFallback: NSResponder?
+    /// Puts what was dragged from the Media Library in at an index.
+    var onLibraryDrop: ((Int) -> Void)?
 
     private(set) var selection = IndexSet()
     /// The fixed end of a Shift-selection, and the end the arrow keys move.
@@ -40,7 +42,7 @@ final class PlaylistView: SkinnedView {
         super.init(
             pixelSize: CGSize(width: PlaylistLayout.width, height: PlaylistLayout.defaultHeight),
             skin: skin, scale: preferences.scale)
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes([.fileURL, MediaLibraryView.draggedItems])
     }
 
     required init?(coder: NSCoder) {
@@ -591,6 +593,11 @@ final class PlaylistView: SkinnedView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if sender.draggingPasteboard.types?.contains(MediaLibraryView.draggedItems) == true {
+            onLibraryDrop?(dropIndex ?? queue.count)
+            dropIndex = nil
+            return true
+        }
         let urls = sender.draggingPasteboard.readObjects(
             forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
         controller.insert(urls, at: dropIndex ?? queue.count)
