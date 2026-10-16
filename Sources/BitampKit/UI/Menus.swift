@@ -68,6 +68,20 @@ enum Menus {
         return menu
     }
 
+    /// Text fields only get their editing shortcuts from these items. Select All also
+    /// reaches the playlist when it has focus.
+    static func editMenu() -> NSMenu {
+        menu("Edit", [
+            item("Undo", Selector(("undo:")), "z", [.command]),
+            item("Redo", Selector(("redo:")), "z", [.command, .shift]),
+            .separator(),
+            item("Cut", #selector(NSText.cut(_:)), "x", [.command]),
+            item("Copy", #selector(NSText.copy(_:)), "c", [.command]),
+            item("Paste", #selector(NSText.paste(_:)), "v", [.command]),
+            item("Select All", #selector(NSResponder.selectAll(_:)), "a", [.command]),
+        ])
+    }
+
     static func submenu(_ menu: NSMenu) -> NSMenuItem {
         let item = NSMenuItem(title: menu.title, action: nil, keyEquivalent: "")
         item.submenu = menu
