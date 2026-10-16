@@ -1,4 +1,5 @@
 import BitampPakKit
+import CoreGraphics
 import Foundation
 import MusicKit
 
@@ -17,6 +18,8 @@ public final class AppleMusicPak: Pak {
     /// Created when the first song plays, since `ApplicationMusicPlayer` needs macOS 14.
     private var backend: PlaybackBackend?
     private let songs = SongStore()
+    /// Created on first use, since it needs macOS 14.
+    private var browser: AnyObject?
 
     public init() {}
 
@@ -87,7 +90,7 @@ public final class AppleMusicPak: Pak {
               MusicAuthorization.currentStatus == .authorized,
               let song = try? await songs.song(for: reference)
         else { return nil }
-        return SongStore.track(song, url: url)
+        return songs.track(song, url: url)
     }
 
     public func playback(for url: URL) throws -> PakPlayback {
@@ -95,6 +98,30 @@ public final class AppleMusicPak: Pak {
         guard AppleMusicURL(url) != nil else { throw AppleMusicError.notASong(url) }
         if backend == nil { backend = AppleMusicBackend(songs: songs) }
         return .backend(backend!)
+    }
+
+    // MARK: - Browsing
+
+    public var canBrowse: Bool { isAvailable }
+
+    public func browse(_ location: PakLocation, after cursor: String?) async throws -> PakPage {
+        guard #available(macOS 14, *) else { throw AppleMusicError.needsMacOS14 }
+        if MusicAuthorization.currentStatus != .authorized { try await connect() }
+        let browser = (self.browser as? AppleMusicBrowser) ?? AppleMusicBrowser(songs: songs)
+        self.browser = browser
+        switch location {
+        case .root:
+            if subscription == nil { subscription = try? await MusicSubscription.current }
+            return browser.root(catalog: subscription?.canPlayCatalogContent == true)
+        case .place(let id):
+            return try await browser.page(id, after: cursor)
+        case .search(let term):
+            return cursor == nil ? try await browser.search(term) : PakPage()
+        }
+    }
+
+    public func image(for artwork: PakArtwork, size: Int) async -> CGImage? {
+        await songs.art.image(for: artwork, size: size)
     }
 }
 
@@ -119,11 +146,12 @@ enum AppleMusicError: LocalizedError {
 @MainActor
 final class SongStore {
     private var songs: [AppleMusicURL: Song] = [:]
+    let art = ArtworkStore()
 
     func remember(_ song: Song, from source: AppleMusicURL.Source) -> PakTrack {
         let reference = AppleMusicURL(source: source, id: song.id.rawValue)
         songs[reference] = song
-        return Self.track(song, url: reference.url)
+        return track(song, url: reference.url)
     }
 
     func cached(_ reference: AppleMusicURL) -> Song? {
@@ -148,8 +176,9 @@ final class SongStore {
         return found
     }
 
-    static func track(_ song: Song, url: URL) -> PakTrack {
-        PakTrack(url: url, title: song.title, artist: song.artistName, album: song.albumTitle, duration: duration(of: song))
+    func track(_ song: Song, url: URL) -> PakTrack {
+        PakTrack(url: url, title: song.title, artist: song.artistName, album: song.albumTitle,
+                 duration: Self.duration(of: song), artwork: art.reference(song.artwork))
     }
 
     /// The song's length in seconds. On macOS 27.2, library songs give `duration` in
