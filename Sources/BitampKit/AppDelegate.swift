@@ -10,6 +10,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The built-in Paks, then the installed ones by name.
     private lazy var paks = PakRegistry(builtInPaks + pakLibrary.installed(), preferences: preferences)
     private var pakView: PakView?
+    private var libraryView: MediaLibraryView?
     private var settingsPanels: [String: PakSettingsPanel] = [:]
     private lazy var controller = PlaybackController(engine: PlayerEngine(), preferences: preferences, paks: paks)
     /// "Add from…" panels, by Pak id, made when first opened.
@@ -44,18 +45,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let playlistView = PlaylistView(controller: controller, preferences: preferences, skin: skin)
         playlistView.keyFallback = mainView
         let pakView = PakView(controller: controller, skin: skin, scale: preferences.scale)
+        let libraryView = MediaLibraryView(controller: controller, skin: skin, scale: preferences.scale)
+        libraryView.keyFallback = mainView
+        self.libraryView = libraryView
         pakView.onSearch = { [weak self] pak in self?.showSearch(pak) }
         pakView.onSettings = { [weak self] pak in self?.showSettings(pak) }
         pakView.onInstall = { [weak self] url in self?.installPak(url) }
         pakView.onRemove = { [weak self] pak in self?.removePak(pak) }
         mainView.onPakDropped = { [weak self] url in self?.installPak(url) }
         self.pakView = pakView
-        // An ejected Pak's search closes with it.
+        // An ejected Pak's search and library close with it.
         pakView.onInsertedChange = { [weak self] pak, inserted in
-            if !inserted { self?.searchPanels[pak.id]?.close() }
+            guard !inserted, let self else { return }
+            searchPanels[pak.id]?.close()
+            closeLibrary(showing: pak)
         }
         mainView.onShowPaks = { [weak self] in self?.windowGroup?.setVisible(.paks, true) }
-        for view in [equalizerView, playlistView, pakView] as [SkinnedView] {
+        for view in [equalizerView, playlistView, pakView, libraryView] as [SkinnedView] {
             view.announce = mainView.announce
             view.flashMessage = { [weak mainView] message in mainView?.flash(message, for: 2) }
         }
@@ -65,10 +71,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             .equalizer: SkinnedWindow(view: equalizerView, layoutName: "EqualizerWindow", isMain: false),
             .playlist: SkinnedWindow(view: playlistView, layoutName: "PlaylistWindow", isMain: false),
             .paks: SkinnedWindow(view: pakView, layoutName: "PaksWindow", isMain: false),
+            .library: SkinnedWindow(view: libraryView, layoutName: "LibraryWindow", isMain: false),
         ]
         for window in panels.values { window.actionFallback = mainView }
         let group = WindowGroup(main: main, panels: panels)
-        views = [mainView, equalizerView, playlistView, pakView]
+        views = [mainView, equalizerView, playlistView, pakView, libraryView]
         for view in views {
             view.windowGroup = group
         }
@@ -225,6 +232,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if controller.playingPak === pak { controller.stop() }
         pak.disconnect()
         searchPanels.removeValue(forKey: pak.id)?.close()
+        closeLibrary(showing: pak)
         settingsPanels.removeValue(forKey: pak.id)?.close()
         paks.unregister(pak)
     }
@@ -418,11 +426,28 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowGroup?.toggle(.paks)
     }
 
+    /// Opens the Media Library on `pak`'s music.
     private func showSearch(_ pak: Pak) {
-        guard pak.isAvailable, paks.isInserted(pak) else { return }
-        let panel = searchPanels[pak.id] ?? PakSearchPanel(pak: pak, controller: controller)
-        searchPanels[pak.id] = panel
-        panel.show()
+        guard pak.isAvailable, paks.isInserted(pak), let libraryView else { return }
+        libraryView.show(pak)
+        windowGroup?.setVisible(.library, true)
+        libraryView.window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Empties and hides the Media Library if it shows `pak`, which is going away.
+    private func closeLibrary(showing pak: Pak) {
+        guard let libraryView, libraryView.pak === pak else { return }
+        libraryView.clear()
+        windowGroup?.setVisible(.library, false)
+    }
+
+    @objc private func toggleLibrary(_ sender: Any?) {
+        guard let windowGroup else { return }
+        if !windowGroup.isVisible(.library), libraryView?.pak == nil,
+           let pak = paks.paks.first(where: { $0.isAvailable && paks.isInserted($0) }) {
+            libraryView?.show(pak)
+        }
+        windowGroup.toggle(.library)
     }
 
     private func makeMainMenu() -> NSMenu {
@@ -444,6 +469,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let equalizer = Menus.item("Equalizer", #selector(toggleEqualizer(_:)), "g", [.option])
         let playlist = Menus.item("Playlist", #selector(togglePlaylist(_:)), "e", [.option])
         let paksWindow = Menus.item("Expansion Paks", #selector(togglePaks(_:)), "k", [.option])
+        let library = Menus.item("Media Library", #selector(toggleLibrary(_:)), "l", [.option])
         let regroup = Menus.item("Regroup Windows", #selector(regroupWindows(_:)), "r", [.option])
         let minimize = Menus.item("Minimize", #selector(minimize(_:)), "m", [.command])
         let sizes = SkinnedView.scales.enumerated().map { index, scale -> NSMenuItem in
@@ -459,9 +485,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let playlistShade = Menus.item("Shade Playlist", #selector(togglePlaylistShade(_:)), "w", [.control, .shift])
         let shadows = Menus.item("Window Shadows", #selector(toggleShadows(_:)))
         let raiseAll = Menus.item("Bring All Windows Forward", #selector(toggleRaiseAllWindows(_:)))
-        for item in [mainWindow, equalizer, playlist, paksWindow, regroup, minimize, equalizerShade, playlistShade, shadows, raiseAll] { item.target = self }
+        for item in [mainWindow, equalizer, playlist, paksWindow, library, regroup, minimize, equalizerShade, playlistShade, shadows, raiseAll] { item.target = self }
         let windowMenu = Menus.menu("Window", [
-            mainWindow, equalizer, playlist, paksWindow, regroup, .separator(),
+            mainWindow, equalizer, playlist, paksWindow, library, regroup, .separator(),
             mainShade, equalizerShade, playlistShade, .separator(),
             Menus.submenu(Menus.menu("Size", sizes)), shadows, raiseAll, .separator(),
             minimize,
@@ -491,6 +517,7 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(toggleEqualizer(_:)): item.state = windowGroup?.isVisible(.equalizer) == true ? .on : .off
         case #selector(togglePlaylist(_:)): item.state = windowGroup?.isVisible(.playlist) == true ? .on : .off
         case #selector(togglePaks(_:)): item.state = windowGroup?.isVisible(.paks) == true ? .on : .off
+        case #selector(toggleLibrary(_:)): item.state = windowGroup?.isVisible(.library) == true ? .on : .off
         case #selector(setScale(_:)): item.state = item.representedObject as? CGFloat == preferences.scale ? .on : .off
         case #selector(toggleShadows(_:)): item.state = preferences.windowShadows ? .on : .off
         case #selector(toggleRaiseAllWindows(_:)): item.state = preferences.raiseAllWindows ? .on : .off
