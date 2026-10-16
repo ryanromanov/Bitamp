@@ -428,3 +428,133 @@ private final class FakeBackend: PlaybackBackend {
         }
     }
 }
+
+/// A Pak that only searches, as every Pak did before browsing.
+@MainActor
+private final class SearchOnlyPak: Pak {
+    let id = "search-only"
+    let name = "Search Only"
+    let schemes: Set<String> = ["search-only"]
+    let isAvailable = true
+    let account = PakAccount.connected(name: nil)
+    func connect() async throws {}
+    func disconnect() {}
+    func search(_ term: String) async throws -> [PakTrack] {
+        [PakTrack(url: URL(string: "search-only://track/1")!, title: "Found \(term)")]
+    }
+    func metadata(for url: URL) async -> PakTrack? { nil }
+    func playback(for url: URL) throws -> PakPlayback { throw CocoaError(.fileReadUnsupportedScheme) }
+}
+
+/// A Pak with one long playlist, `list`, that comes `pageSize` tracks at a time.
+@MainActor
+private final class PagedPak: Pak {
+    let id = "paged"
+    let name = "Paged"
+    let schemes: Set<String> = ["paged"]
+    let isAvailable = true
+    let account = PakAccount.connected(name: nil)
+    var count = 25
+    var pageSize = 10
+    /// Gives the same cursor forever, as a broken Pak might.
+    var stuck = false
+    private(set) var pagesAsked = 0
+
+    var canBrowse: Bool { true }
+
+    func browse(_ location: PakLocation, after cursor: String?) async throws -> PakPage {
+        guard location == .place("list") else { return PakPage() }
+        pagesAsked += 1
+        let start = cursor.flatMap(Int.init) ?? 0
+        let end = min(count, start + pageSize)
+        let tracks = (start..<end).map { PakItem.track(PakTrack(url: URL(string: "paged://track/\($0)")!, title: "Track \($0)")) }
+        return PakPage(shelves: [PakShelf(items: tracks)], cursor: stuck ? "0" : end < count ? String(end) : nil)
+    }
+
+    func connect() async throws {}
+    func disconnect() {}
+    func search(_ term: String) async throws -> [PakTrack] { [] }
+    func metadata(for url: URL) async -> PakTrack? { nil }
+    func playback(for url: URL) throws -> PakPlayback { throw CocoaError(.fileReadUnsupportedScheme) }
+}
+
+@MainActor @Suite struct PakBrowsingTests {
+    @Test func aPakThatOnlySearchesBrowsesItsSearch() async throws {
+        let pak: Pak = SearchOnlyPak()
+        #expect(!pak.canBrowse)
+        let found = try await pak.browse(.search("ode"), after: nil)
+        #expect(found.tracks.map(\.title) == ["Found ode"])
+        #expect(try await pak.browse(.search("ode"), after: "more").shelves.isEmpty)
+        #expect(try await pak.browse(.root, after: nil).shelves.isEmpty)
+        await #expect(throws: PakBrowseError.notFound("album")) { try await pak.browse(.place("album"), after: nil) }
+        #expect(await pak.image(for: PakArtwork("not-a-url"), size: 44) == nil)
+    }
+
+    /// Through `any Pak`, as Bitamp holds them, a Pak's own browsing must win over the
+    /// defaults (it wouldn't if they were only in an extension).
+    @Test func aPaksOwnBrowsingIsUsed() async throws {
+        let pak: Pak = PagedPak()
+        #expect(pak.canBrowse)
+        #expect(try await pak.browse(.place("list"), after: nil).tracks.count == 10)
+    }
+
+    @Test func allTracksFollowsCursors() async throws {
+        let pak = PagedPak()
+        let tracks = try await pak.allTracks(at: .place("list"))
+        #expect(tracks.map(\.title) == (0..<25).map { "Track \($0)" })
+        #expect(pak.pagesAsked == 3)
+    }
+
+    @Test func allTracksStopsAtItsLimitAndAtARepeatedCursor() async throws {
+        let pak = PagedPak()
+        #expect(try await pak.allTracks(at: .place("list"), limit: 12).count == 12)
+        #expect(pak.pagesAsked == 2)
+
+        let stuck = PagedPak()
+        stuck.stuck = true
+        #expect(try await stuck.allTracks(at: .place("list")).count == 20)
+        #expect(stuck.pagesAsked == 2)
+    }
+}
+
+@MainActor @Suite struct AppleMusicBrowsingTests {
+    @Test func theSidebarShowsTheCatalogOnlyWithASubscription() throws {
+        guard #available(macOS 14, *) else { return }
+        let browser = AppleMusicBrowser(songs: SongStore())
+        let library = browser.root(catalog: false)
+        #expect(library.shelves.map(\.title) == ["Library"])
+        #expect(library.shelves[0].items.compactMap(\.place?.title)
+            == ["Recently Added", "Albums", "Artists", "Songs", "Playlists"])
+        let both = browser.root(catalog: true)
+        #expect(both.shelves.map(\.title) == ["Library", "Apple Music"])
+        #expect(both.shelves[1].items.compactMap(\.place?.id)
+            == ["section/for-you", "section/recently-played", "section/charts"])
+    }
+
+    @Test func unknownPlacesAreNotFound() async throws {
+        guard #available(macOS 14, *) else { return }
+        let browser = AppleMusicBrowser(songs: SongStore())
+        for id in ["section/radio", "nonsense", "library-video/1"] {
+            await #expect(throws: PakBrowseError.notFound(id)) { try await browser.page(id, after: nil) }
+        }
+    }
+
+    /// `ArtworkImage` fits wide art inside a square with clear bands above and below;
+    /// the cover is the middle square of what's left.
+    @Test func coversAreTrimmedAndSquared() throws {
+        let context = try #require(CGContext(data: nil, width: 100, height: 100, bitsPerComponent: 8, bytesPerRow: 0,
+                                             space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(srgbRed: 1, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 20, width: 100, height: 60))
+        let square = ArtworkStore.square(try #require(context.makeImage()))
+        #expect(square.width == 60 && square.height == 60)
+
+        // Opaque art is just center-cropped.
+        let wide = try #require(CGContext(data: nil, width: 160, height: 90, bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                          bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        let cropped = ArtworkStore.square(try #require(wide.makeImage()))
+        #expect(cropped.width == 90 && cropped.height == 90)
+    }
+}

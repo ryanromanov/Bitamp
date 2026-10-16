@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// An Expansion Pak: a music source beyond local files, such as a streaming service or a
@@ -25,6 +26,37 @@ public protocol Pak: AnyObject {
     func metadata(for url: URL) async -> PakTrack?
     /// How to play one of this Pak's tracks.
     func playback(for url: URL) throws -> PakPlayback
+
+    // Browsing, for the Media Library. Paks that only search can leave these out.
+
+    /// Whether `browse` offers more than search: a sidebar from `.root`, and places.
+    var canBrowse: Bool { get }
+    /// What's at `location`, or more of it after the `cursor` an earlier page gave.
+    func browse(_ location: PakLocation, after cursor: String?) async throws -> PakPage
+    /// The picture for `artwork`, about `size` pixels square, or nil if there's none.
+    func image(for artwork: PakArtwork, size: Int) async -> CGImage?
+}
+
+extension Pak {
+    public var canBrowse: Bool { false }
+
+    /// Search's tracks for `.search`, and nothing anywhere else.
+    public func browse(_ location: PakLocation, after cursor: String?) async throws -> PakPage {
+        switch location {
+        case .search(let term):
+            guard cursor == nil else { return PakPage() }
+            return PakPage(shelves: [PakShelf(items: try await search(term).map(PakItem.track))])
+        case .root:
+            return PakPage()
+        case .place(let id):
+            throw PakBrowseError.notFound(id)
+        }
+    }
+
+    /// Fetches art with a web address.
+    public func image(for artwork: PakArtwork, size: Int) async -> CGImage? {
+        await artwork.download()
+    }
 }
 
 public enum PakAccount: Sendable, Equatable {
@@ -50,12 +82,16 @@ public struct PakTrack: Sendable, Equatable {
     public var artist: String?
     public var album: String?
     public var duration: Double?
+    /// The track's album art, for the Media Library and what's playing.
+    public var artwork: PakArtwork?
 
-    public init(url: URL, title: String, artist: String? = nil, album: String? = nil, duration: Double? = nil) {
+    public init(url: URL, title: String, artist: String? = nil, album: String? = nil, duration: Double? = nil,
+                artwork: PakArtwork? = nil) {
         self.url = url
         self.title = title
         self.artist = artist
         self.album = album
         self.duration = duration
+        self.artwork = artwork
     }
 }
