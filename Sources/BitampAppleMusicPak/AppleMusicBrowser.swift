@@ -127,24 +127,25 @@ final class AppleMusicBrowser {
                 let items = recommendation.items.compactMap { item -> PakItem? in
                     switch item {
                     case .album(let album): return place(album, library: false)
-                    case .playlist(let playlist): return place(playlist, library: false)
+                    case .playlist(let playlist): return place(playlist, library: Self.isLibraryPlaylist(playlist.id))
                     default: return nil // Stations don't fit a playlist.
                     }
                 }
                 return items.isEmpty ? nil : PakShelf(title: recommendation.title, items: items)
             })
         case .recentlyPlayed:
-            guard offset == 0 else { return PakPage() }
+            // Apple Music gives at most 10 at a time.
             var request = MusicRecentlyPlayedContainerRequest()
-            request.limit = 30
+            request.limit = 10
+            request.offset = offset
             let found = try await request.response().items
             return PakPage(shelves: [PakShelf(items: found.compactMap { item -> PakItem? in
                 switch item {
                 case .album(let album): return place(album, library: false)
-                case .playlist(let playlist): return place(playlist, library: false)
+                case .playlist(let playlist): return place(playlist, library: Self.isLibraryPlaylist(playlist.id))
                 default: return nil
                 }
-            })])
+            })], cursor: found.count < 10 || offset + found.count >= 50 ? nil : String(offset + found.count))
         case .charts:
             guard offset == 0 else { return PakPage() }
             var request = MusicCatalogChartsRequest(kinds: [.mostPlayed], types: [Song.self, Album.self, Playlist.self])
@@ -162,6 +163,13 @@ final class AppleMusicBrowser {
             }
             return PakPage(shelves: shelves.filter { !$0.items.isEmpty })
         }
+    }
+
+    /// For You and Recently Played come from Apple Music but can hold the listener's own
+    /// playlists, whose ids start "p." (catalog playlists' start "pl."). Other ids don't
+    /// say: library and catalog ids are both often plain numbers.
+    static func isLibraryPlaylist(_ id: MusicItemID) -> Bool {
+        id.rawValue.hasPrefix("p.")
     }
 
     /// The cursor for the next page, when this one was full.
@@ -194,18 +202,27 @@ final class AppleMusicBrowser {
             NSLog("Bitamp: Apple Music catalog search failed: \(error)")
             if let libraryError { throw libraryError }
         }
+        // The library's answers can run past the limit; the catalog's copies of what's in
+        // the library are left out. Artists stay, since a catalog artist's page has more.
+        let librarySongs = Array((library?.songs ?? []).prefix(25)), libraryAlbums = Array((library?.albums ?? []).prefix(25))
+        let libraryPlaylists = Array((library?.playlists ?? []).prefix(25))
+        let songKeys = Set(librarySongs.map { "\($0.title)\u{0}\($0.artistName)" })
+        let albumKeys = Set(libraryAlbums.map { "\($0.title)\u{0}\($0.artistName)" })
+        let playlistNames = Set(libraryPlaylists.map(\.name))
         var shelves: [PakShelf] = []
         func add(_ title: String, _ items: [PakItem]) {
             if !items.isEmpty { shelves.append(PakShelf(title: title, items: items)) }
         }
-        add("Songs", (library?.songs.map { .track(songs.remember($0, from: .library)) } ?? [])
-            + (catalog?.songs.map { .track(songs.remember($0, from: .catalog)) } ?? []))
-        add("Albums", (library?.albums.compactMap { place($0, library: true) } ?? [])
-            + (catalog?.albums.compactMap { place($0, library: false) } ?? []))
-        add("Artists", (library?.artists.compactMap { place($0, library: true) } ?? [])
+        add("Songs", librarySongs.map { .track(songs.remember($0, from: .library)) }
+            + (catalog?.songs ?? []).filter { !songKeys.contains("\($0.title)\u{0}\($0.artistName)") }
+                .map { .track(songs.remember($0, from: .catalog)) })
+        add("Albums", libraryAlbums.compactMap { place($0, library: true) }
+            + (catalog?.albums ?? []).filter { !albumKeys.contains("\($0.title)\u{0}\($0.artistName)") }
+                .compactMap { place($0, library: false) })
+        add("Artists", (library?.artists ?? []).prefix(25).compactMap { place($0, library: true, labelled: true) }
             + (catalog?.artists.compactMap { place($0, library: false) } ?? []))
-        add("Playlists", (library?.playlists.compactMap { place($0, library: true) } ?? [])
-            + (catalog?.playlists.compactMap { place($0, library: false) } ?? []))
+        add("Playlists", libraryPlaylists.compactMap { place($0, library: true) }
+            + (catalog?.playlists ?? []).filter { !playlistNames.contains($0.name) }.compactMap { place($0, library: false) })
         return PakPage(shelves: shelves)
     }
 
@@ -221,11 +238,14 @@ final class AppleMusicBrowser {
                                artwork: art.reference(album.artwork)))
     }
 
-    private func place(_ artist: Artist, library: Bool) -> PakItem? {
+    /// `labelled` says "In Library" under it, for search, where the catalog's artist of
+    /// the same name may be next to it.
+    private func place(_ artist: Artist, library: Bool, labelled: Bool = false) -> PakItem? {
         guard !artist.name.isEmpty else { return nil }
         let id = (library ? "library-artist/" : "catalog-artist/") + artist.id.rawValue
         artists[id] = artist
-        return .place(PakPlace(id: id, kind: .artist, title: artist.name, artwork: art.reference(artist.artwork)))
+        return .place(PakPlace(id: id, kind: .artist, title: artist.name, subtitle: labelled ? "In Library" : nil,
+                               artwork: art.reference(artist.artwork)))
     }
 
     private func place(_ playlist: Playlist, library: Bool) -> PakItem? {
