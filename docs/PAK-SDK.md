@@ -4,7 +4,7 @@
   <img src="images/expansion-paks.png" width="307" alt="The Expansion Paks window with the Demo Pak plugged in">
 </p>
 
-An Expansion Pak adds a music source to Bitamp: a server, a radio directory, an archive. Bitamp shows each Pak as a cartridge in its Expansion Paks window (⌥K). Its songs can be searched, added to the playlist and played like local files, with the equalizer, visualizer and Retro Sound all working.
+An Expansion Pak adds a music source to Bitamp: a server, a radio directory, an archive. Bitamp shows each Pak as a cartridge in its Expansion Paks window (⌥K). Its songs can be searched in the Media Library, added to the playlist and played like local files, with the equalizer, visualizer and Retro Sound all working.
 
 A Pak is a program. Bitamp starts it, asks it questions over standard input and output, and plays the audio it points to. You can write one in Swift with the small SDK in this repository, or in any language that can read and write lines of JSON.
 
@@ -199,7 +199,7 @@ Save it as `hello.py` in `Hello.bitpak`, `chmod +x` it, and point `pak.json`'s `
   It reads `pak.json` as installing does, then starts the program and has the same conversation Bitamp has, using the first track it finds. It catches what usually goes wrong: answers that aren't flushed, other output on standard output, a `track` that forgets an id `search` gave, a file that isn't there, and a program that doesn't exit. Settings take their defaults unless you give `--setting key=value`, once per setting. What the program writes to standard error is shown as it runs. It exits with status 0 when there's nothing to fix.
 - Install by double-clicking the `.bitpak`, dropping it on Bitamp, or File ▸ Install Expansion Pak…. Installing a Pak with the same id replaces the old one.
 - Installed Paks live in `~/Library/Application Support/Bitamp/Paks`; their caches in `~/Library/Caches/com.ryanromanov.Bitamp/Paks`.
-- Right-click the cartridge to search, change settings, eject or remove it.
+- Click the cartridge to open the Pak in the Media Library, where it shows what `search ""` gives and searches as the user types. Right-click it to browse, change settings, eject or remove it.
 
 ## Trust
 
@@ -209,4 +209,4 @@ A Pak runs with the same permissions as the person who installed it, so Bitamp a
 
 - **Streaming.** Bitamp downloads the whole file before it starts playing. Fine for songs on a home server, not for endless radio streams.
 - **Paks that play audio themselves**, as a streaming service's own player would, can't be third-party yet; a third-party Pak always hands Bitamp audio to play.
-- **Album art and browsing** beyond search.
+- **Album art and browsing** beyond search. The Media Library browses the built-in Apple Music Pak (sections, albums, artists, playlists, covers); third-party Paks get the same once its shape has settled. See [PAKS.md](PAKS.md).

@@ -164,6 +164,150 @@ struct ShowcaseTests {
     }
 }
 
+extension ShowcaseTests {
+    /// The Media Library for the README: invented albums with patterned covers, in the
+    /// default skin, at 2× like the main picture's 4× in the README's units.
+    @Test func library() async throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let preferences = Preferences(defaults: UserDefaults(suiteName: "BitampShowcase-\(UUID().uuidString)")!)
+        let pak = ShowcaseLibraryPak()
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences, paks: PakRegistry([pak], preferences: preferences))
+        let view = MediaLibraryView(controller: controller, skin: DefaultSkin(), scale: 1)
+        view.show(pak)
+        for _ in 0..<200 where view.shown?.items.isEmpty != false { try await Task.sleep(for: .milliseconds(5)) }
+        view.moveFocus(to: 0)
+        // Draw once so the covers in view are asked for, then let them arrive.
+        _ = try image(view)
+        try await Task.sleep(for: .milliseconds(200))
+        try compose([Placed(image: try image(view), size: view.pixelSize, origin: .zero)], factor: 2)
+            .write(to: folder.appendingPathComponent("media-library.png"))
+    }
+}
+
+/// Invented albums for the Media Library picture.
+@MainActor
+private final class ShowcaseLibraryPak: Pak {
+    let id = "applemusic"
+    let name = "Apple Music"
+    let schemes: Set<String> = ["showcase"]
+    let isAvailable = true
+    let account = PakAccount.connected(name: nil)
+    var canBrowse: Bool { true }
+
+    static let albums = [
+        ("Analog Weather", "Signal Lost"), ("Neon Tide", "Pixel Harbor"), ("Dial-Up Sunrise", "The Low Bits"),
+        ("Cassette Hearts", "Mira Vance"), ("Midnight Modem", "Kilobyte Club"), ("Paper Planets", "Vector Bloom"),
+        ("Summer on Repeat", "Old Stereo"), ("Harbor Lights", "Pixel Harbor"), ("Static Garden", "Signal Lost"),
+        ("Low Tide FM", "The Low Bits"), ("Glass Arcade", "Mira Vance"), ("Afterglow Drive", "Vector Bloom"),
+        ("Floppy Love", "Kilobyte Club"), ("Backseat Radio", "Old Stereo"), ("Chrome Orchard", "Vector Bloom"),
+        ("Saturday Sprites", "The Low Bits"), ("Night Bus", "Mira Vance"), ("Tape Hiss", "Old Stereo"),
+    ]
+
+    func browse(_ location: PakLocation, after cursor: String?) async throws -> PakPage {
+        switch location {
+        case .root:
+            let library = ["Recently Added", "Albums", "Artists", "Songs", "Playlists"]
+            let catalog = ["For You", "Recently Played", "Top Charts"]
+            func sections(_ titles: [String]) -> [PakItem] {
+                titles.map { .place(PakPlace(id: "section/\($0)", kind: .section, title: $0)) }
+            }
+            return PakPage(shelves: [PakShelf(title: "Library", items: sections(library)),
+                                     PakShelf(title: "Apple Music", items: sections(catalog))])
+        default:
+            return PakPage(shelves: [PakShelf(items: Self.albums.enumerated().map { index, album in
+                .place(PakPlace(id: "album/\(index)", kind: .album, title: album.0, subtitle: album.1,
+                                artwork: PakArtwork("\(index * 7 + 3)")))
+            })])
+        }
+    }
+
+    func image(for artwork: PakArtwork, size: Int) async -> CGImage? {
+        UInt64(artwork.id).map { showcaseCover($0, size: size) }
+    }
+
+    func connect() async throws {}
+    func disconnect() {}
+    func search(_ term: String) async throws -> [PakTrack] { [] }
+    func metadata(for url: URL) async -> PakTrack? { nil }
+    func playback(for url: URL) throws -> PakPlayback { throw CocoaError(.featureUnsupported) }
+}
+
+/// An abstract cover, the same design at any size.
+func showcaseCover(_ seed: UInt64, size: Int) -> CGImage {
+    var random = SplitMix64(seed: seed &* 2654435761)
+    func unit() -> CGFloat { CGFloat(random.next() % 10_000) / 10_000 }
+    let context = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
+                            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    context.setShouldAntialias(true)
+    let s = CGFloat(size)
+    let hue = unit()
+    func color(_ h: CGFloat, _ sat: CGFloat, _ bright: CGFloat) -> CGColor {
+        NSColor(hue: (h.truncatingRemainder(dividingBy: 1) + 1).truncatingRemainder(dividingBy: 1),
+                saturation: sat, brightness: bright, alpha: 1).cgColor
+    }
+    let top = color(hue, 0.7, 0.35), bottom = color(hue + 0.12, 0.8, 0.85)
+    let accent = color(hue + 0.5, 0.75, 1), light = color(hue + 0.08, 0.25, 1)
+    let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: [bottom, top] as CFArray, locations: [0, 1])!
+    context.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: s), options: [])
+
+    switch seed % 6 {
+    case 0: // sun over stripes
+        context.setFillColor(accent)
+        context.fillEllipse(in: CGRect(x: s * 0.2, y: s * 0.25, width: s * 0.6, height: s * 0.6))
+        context.setFillColor(bottom)
+        for i in 0..<5 {
+            let y = s * (0.28 + CGFloat(i) * 0.08)
+            context.fill(CGRect(x: 0, y: y, width: s, height: s * 0.012 * CGFloat(5 - i) + 1))
+        }
+    case 1: // rings
+        for i in (0..<6).reversed() {
+            context.setFillColor(i % 2 == 0 ? accent : top)
+            let r = s * 0.08 * CGFloat(i + 1)
+            context.fillEllipse(in: CGRect(x: s * 0.5 - r, y: s * 0.5 - r, width: r * 2, height: r * 2))
+        }
+    case 2: // mountains
+        for (i, shade) in [light, accent, top].enumerated() {
+            context.setFillColor(shade)
+            let base = s * (0.1 + CGFloat(i) * 0.12) - s * 0.2
+            context.beginPath()
+            context.move(to: CGPoint(x: -s * 0.1, y: 0))
+            context.addLine(to: CGPoint(x: s * unit(), y: s * 0.75 - base))
+            context.addLine(to: CGPoint(x: s * 1.1, y: 0))
+            context.fillPath()
+        }
+    case 3: // diagonal stripes
+        context.setFillColor(accent)
+        for i in stride(from: -4, to: 8, by: 2) {
+            let x = s * CGFloat(i) * 0.12
+            context.beginPath()
+            context.move(to: CGPoint(x: x, y: 0))
+            context.addLine(to: CGPoint(x: x + s * 0.12, y: 0))
+            context.addLine(to: CGPoint(x: x + s * 0.72, y: s))
+            context.addLine(to: CGPoint(x: x + s * 0.6, y: s))
+            context.fillPath()
+        }
+    case 4: // bubbles
+        for _ in 0..<7 {
+            context.setFillColor((unit() > 0.5 ? accent : light).copy(alpha: 0.75)!)
+            let r = s * (0.08 + unit() * 0.2)
+            context.fillEllipse(in: CGRect(x: s * unit() - r, y: s * unit() - r, width: r * 2, height: r * 2))
+        }
+    default: // checker floor and a moon
+        context.setFillColor(light)
+        context.fillEllipse(in: CGRect(x: s * 0.55, y: s * 0.58, width: s * 0.28, height: s * 0.28))
+        let cells = 6
+        for row in 0..<3 {
+            for column in 0..<cells where (row + column) % 2 == 0 {
+                context.setFillColor(accent)
+                let w = s / CGFloat(cells)
+                context.fill(CGRect(x: CGFloat(column) * w, y: CGFloat(row) * w * 0.7, width: w, height: w * 0.7))
+            }
+        }
+    }
+    return context.makeImage()!
+}
+
 /// Stands in for the demo Pak in the Expansion Paks picture, without running its program.
 @MainActor
 private final class ShowcasePak: Pak {
