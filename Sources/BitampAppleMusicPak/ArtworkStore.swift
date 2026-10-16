@@ -5,23 +5,25 @@ import SwiftUI
 
 /// MusicKit artwork under keys Bitamp can hold on to. Catalog art has https addresses;
 /// library art comes as `musicKit://` addresses that only `ArtworkImage` can draw, so it
-/// is drawn in a window that's never shown and captured. Captures run one at a time.
+/// is drawn in a window that's never shown and captured, a few at a time.
+///
+/// A key names what the art belongs to (`library-album/123`), not the art's address:
+/// library addresses are new each time MusicKit is asked, and the key must stay the same
+/// for Bitamp to keep the picture, in memory and on disk, between visits and launches.
 @MainActor
 final class ArtworkStore {
     static let prefix = "applemusic-art:"
+    /// The newest artwork for each key, since a library address may not last.
     private var artworks: [String: Artwork] = [:]
-    /// Keys by the artwork's address, so the same picture gets the same key.
-    private var keys: [String: String] = [:]
-    private var capturing = false
+    private static let capturesAtOnce = 3
+    private var capturing = 0
     private var waiting: [CheckedContinuation<Void, Never>] = []
 
-    func reference(_ artwork: Artwork?) -> PakArtwork? {
+    /// The art of the item `owner` names (a place id, a song's URL).
+    func reference(_ artwork: Artwork?, of owner: String) -> PakArtwork? {
         guard let artwork else { return nil }
-        let address = artwork.url(width: 64, height: 64)?.absoluteString
-        if let address, let key = keys[address] { return PakArtwork(key) }
-        let key = Self.prefix + String(artworks.count)
+        let key = Self.prefix + owner
         artworks[key] = artwork
-        if let address { keys[address] = key }
         return PakArtwork(key)
     }
 
@@ -41,16 +43,17 @@ final class ArtworkStore {
     }
 
     private func takeTurn() async {
-        if !capturing {
-            capturing = true
+        if capturing < Self.capturesAtOnce {
+            capturing += 1
             return
         }
+        // A turn handed over by `endTurn` keeps `capturing` as it is.
         await withCheckedContinuation { waiting.append($0) }
     }
 
     private func endTurn() {
         if waiting.isEmpty {
-            capturing = false
+            capturing -= 1
         } else {
             waiting.removeFirst().resume()
         }

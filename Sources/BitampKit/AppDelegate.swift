@@ -45,7 +45,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let playlistView = PlaylistView(controller: controller, preferences: preferences, skin: skin)
         playlistView.keyFallback = mainView
         let pakView = PakView(controller: controller, skin: skin, scale: preferences.scale)
-        let libraryView = MediaLibraryView(controller: controller, skin: skin, scale: preferences.scale)
+        let libraryView = MediaLibraryView(controller: controller, skin: skin, scale: preferences.scale, covers: .standard())
         libraryView.keyFallback = mainView
         self.libraryView = libraryView
         pakView.onSearch = { [weak self] pak in self?.showSearch(pak) }

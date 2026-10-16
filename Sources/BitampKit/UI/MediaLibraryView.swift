@@ -46,14 +46,10 @@ final class MediaLibraryView: SkinnedView {
     private var generation = 0
     private var loadingMore = false
 
-    private struct CoverKey: Hashable {
-        let artwork: PakArtwork
-        let size: Int
-    }
-    private var covers: [CoverKey: CGImage] = [:]
-    private var coverTasks: [CoverKey: Task<Void, Never>] = [:]
+    let covers: CoverCache
+    private var coverTasks: [CoverCache.Key: Task<Void, Never>] = [:]
     /// The covers the last frame drew, so ones that scrolled away stop loading.
-    private var wantedCovers: Set<CoverKey> = []
+    private var wantedCovers: Set<CoverCache.Key> = []
 
     private enum Press: Equatable {
         case close, back, play, add, grip(startSize: CGSize, startMouse: NSPoint), thumb(grab: CGFloat), search, items
@@ -61,8 +57,10 @@ final class MediaLibraryView: SkinnedView {
     private var pressed: Press?
     private var pressedInside = false
 
-    init(controller: PlaybackController, skin: Skin, scale: CGFloat) {
+    /// `covers` keeps them in memory only unless given a folder; Bitamp gives it one.
+    init(controller: PlaybackController, skin: Skin, scale: CGFloat, covers: CoverCache = CoverCache()) {
         self.controller = controller
+        self.covers = covers
         super.init(pixelSize: LibraryLayout.defaultSize, skin: skin, scale: scale)
         search = PixelTextBox(in: self, rect: parts.search, placeholder: "Search")
         search.onSubmit = { [weak self] term in self?.runSearch(term) }
@@ -138,7 +136,6 @@ final class MediaLibraryView: SkinnedView {
         generation += 1
         coverTasks.values.forEach { $0.cancel() }
         coverTasks = [:]
-        covers = [:]
         pak = nil
         sidebar = []
         selectedSection = nil
@@ -300,32 +297,20 @@ final class MediaLibraryView: SkinnedView {
 
     // MARK: - Covers
 
-    /// The cover for `artwork` at `size` pixels, if it has loaded; asks for it if not.
+    /// The cover for `artwork` at `size` pixels, if it's cached; asks for it if not.
     private func cover(_ artwork: PakArtwork?, size: Int) -> CGImage? {
-        guard let artwork else { return nil }
-        let key = CoverKey(artwork: artwork, size: size)
+        guard let artwork, let pak else { return nil }
+        let key = CoverCache.Key(pak: pak.id, artwork: artwork, size: size)
         wantedCovers.insert(key)
-        if let image = covers[key] { return image }
-        guard coverTasks[key] == nil, let pak, canAsk else { return nil }
+        if let image = covers.cached(key) { return image }
+        guard coverTasks[key] == nil, canAsk else { return nil }
         coverTasks[key] = Task { [weak self] in
-            // Asked for three times larger, then averaged down, for a cleaner small picture.
-            let image = await pak.image(for: artwork, size: size * 3)
+            let image = await self?.covers.load(key, from: pak)
             guard let self, !Task.isCancelled else { return }
             coverTasks[key] = nil
-            if let image { covers[key] = Self.shrink(image, to: size) }
-            needsDisplay = true
+            if image != nil { needsDisplay = true }
         }
         return nil
-    }
-
-    /// `image` at `size` pixels square, each pixel the average of what it covers.
-    static func shrink(_ image: CGImage, to size: Int) -> CGImage {
-        guard let context = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
-                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return image }
-        context.interpolationQuality = .high
-        context.draw(image, in: CGRect(x: 0, y: 0, width: size, height: size))
-        return context.makeImage() ?? image
     }
 
     // MARK: - Drawing
