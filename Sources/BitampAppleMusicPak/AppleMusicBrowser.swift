@@ -235,7 +235,7 @@ final class AppleMusicBrowser {
         let id = (library ? "library-album/" : "catalog-album/") + album.id.rawValue
         albums[id] = album
         return .place(PakPlace(id: id, kind: .album, title: album.title, subtitle: nonEmpty(album.artistName),
-                               artwork: art.reference(album.artwork)))
+                               artwork: art.reference(album.artwork, of: id)))
     }
 
     /// `labelled` says "In Library" under it, for search, where the catalog's artist of
@@ -245,14 +245,14 @@ final class AppleMusicBrowser {
         let id = (library ? "library-artist/" : "catalog-artist/") + artist.id.rawValue
         artists[id] = artist
         return .place(PakPlace(id: id, kind: .artist, title: artist.name, subtitle: labelled ? "In Library" : nil,
-                               artwork: art.reference(artist.artwork)))
+                               artwork: art.reference(artist.artwork, of: id)))
     }
 
     private func place(_ playlist: Playlist, library: Bool) -> PakItem? {
         let id = (library ? "library-playlist/" : "catalog-playlist/") + playlist.id.rawValue
         playlists[id] = playlist
         return .place(PakPlace(id: id, kind: .playlist, title: playlist.name, subtitle: nonEmpty(playlist.curatorName),
-                               artwork: art.reference(playlist.artwork)))
+                               artwork: art.reference(playlist.artwork, of: id)))
     }
 
     private func albumPage(_ id: String, _ itemID: String, library: Bool) async throws -> PakPage {
@@ -275,7 +275,7 @@ final class AppleMusicBrowser {
         let year = found.releaseDate.map { String(Calendar.current.component(.year, from: $0)) }
         let detail = ([found.genreNames.first, year].compactMap { $0 } + [songCount(tracks.count)]).joined(separator: " · ")
         return PakPage(
-            header: PakHeader(title: found.title, subtitle: nonEmpty(found.artistName), detail: detail, artwork: art.reference(found.artwork)),
+            header: PakHeader(title: found.title, subtitle: nonEmpty(found.artistName), detail: detail, artwork: art.reference(found.artwork, of: id)),
             shelves: [PakShelf(items: tracks)])
     }
 
@@ -293,7 +293,7 @@ final class AppleMusicBrowser {
             request.filter(matching: \.artistName, equalTo: name)
             request.sort(by: \.title, ascending: true)
             let found = try await request.response().items
-            return PakPage(header: PakHeader(title: name, artwork: art.reference(artists[id]?.artwork)),
+            return PakPage(header: PakHeader(title: name, artwork: art.reference(artists[id]?.artwork, of: id)),
                            shelves: [PakShelf(title: "Albums", items: found.compactMap { place($0, library: true) })])
         }
         var artist = artists[id]
@@ -307,7 +307,7 @@ final class AppleMusicBrowser {
         if !top.isEmpty { shelves.append(PakShelf(title: "Top Songs", items: top)) }
         let albums = (found.albums ?? []).compactMap { place($0, library: false) }
         if !albums.isEmpty { shelves.append(PakShelf(title: "Albums", items: albums)) }
-        return PakPage(header: PakHeader(title: found.name, artwork: art.reference(found.artwork)), shelves: shelves)
+        return PakPage(header: PakHeader(title: found.name, artwork: art.reference(found.artwork, of: id)), shelves: shelves)
     }
 
     private func playlistPage(_ id: String, _ itemID: String, library: Bool) async throws -> PakPage {
@@ -329,7 +329,7 @@ final class AppleMusicBrowser {
         }
         return PakPage(
             header: PakHeader(title: found.name, subtitle: nonEmpty(found.curatorName), detail: songCount(tracks.count),
-                              artwork: art.reference(found.artwork)),
+                              artwork: art.reference(found.artwork, of: id)),
             shelves: [PakShelf(items: tracks)])
     }
 

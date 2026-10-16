@@ -159,6 +159,28 @@ final class LibraryPak: Pak {
         #expect(pak.browsed.count == asked)
     }
 
+    /// A cover is asked of the Pak once: after that it comes from memory, and with a
+    /// folder, from disk in a new cache, as after a relaunch.
+    @Test func coversAreKept() async throws {
+        let pak = LibraryPak()
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("BitampCovers-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let key = CoverCache.Key(pak: pak.id, artwork: PakArtwork("cover-3"), size: 44)
+        let first = CoverCache(folder: folder)
+        #expect(first.cached(key) == nil)
+        let image = try #require(await first.load(key, from: pak))
+        #expect(image.width == 44 && image.height == 44)
+        #expect(first.cached(key) != nil && pak.imagesAsked == 1)
+
+        // The file is written in the background.
+        let second = CoverCache(folder: folder)
+        for _ in 0..<100 where second.cached(key) == nil { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(second.cached(key)?.width == 44)
+        #expect(await second.load(key, from: pak) != nil && pak.imagesAsked == 1)
+        // Without a folder, nothing is kept past the cache.
+        #expect(CoverCache().cached(key) == nil)
+    }
+
     /// The library starts hidden, even for people who used Bitamp before it existed; it
     /// comes back the size it was resized to; and the first time it opens, it's on screen.
     @Test func theWindowGroupKeepsItsSizeAndPlace() throws {

@@ -179,7 +179,7 @@ final class SongStore {
 
     func track(_ song: Song, url: URL) -> PakTrack {
         PakTrack(url: url, title: song.title, artist: song.artistName, album: song.albumTitle,
-                 duration: Self.duration(of: song), artwork: art.reference(song.artwork))
+                 duration: Self.duration(of: song), artwork: art.reference(song.artwork, of: url.absoluteString))
     }
 
     /// The song's length in seconds. On macOS 27.2, library songs give `duration` in
