@@ -85,7 +85,7 @@ final class LinerNotesCache {
 }
 
 /// Follows what's playing for the Liner Notes window, and looks songs up when the Pak's
-/// setting says: after a song has played a few seconds ("Every track"), or when asked.
+/// setting says: after a song has played two seconds ("Every track"), or when asked.
 /// Lookups start only while the window is open and the Pak inserted, since each one costs.
 @MainActor
 final class LinerNotesSession {
@@ -111,7 +111,7 @@ final class LinerNotesSession {
     }
 
     /// How long a song plays before it's looked up, so skipping through costs nothing.
-    static let delay: TimeInterval = 5
+    static let delay: TimeInterval = 2
 
     let pak: LinerNotesPak
     private let cache: LinerNotesCache

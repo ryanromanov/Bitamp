@@ -225,15 +225,16 @@ final class CannedLinerNotes: LinerNotesService, @unchecked Sendable {
         #expect(pak.account == .disconnected)
     }
 
-    @Test func everyTrackWaitsForFiveSecondsOfPlaying() async {
+    @Test func everyTrackWaitsForTwoSecondsOfPlaying() async {
+        #expect(LinerNotesSession.delay == 2)
         await start(lookup: .everyTrack)
         #expect(session.phase == .waiting)
-        await run(seconds: 3)
+        await run(seconds: 1)
         player.playing = false
         await run(seconds: 10)
         #expect(service.asked == 0, "paused time doesn't count")
         player.playing = true
-        await run(seconds: 3)
+        await run(seconds: 1)
         #expect(service.asked == 1)
         #expect(session.phase == .done)
         #expect(session.notes.text == "Canned notes.")
@@ -249,11 +250,11 @@ final class CannedLinerNotes: LinerNotesService, @unchecked Sendable {
 
     @Test func skippingCancelsTheWait() async {
         await start(lookup: .everyTrack)
-        await run(seconds: 4)
+        await run(seconds: 1)
         player.url = URL(string: "bitpak-test://track/2")
-        await run(seconds: 4)
-        #expect(service.asked == 0)
         await run(seconds: 2)
+        #expect(service.asked == 0)
+        await run(seconds: 1)
         #expect(service.asked == 1)
     }
 
