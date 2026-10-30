@@ -61,6 +61,7 @@ final class BackstoryView: SkinnedView {
     /// The setup's choices before they're saved.
     private var draftProvider: String?
     private var draftModel: String?
+    private var draftPrefetch: Bool?
 
     private var scroll: CGFloat = 0 {
         didSet {
@@ -75,7 +76,7 @@ final class BackstoryView: SkinnedView {
     private var buttons: [(CGRect, Button)] = []
 
     private enum Button: Equatable {
-        case lookup(BackstoryPak.Lookup), askAgain, ask, setUp, provider(String), model(String), save, cancel
+        case lookup(BackstoryPak.Lookup), askAgain, ask, setUp, provider(String), model(String), prefetch(Bool), save, cancel
     }
 
     private enum Press: Equatable {
@@ -326,11 +327,11 @@ final class BackstoryView: SkinnedView {
     private func drawSetup(_ c: Canvas, _ parts: BackstoryLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor, top: Int) -> Int {
         let x = parts.left, width = Int(parts.body.width)
         var y = top
-        for line in Self.wrap("Backstory looks up the song that's playing. It sends the title, artist and album, never the audio, to the service you pick, with your own key. Nothing goes to Bitamp.", width: width) {
+        for line in Self.wrap("Sends the song's title, artist and album, never the audio, to the service you pick, with your own key. Nothing goes to Bitamp.", width: width) {
             ListFont.draw(line, in: c, x: x, y: y, color: colors.normal)
             y += ListFont.lineHeight
         }
-        y += 5
+        y += 3
         let labelWidth = 44
         let provider = pak.providers.first { $0.name == draftProvider } ?? pak.provider
         if pak.providers.count > 1 {
@@ -362,15 +363,31 @@ final class BackstoryView: SkinnedView {
         c.text("API KEY", x, y + 4, dim)
         keyBox.placeholder = pak.key(for: provider) == nil ? "Paste your \(provider.name) API key" : "Saved (paste to replace)"
         keyBox.rect = CGRect(x: x + labelWidth, y: y, width: width - labelWidth, height: 13)
+        y += 17
+        // Looking the next song up early, for AUTO.
+        let prefetch = draftPrefetch ?? pak.prefetch
+        c.text("NEXT", x, y + 1, dim)
+        c.text("SONG", x, y + 8, dim)
+        var px = x + labelWidth
+        for (on, label) in [(false, "WHEN IT PLAYS"), (true, "EARLY")] {
+            let rect = CGRect(x: px, y: y, width: PixelFont.width(of: label) + 7, height: 13)
+            drawButton(c, label, rect, .prefetch(on), selected: on == prefetch, colors)
+            px += Int(rect.width) + 2
+        }
         y += 15
-        ListFont.draw("Kept in your Keychain.", in: c, x: x + labelWidth, y: y, color: dim)
-        y += ListFont.lineHeight + 4
+        for line in Self.wrap("With AUTO, readies the next song's notes. Skipping it still costs.", width: width - labelWidth) {
+            ListFont.draw(line, in: c, x: x + labelWidth, y: y, color: dim)
+            y += ListFont.lineHeight
+        }
+        y += 4
         var sx = x + labelWidth
         drawButton(c, "SAVE", CGRect(x: sx, y: y, width: PixelFont.width(of: "SAVE") + 9, height: 13), .save, selected: false, colors)
         sx += PixelFont.width(of: "SAVE") + 11
         if pak.key(for: pak.provider) != nil {
             drawButton(c, "CANCEL", CGRect(x: sx, y: y, width: PixelFont.width(of: "CANCEL") + 9, height: 13), .cancel, selected: false, colors)
+            sx += PixelFont.width(of: "CANCEL") + 11
         }
+        ListFont.draw(ListFont.truncate("Key kept in your Keychain.", toWidth: x + width - sx - 2), in: c, x: sx + 2, y: y + 1, color: dim)
         y += 13
         return y - top
     }
@@ -520,6 +537,7 @@ final class BackstoryView: SkinnedView {
             settingUp = true
             draftProvider = nil
             draftModel = nil
+            draftPrefetch = nil
             scroll = 0
             keyBox.focus()
         case .provider(let name):
@@ -527,6 +545,8 @@ final class BackstoryView: SkinnedView {
             draftModel = nil
         case .model(let name):
             draftModel = name
+        case .prefetch(let on):
+            draftPrefetch = on
         case .save:
             saveSetup()
         case .cancel:
@@ -540,6 +560,7 @@ final class BackstoryView: SkinnedView {
         if let draftModel, provider.models.contains(draftModel) { changes["\(provider.name.lowercased())-model"] = draftModel }
         let key = keyBox.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty { changes["\(provider.name.lowercased())-key"] = key }
+        if let draftPrefetch { changes["prefetch"] = draftPrefetch ? "On" : "Off" }
         guard !key.isEmpty || pak.key(for: provider) != nil else {
             flashMessage?("PASTE AN API KEY FIRST")
             keyBox.focus()
@@ -554,6 +575,7 @@ final class BackstoryView: SkinnedView {
         settingUp = false
         draftProvider = nil
         draftModel = nil
+        draftPrefetch = nil
         window?.makeFirstResponder(self)
         settingsChanged()
     }

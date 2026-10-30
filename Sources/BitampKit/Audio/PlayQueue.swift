@@ -124,6 +124,15 @@ struct PlayQueue {
         rebuildOrder(keeping: currentIndex)
     }
 
+    /// What `next()` would move to, without moving: nil at the end, and at the end of a
+    /// shuffled repeat, whose next order isn't drawn yet.
+    var upNext: URL? {
+        guard !order.isEmpty else { return nil }
+        if currentRemoved { return current }
+        if position + 1 < order.count { return items[order[position + 1]] }
+        return repeats && !shuffled ? items[order[0]] : nil
+    }
+
     /// Moves to the next track. Returns nil, and stays put, at the end unless repeating.
     @discardableResult
     mutating func next() -> URL? {

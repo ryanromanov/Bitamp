@@ -187,6 +187,8 @@ final class CannedBackstory: BackstoryService, @unchecked Sendable {
     final class Player {
         var url: URL? = URL(string: "bitpak-test://track/1")
         var playing = true
+        var next: URL?
+        var remaining: TimeInterval = 200
     }
 
     init() {
@@ -198,7 +200,12 @@ final class CannedBackstory: BackstoryService, @unchecked Sendable {
         session = BackstorySession(pak: pak, cache: BackstoryCache(folder: nil), clock: { clock.now })
         let player = self.player
         session.current = { (player.url, player.playing) }
-        session.describe = { url in (url.lastPathComponent == "untagged" ? nil : song, nil) }
+        session.upcoming = { (player.next, player.remaining) }
+        // Each track is its own song, except that "1-again" is track 1 once more.
+        session.describe = { url in
+            let name = url.lastPathComponent.replacingOccurrences(of: "-again", with: "")
+            return (name == "untagged" ? nil : PakNowPlaying(title: "Song \(name)", artist: "The Low Bits", album: "Low Tide FM"), nil)
+        }
     }
 
     /// Advances the clock a second at a time, updating as the window would.
@@ -264,7 +271,7 @@ final class CannedBackstory: BackstoryService, @unchecked Sendable {
         session.lookUp()
         await settle()
         #expect(service.asked == 1)
-        player.url = URL(string: "bitpak-test://track/again")
+        player.url = URL(string: "bitpak-test://track/1-again")
         await run(seconds: 10)
         #expect(session.phase == .done)
         #expect(service.asked == 1)
@@ -297,6 +304,126 @@ final class CannedBackstory: BackstoryService, @unchecked Sendable {
         pak.save(["claude-model": "Opus 5.5"])
         #expect(pak.identity != sonnet)
         #expect(pak.account == .connected(name: "Claude Opus 5.5"))
+    }
+}
+
+/// Holds every answer until released, as a slow service would.
+final class GatedBackstory: BackstoryService, @unchecked Sendable {
+    private(set) var asked: [String] = []
+    private var waiting: [AsyncThrowingStream<BackstoryUpdate, Error>.Continuation] = []
+
+    func notes(for track: PakNowPlaying) -> AsyncThrowingStream<BackstoryUpdate, Error> {
+        asked.append(track.title)
+        return AsyncThrowingStream { waiting.append($0) }
+    }
+
+    func release() {
+        for continuation in waiting {
+            continuation.yield(.text("Gated notes."))
+            continuation.finish()
+        }
+        waiting = []
+    }
+}
+
+@MainActor
+@Suite struct BackstoryEarlyTests {
+    let service = GatedBackstory()
+    let pak: BackstoryPak
+    let session: BackstorySession
+    let clock = BackstorySessionTests.Clock()
+    let player = BackstorySessionTests.Player()
+
+    init() {
+        let store = BackstoryMemorySettings(defaults: UserDefaults(suiteName: "BitampBackstoryEarly-\(UUID().uuidString)")!)
+        let service = self.service
+        pak = BackstoryPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5"]) { _, _ in service }], store: store)
+        pak.save(["claude-key": "test-key", "lookup": BackstoryPak.Lookup.everyTrack.rawValue])
+        let clock = self.clock, player = self.player
+        session = BackstorySession(pak: pak, cache: BackstoryCache(folder: nil), clock: { clock.now })
+        session.current = { (player.url, player.playing) }
+        session.upcoming = { (player.next, player.remaining) }
+        session.describe = { url in (PakNowPlaying(title: url.lastPathComponent, artist: "The Low Bits"), nil) }
+        player.next = URL(string: "bitpak-test://track/2")
+    }
+
+    func run(seconds: Int) async {
+        for _ in 0..<seconds {
+            clock.now += 1
+            session.update(active: true)
+            for _ in 0..<20 { await Task.yield() }
+        }
+    }
+
+    func release() async {
+        service.release()
+        for _ in 0..<20 { await Task.yield() }
+    }
+
+    @Test func offByDefault() async {
+        #expect(!pak.prefetch)
+        player.remaining = 10
+        await run(seconds: 5)
+        await release()
+        #expect(service.asked == ["1"])
+    }
+
+    @Test func looksUpTheNextSongNearTheEnd() async {
+        pak.prefetch = true
+        await run(seconds: 5)
+        await release()
+        #expect(service.asked == ["1"])
+        player.remaining = 25
+        await run(seconds: 1)
+        #expect(service.asked == ["1"])
+        player.remaining = 19
+        await run(seconds: 3)
+        #expect(service.asked == ["1", "2"], "once")
+        await release()
+        // When it starts, its notes are there.
+        player.url = player.next
+        player.next = URL(string: "bitpak-test://track/3")
+        player.remaining = 200
+        await run(seconds: 1)
+        #expect(session.phase == .done)
+        #expect(session.notes.text == "Gated notes.")
+        #expect(service.asked == ["1", "2"])
+    }
+
+    @Test func aSongThatStartsMidLookupShowsItsNotesAsTheyCome() async {
+        pak.prefetch = true
+        await run(seconds: 3)
+        await release()
+        player.remaining = 10
+        await run(seconds: 1)
+        #expect(session.lookingUpEarly == player.next)
+        player.url = player.next
+        player.next = nil
+        await run(seconds: 5)
+        #expect(session.phase == .looking)
+        await release()
+        #expect(session.phase == .done)
+        #expect(service.asked == ["1", "2"], "not asked twice")
+    }
+
+    @Test func skippingElsewhereStopsIt() async {
+        pak.prefetch = true
+        await run(seconds: 3)
+        await release()
+        player.remaining = 10
+        await run(seconds: 1)
+        #expect(session.lookingUpEarly != nil)
+        player.url = URL(string: "bitpak-test://track/9")
+        await run(seconds: 1)
+        #expect(session.lookingUpEarly == nil)
+    }
+
+    @Test func onlyWithEveryTrack() async {
+        pak.prefetch = true
+        pak.lookup = .whenAsked
+        player.remaining = 10
+        await run(seconds: 5)
+        #expect(service.asked.isEmpty)
     }
 }
 

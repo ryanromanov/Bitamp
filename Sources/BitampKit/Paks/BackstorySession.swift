@@ -87,6 +87,7 @@ final class BackstoryCache {
 /// Follows what's playing for the Backstory window, and looks songs up when the Pak's
 /// setting says: after a song has played two seconds ("Every track"), or when asked.
 /// Lookups start only while the window is open and the Pak inserted, since each one costs.
+/// With "Next song early" on, the next song is looked up shortly before this one ends.
 @MainActor
 final class BackstorySession {
     enum Phase: Equatable {
@@ -112,12 +113,17 @@ final class BackstorySession {
 
     /// How long a song plays before it's looked up, so skipping through costs nothing.
     static let delay: TimeInterval = 2
+    /// How long before a song ends the next one is looked up, with "Next song early" on: time
+    /// enough for a lookup, which took about 5 s in the spike.
+    static let prefetchLead: TimeInterval = 20
 
     let pak: BackstoryPak
     private let cache: BackstoryCache
     private let clock: () -> TimeInterval
     /// What's playing: the queue item, and whether it's playing now.
     var current: () -> (url: URL?, playing: Bool) = { (nil, false) }
+    /// The queue item that plays next, and how long the current one has left.
+    var upcoming: () -> (next: URL?, remaining: TimeInterval?) = { (nil, nil) }
     /// A queue item's tags and picture. Nil tags means nothing to look up.
     var describe: (URL) async -> (PakNowPlaying?, CGImage?) = { _ in (nil, nil) }
     var onChange: (() -> Void)?
@@ -131,6 +137,17 @@ final class BackstorySession {
     private var trackURL: URL?
     private var lastTick: TimeInterval?
     private var task: Task<Void, Never>?
+    /// The next song, being looked up before it plays.
+    private struct Early {
+        let url: URL
+        var notes = BackstoryNotes()
+        var task: Task<Void, Never>?
+        var finished = false
+    }
+    private var early: Early?
+
+    /// The queue item being looked up early, if any.
+    var lookingUpEarly: URL? { early?.finished == false ? early?.url : nil }
 
     init(pak: BackstoryPak, cache: BackstoryCache, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.pak = pak
@@ -154,6 +171,12 @@ final class BackstorySession {
             return
         }
         if playing { played += elapsed }
+        if active, playing, played >= Self.delay, pak.lookup == .everyTrack, pak.prefetch {
+            let (next, remaining) = upcoming()
+            if let next, let remaining, remaining <= Self.prefetchLead, next != url, early?.url != next {
+                lookUpEarly(next)
+            }
+        }
         if phase == .waiting {
             if active && played >= Self.delay {
                 lookUp()
@@ -172,6 +195,10 @@ final class BackstorySession {
             return
         }
         task?.cancel()
+        if early?.url == trackURL {
+            early?.task?.cancel()
+            early = nil
+        }
         let identity = pak.identity
         notes = BackstoryNotes()
         phase = .looking
@@ -209,9 +236,63 @@ final class BackstorySession {
         settle()
     }
 
+    /// Looks `url` up before it plays and saves the notes. If it starts playing first, the
+    /// window shows them as they arrive; if something else plays, the lookup stops.
+    private func lookUpEarly(_ url: URL) {
+        guard let service = pak.service() else { return }
+        early?.task?.cancel()
+        early = Early(url: url)
+        let identity = pak.identity
+        early?.task = Task { [weak self] in
+            guard let self else { return }
+            let (track, _) = await self.describe(url)
+            guard self.early?.url == url, !Task.isCancelled else { return }
+            guard let track, self.cache.notes(for: track, identity: identity) == nil else {
+                self.early?.finished = true
+                return
+            }
+            var failure: Error?
+            do {
+                for try await update in service.notes(for: track) {
+                    guard self.early?.url == url, !Task.isCancelled else { return }
+                    self.early?.notes.apply(update)
+                    self.showEarly(url)
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                failure = error
+            }
+            guard var early = self.early, early.url == url, !Task.isCancelled else { return }
+            early.finished = true
+            self.early = early
+            if failure == nil, !early.notes.isEmpty {
+                self.cache.save(early.notes, for: track, identity: identity)
+            }
+            guard self.trackURL == url, self.phase == .looking else { return }
+            if let failure {
+                self.phase = .failed(failure.localizedDescription, badKey: failure as? BackstoryError == .badKey)
+            } else {
+                self.phase = early.notes.isEmpty ? .failed("No notes came back. Try again.", badKey: false) : .done
+            }
+            self.onChange?()
+        }
+    }
+
+    /// Shows an early lookup's notes so far, once its song is the one playing.
+    private func showEarly(_ url: URL) {
+        guard trackURL == url, phase == .looking, let early else { return }
+        notes = early.notes
+        onChange?()
+    }
+
     private func switchTo(_ url: URL?) {
         task?.cancel()
         task = nil
+        if early?.url != url {
+            early?.task?.cancel()
+            early = nil
+        }
         trackURL = url
         played = 0
         track = nil
@@ -240,6 +321,12 @@ final class BackstorySession {
         if let saved = cache.notes(for: track, identity: pak.identity) {
             notes = saved
             phase = .done
+            return
+        }
+        // Already on its way, looked up before it started.
+        if let early, early.url == trackURL, !early.finished {
+            notes = early.notes
+            phase = .looking
             return
         }
         notes = BackstoryNotes()
