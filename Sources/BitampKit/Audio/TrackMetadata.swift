@@ -4,6 +4,7 @@ import AVFoundation
 struct TrackMetadata: Sendable, Equatable {
     var title: String?
     var artist: String?
+    var album: String?
     var duration: Double?
     var kbps: Int?
 
@@ -14,11 +15,13 @@ struct TrackMetadata: Sendable, Equatable {
             switch item.commonKey {
             case .commonKeyTitle?: metadata.title = try? await item.load(.stringValue)
             case .commonKeyArtist?: metadata.artist = try? await item.load(.stringValue)
+            case .commonKeyAlbumName?: metadata.album = try? await item.load(.stringValue)
             default: break
             }
         }
         if metadata.title?.isEmpty == true { metadata.title = nil }
         if metadata.artist?.isEmpty == true { metadata.artist = nil }
+        if metadata.album?.isEmpty == true { metadata.album = nil }
         if let duration = try? await asset.load(.duration), duration.isNumeric, duration.seconds > 0 {
             metadata.duration = duration.seconds
         }

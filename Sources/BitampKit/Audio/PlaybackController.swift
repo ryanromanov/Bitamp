@@ -48,7 +48,7 @@ final class PlaybackController {
         info.loadExternal = { [weak paks] url in
             guard let pak = paks?.pak(for: url) else { return nil }
             let track = await pak.metadata(for: url)
-            return TrackMetadata(title: track?.title, artist: track?.artist, duration: track?.duration)
+            return TrackMetadata(title: track?.title, artist: track?.artist, album: track?.album, duration: track?.duration)
         }
     }
 

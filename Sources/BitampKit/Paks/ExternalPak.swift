@@ -31,7 +31,6 @@ final class ExternalPak: Pak {
     var id: String { manifest.id }
     var name: String { manifest.name }
     var schemes: Set<String> { [Self.scheme(for: manifest.id)] }
-    var hasSettings: Bool { !(manifest.settings ?? []).isEmpty }
 
     static func scheme(for id: String) -> String { "bitpak-\(id)" }
 

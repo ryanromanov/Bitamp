@@ -6,9 +6,13 @@ import UniformTypeIdentifiers
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let preferences = Preferences()
     private let builtInPaks: [Pak]
+    /// The Liner Notes Pak, when this copy of Bitamp has a service for it.
+    private let linerNotesPak: LinerNotesPak?
+    private var linerNotesView: LinerNotesView?
     private lazy var pakLibrary = PakLibrary()
     /// The built-in Paks, then the installed ones by name.
-    private lazy var paks = PakRegistry(builtInPaks + pakLibrary.installed(), preferences: preferences)
+    private lazy var paks = PakRegistry(builtInPaks + [linerNotesPak].compactMap { $0 } + pakLibrary.installed(),
+                                        preferences: preferences)
     private var pakView: PakView?
     private var libraryView: MediaLibraryView?
     private var settingsPanels: [String: PakSettingsPanel] = [:]
@@ -20,9 +24,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Rebuilt as it opens, since its "Browse…" items follow the installed Paks.
     private let fileMenu = NSMenu(title: "File")
 
-    /// `paks` are the Expansion Paks built into this copy of Bitamp.
-    public init(paks: [Pak] = []) {
+    /// `paks` are the Expansion Paks built into this copy of Bitamp; `linerNotes`, the
+    /// services the Liner Notes Pak can ask (none leaves it out).
+    public init(paks: [Pak] = [], linerNotes: [LinerNotesPak.Provider] = []) {
         builtInPaks = paks
+        linerNotesPak = linerNotes.isEmpty ? nil : LinerNotesPak(providers: linerNotes)
         super.init()
     }
 
@@ -58,21 +64,42 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             if !inserted { self?.closeLibrary(showing: pak) }
         }
         mainView.onShowPaks = { [weak self] in self?.windowGroup?.setVisible(.paks, true) }
-        for view in [equalizerView, playlistView, pakView, libraryView] as [SkinnedView] {
+        var extraViews: [SkinnedView] = [libraryView]
+        if let linerNotesPak {
+            let session = LinerNotesSession(pak: linerNotesPak, cache: .standard())
+            let controller = self.controller
+            session.current = { [weak controller] in
+                (controller?.queue.current, controller?.player.state == .playing)
+            }
+            let paks = self.paks
+            session.describe = { url in await LinerNotesSession.describe(url, paks: paks) }
+            let view = LinerNotesView(session: session, paks: paks, skin: skin, scale: preferences.scale)
+            view.keyFallback = mainView
+            linerNotesPak.onChange = { [weak view, weak pakView] in
+                view?.settingsChanged()
+                pakView?.needsDisplay = true
+            }
+            linerNotesView = view
+            extraViews.append(view)
+        }
+        for view in [equalizerView, playlistView, pakView] + extraViews {
             view.announce = mainView.announce
             view.flashMessage = { [weak mainView] message in mainView?.flash(message, for: 2) }
         }
 
         let main = SkinnedWindow(view: mainView, layoutName: "MainWindow", isMain: true)
-        let panels: [WindowGroup.Panel: SkinnedWindow] = [
+        var panels: [WindowGroup.Panel: SkinnedWindow] = [
             .equalizer: SkinnedWindow(view: equalizerView, layoutName: "EqualizerWindow", isMain: false),
             .playlist: SkinnedWindow(view: playlistView, layoutName: "PlaylistWindow", isMain: false),
             .paks: SkinnedWindow(view: pakView, layoutName: "PaksWindow", isMain: false),
             .library: SkinnedWindow(view: libraryView, layoutName: "LibraryWindow", isMain: false),
         ]
+        if let linerNotesView {
+            panels[.linerNotes] = SkinnedWindow(view: linerNotesView, layoutName: "LinerNotesWindow", isMain: false)
+        }
         for window in panels.values { window.actionFallback = mainView }
         let group = WindowGroup(main: main, panels: panels)
-        views = [mainView, equalizerView, playlistView, pakView, libraryView]
+        views = [mainView, equalizerView, playlistView, pakView] + extraViews
         for view in views {
             view.windowGroup = group
         }
@@ -87,7 +114,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowGroup?.restore()
         // A library left open at quit opens on the first Pak that can show it.
         if windowGroup?.isVisible(.library) == true {
-            if let pak = paks.paks.first(where: { $0.isAvailable && paks.isInserted($0) }) {
+            if let pak = firstMusicPak {
                 libraryView?.show(pak)
             } else {
                 windowGroup?.setVisible(.library, false)
@@ -241,7 +268,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         paks.unregister(pak)
     }
 
-    private func showSettings(_ pak: ExternalPak) {
+    private func showSettings(_ pak: ConfigurablePak) {
         let panel = settingsPanels[pak.id] ?? PakSettingsPanel(pak: pak)
         settingsPanels[pak.id] = panel
         panel.show()
@@ -408,7 +435,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func rebuildFileMenu() {
         let open = Menus.item("Open…", #selector(openDocument(_:)), "o", [.command])
-        let browsePaks = paks.paks.map { pak -> NSMenuItem in
+        let browsePaks = paks.paks.filter(\.isMusicSource).map { pak -> NSMenuItem in
             let item = Menus.item("Browse \(pak.name)…", #selector(browsePak(_:)))
             item.representedObject = pak.id
             return item
@@ -430,8 +457,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowGroup?.toggle(.paks)
     }
 
-    /// Opens the Media Library on `pak`'s music.
+    /// The first Pak with music to browse that can be browsed now.
+    private var firstMusicPak: Pak? {
+        paks.paks.first { $0.isMusicSource && $0.isAvailable && paks.isInserted($0) }
+    }
+
+    /// Opens the Media Library on `pak`'s music; a companion Pak opens its own window.
     private func showLibrary(_ pak: Pak) {
+        if pak === linerNotesPak {
+            showLinerNotes()
+            return
+        }
         guard pak.isAvailable, paks.isInserted(pak), let libraryView else { return }
         libraryView.show(pak)
         windowGroup?.setVisible(.library, true)
@@ -447,11 +483,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleLibrary(_ sender: Any?) {
         guard let windowGroup else { return }
-        if !windowGroup.isVisible(.library), libraryView?.pak == nil,
-           let pak = paks.paks.first(where: { $0.isAvailable && paks.isInserted($0) }) {
+        if !windowGroup.isVisible(.library), libraryView?.pak == nil, let pak = firstMusicPak {
             libraryView?.show(pak)
         }
         windowGroup.toggle(.library)
+    }
+
+    private func showLinerNotes() {
+        windowGroup?.setVisible(.linerNotes, true)
+        linerNotesView?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func toggleLinerNotes(_ sender: Any?) {
+        windowGroup?.toggle(.linerNotes)
     }
 
     private func makeMainMenu() -> NSMenu {
@@ -489,9 +533,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let playlistShade = Menus.item("Shade Playlist", #selector(togglePlaylistShade(_:)), "w", [.control, .shift])
         let shadows = Menus.item("Window Shadows", #selector(toggleShadows(_:)))
         let raiseAll = Menus.item("Bring All Windows Forward", #selector(toggleRaiseAllWindows(_:)))
-        for item in [mainWindow, equalizer, playlist, paksWindow, library, regroup, minimize, equalizerShade, playlistShade, shadows, raiseAll] { item.target = self }
+        let linerNotes = linerNotesPak.map { _ in Menus.item("Liner Notes", #selector(toggleLinerNotes(_:)), "n", [.option]) }
+        for item in [mainWindow, equalizer, playlist, paksWindow, library, regroup, minimize, equalizerShade, playlistShade, shadows, raiseAll]
+            + [linerNotes].compactMap({ $0 }) { item.target = self }
         let windowMenu = Menus.menu("Window", [
-            mainWindow, equalizer, playlist, paksWindow, library, regroup, .separator(),
+            mainWindow, equalizer, playlist, paksWindow, library] + [linerNotes].compactMap { $0 } + [regroup, .separator(),
             mainShade, equalizerShade, playlistShade, .separator(),
             Menus.submenu(Menus.menu("Size", sizes)), shadows, raiseAll, .separator(),
             minimize,
@@ -522,6 +568,7 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(togglePlaylist(_:)): item.state = windowGroup?.isVisible(.playlist) == true ? .on : .off
         case #selector(togglePaks(_:)): item.state = windowGroup?.isVisible(.paks) == true ? .on : .off
         case #selector(toggleLibrary(_:)): item.state = windowGroup?.isVisible(.library) == true ? .on : .off
+        case #selector(toggleLinerNotes(_:)): item.state = windowGroup?.isVisible(.linerNotes) == true ? .on : .off
         case #selector(setScale(_:)): item.state = item.representedObject as? CGFloat == preferences.scale ? .on : .off
         case #selector(toggleShadows(_:)): item.state = preferences.windowShadows ? .on : .off
         case #selector(toggleRaiseAllWindows(_:)): item.state = preferences.raiseAllWindows ? .on : .off
