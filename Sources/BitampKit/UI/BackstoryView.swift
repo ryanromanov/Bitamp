@@ -1,7 +1,7 @@
 import AppKit
 
-/// Where things sit in the Liner Notes window, in skin pixels.
-enum LinerNotesLayout {
+/// Where things sit in the Backstory window, in skin pixels.
+enum BackstoryLayout {
     /// As wide as the main window, docking under the playlist.
     static let defaultSize = CGSize(width: 275, height: 20 + 7 * 29 + 12)
     static let minSize = CGSize(width: 275, height: 20 + 5 * 29 + 12)
@@ -44,14 +44,14 @@ enum LinerNotesLayout {
     }
 }
 
-/// The Liner Notes window: the song that's playing, and notes about it with numbered
-/// sources, from the Liner Notes Pak. Along the bottom, when to look songs up (AUTO, ASK,
+/// The Backstory window: the song that's playing, and notes about it with numbered
+/// sources, from the Backstory Pak. Along the bottom, when to look songs up (AUTO, ASK,
 /// OFF); the setup (service, model, key) shows in the window when there's no key yet, or
 /// when the service line under the title is clicked.
-final class LinerNotesView: SkinnedView {
-    let session: LinerNotesSession
+final class BackstoryView: SkinnedView {
+    let session: BackstorySession
     let paks: PakRegistry
-    private var pak: LinerNotesPak { session.pak }
+    private var pak: BackstoryPak { session.pak }
     /// Gets keys the window doesn't use, such as the transport letters.
     weak var keyFallback: NSResponder?
 
@@ -75,7 +75,7 @@ final class LinerNotesView: SkinnedView {
     private var buttons: [(CGRect, Button)] = []
 
     private enum Button: Equatable {
-        case lookup(LinerNotesPak.Lookup), askAgain, ask, setUp, provider(String), model(String), save, cancel
+        case lookup(BackstoryPak.Lookup), askAgain, ask, setUp, provider(String), model(String), save, cancel
     }
 
     private enum Press: Equatable {
@@ -84,10 +84,10 @@ final class LinerNotesView: SkinnedView {
     private var pressed: Press?
     private var pressedInside = false
 
-    init(session: LinerNotesSession, paks: PakRegistry, skin: Skin, scale: CGFloat) {
+    init(session: BackstorySession, paks: PakRegistry, skin: Skin, scale: CGFloat) {
         self.session = session
         self.paks = paks
-        super.init(pixelSize: LinerNotesLayout.defaultSize, skin: skin, scale: scale)
+        super.init(pixelSize: BackstoryLayout.defaultSize, skin: skin, scale: scale)
         keyBox = PixelTextBox(in: self, rect: .zero, placeholder: "Paste your API key", secure: true)
         keyBox.onSubmit = { [weak self] _ in self?.saveSetup() }
         session.onChange = { [weak self] in self?.needsDisplay = true }
@@ -98,7 +98,7 @@ final class LinerNotesView: SkinnedView {
     }
 
     override func normalizedPixelSize(_ proposed: CGSize) -> CGSize {
-        LinerNotesLayout.snapped(proposed)
+        BackstoryLayout.snapped(proposed)
     }
 
     /// Redraws every frame only while something moves: the countdown, notes arriving, or
@@ -107,8 +107,8 @@ final class LinerNotesView: SkinnedView {
         keyBox?.isEditing == true || session.phase == .looking || session.phase == .waiting
     }
 
-    private var parts: LinerNotesLayout.Parts {
-        LinerNotesLayout.Parts(size: pixelSize, gen: skin.gen != nil)
+    private var parts: BackstoryLayout.Parts {
+        BackstoryLayout.Parts(size: pixelSize, gen: skin.gen != nil)
     }
 
     private var isInserted: Bool { paks.isInserted(pak) }
@@ -146,7 +146,7 @@ final class LinerNotesView: SkinnedView {
         let rule = mix(colors.normalBackground, colors.normal, 0.25)
         buttons = []
         sourceRects = []
-        PanelFrame(skin: skin, size: pixelSize, title: "LINER NOTES", active: isActive)
+        PanelFrame(skin: skin, size: pixelSize, title: "BACKSTORY", active: isActive)
             .draw(c, closePressed: pressed == .close && pressedInside)
         c.fill(skin.gen == nil ? CGRect(x: parts.content.minX, y: parts.content.minY,
                                         width: parts.scrollTrack.minX - parts.content.minX, height: parts.content.height)
@@ -180,8 +180,8 @@ final class LinerNotesView: SkinnedView {
         return CGRect(origin: CGPoint(x: track.minX, y: track.minY + (travel * scroll / limit).rounded()), size: PlaylistLayout.scrollThumb)
     }
 
-    private func drawHeader(_ c: Canvas, _ parts: LinerNotesLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor) {
-        let x = parts.left, y = Int(parts.header.minY), size = LinerNotesLayout.cover
+    private func drawHeader(_ c: Canvas, _ parts: BackstoryLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor) {
+        let x = parts.left, y = Int(parts.header.minY), size = BackstoryLayout.cover
         let light = mix(colors.normalBackground, colors.normal, 0.25), dark = mix(colors.normalBackground, rgb(0), 0.4)
         if let artwork = session.artwork {
             c.context.saveGState()
@@ -217,13 +217,13 @@ final class LinerNotesView: SkinnedView {
         c.text(service, textX, y + 25, pressed == .button(.setUp) && pressedInside ? colors.current : dim)
     }
 
-    private func drawBar(_ c: Canvas, _ parts: LinerNotesLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor) {
+    private func drawBar(_ c: Canvas, _ parts: BackstoryLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor) {
         let bar = parts.bar
         var x = Int(bar.minX)
         c.text("LOOK UP", x, Int(bar.minY) + 4, dim)
         x += PixelFont.width(of: "LOOK UP") + 5
         let current = pak.lookup
-        for (lookup, label) in [(LinerNotesPak.Lookup.everyTrack, "AUTO"), (.whenAsked, "ASK"), (.off, "OFF")] {
+        for (lookup, label) in [(BackstoryPak.Lookup.everyTrack, "AUTO"), (.whenAsked, "ASK"), (.off, "OFF")] {
             let rect = CGRect(x: x, y: Int(bar.minY), width: PixelFont.width(of: label) + 7, height: Int(bar.height))
             drawButton(c, label, rect, .lookup(lookup), selected: lookup == current, colors)
             x += Int(rect.width) + 2
@@ -248,7 +248,7 @@ final class LinerNotesView: SkinnedView {
     }
 
     /// Draws what's under the header; returns its height.
-    private func drawBody(_ c: Canvas, _ parts: LinerNotesLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor, top: Int) -> Int {
+    private func drawBody(_ c: Canvas, _ parts: BackstoryLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor, top: Int) -> Int {
         let body = parts.body, x = parts.left, width = Int(body.width)
         let middle = Int(body.midY) - ListFont.lineHeight / 2
         var y = top
@@ -265,7 +265,7 @@ final class LinerNotesView: SkinnedView {
         }
 
         if !isInserted {
-            paragraph("The Liner Notes Pak is ejected. Insert it in the Expansion Paks window to look songs up.", dim)
+            paragraph("The Backstory Pak is ejected. Insert it in the Expansion Paks window to look songs up.", dim)
             return y - top
         }
         if showsSetup {
@@ -323,10 +323,10 @@ final class LinerNotesView: SkinnedView {
         return y - top
     }
 
-    private func drawSetup(_ c: Canvas, _ parts: LinerNotesLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor, top: Int) -> Int {
+    private func drawSetup(_ c: Canvas, _ parts: BackstoryLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor, top: Int) -> Int {
         let x = parts.left, width = Int(parts.body.width)
         var y = top
-        for line in Self.wrap("Liner Notes looks up the song that's playing. It sends the title, artist and album, never the audio, to the service you pick, with your own key. Nothing goes to Bitamp.", width: width) {
+        for line in Self.wrap("Backstory looks up the song that's playing. It sends the title, artist and album, never the audio, to the service you pick, with your own key. Nothing goes to Bitamp.", width: width) {
             ListFont.draw(line, in: c, x: x, y: y, color: colors.normal)
             y += ListFont.lineHeight
         }
@@ -375,7 +375,7 @@ final class LinerNotesView: SkinnedView {
         return y - top
     }
 
-    static func sourceLabel(_ source: LinerNotesSource) -> String {
+    static func sourceLabel(_ source: BackstorySource) -> String {
         let host = source.url.host.map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 } ?? ""
         return host.isEmpty ? source.title : "\(source.title) - \(host)"
     }
@@ -421,7 +421,7 @@ final class LinerNotesView: SkinnedView {
 
     private func press(at point: CGPoint) -> Press? {
         let parts = self.parts
-        if PanelFrame(skin: skin, size: pixelSize, title: "LINER NOTES", active: isActive).close.contains(point) { return .close }
+        if PanelFrame(skin: skin, size: pixelSize, title: "BACKSTORY", active: isActive).close.contains(point) { return .close }
         if parts.grip.contains(point) { return .grip(startSize: .zero, startMouse: .zero) }
         if CGFloat(contentHeight) > parts.body.height, parts.scrollTrack.contains(point) { return .thumb(grab: 0) }
         if keyBox.rect != .zero, keyBox.rect.contains(point) { return .key }
@@ -498,7 +498,7 @@ final class LinerNotesView: SkinnedView {
         case .key?:
             keyBox.mouseUp()
         case .close? where pressedInside:
-            windowGroup?.setVisible(.linerNotes, false)
+            windowGroup?.setVisible(.backstory, false)
         case .source(let url)? where pressedInside:
             NSWorkspace.shared.open(url)
         case .button(let button)? where pressedInside:

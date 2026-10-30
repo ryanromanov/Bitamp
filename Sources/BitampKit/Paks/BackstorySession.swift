@@ -5,11 +5,11 @@ import ImageIO
 
 /// Notes about one song as the window shows them: the words, with "[1]"-style marks after
 /// what each source supports, and the sources those marks number.
-struct LinerNotes: Codable, Equatable {
+struct BackstoryNotes: Codable, Equatable {
     var text = ""
-    var sources: [LinerNotesSource] = []
+    var sources: [BackstorySource] = []
 
-    mutating func apply(_ update: LinerNotesUpdate) {
+    mutating func apply(_ update: BackstoryUpdate) {
         switch update {
         case .text(let words):
             text += Self.plain(words)
@@ -48,17 +48,17 @@ struct LinerNotes: Codable, Equatable {
 
 /// Notes already written, so a song played again shows them at once and costs nothing.
 /// Kept in memory and as small JSON files in Bitamp's caches folder.
-final class LinerNotesCache {
+final class BackstoryCache {
     private let folder: URL?
-    private var memory: [String: LinerNotes] = [:]
+    private var memory: [String: BackstoryNotes] = [:]
 
     init(folder: URL?) {
         self.folder = folder
     }
 
-    static func standard() -> LinerNotesCache {
-        LinerNotesCache(folder: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.ryanromanov.Bitamp/LinerNotes", isDirectory: true))
+    static func standard() -> BackstoryCache {
+        BackstoryCache(folder: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("com.ryanromanov.Bitamp/BackstoryNotes", isDirectory: true))
     }
 
     static func key(_ track: PakNowPlaying, _ identity: String) -> String {
@@ -66,16 +66,16 @@ final class LinerNotesCache {
         return SHA256.hash(data: Data(name.utf8)).prefix(16).map { String(format: "%02x", $0) }.joined()
     }
 
-    func notes(for track: PakNowPlaying, identity: String) -> LinerNotes? {
+    func notes(for track: PakNowPlaying, identity: String) -> BackstoryNotes? {
         let key = Self.key(track, identity)
         if let notes = memory[key] { return notes }
         guard let folder, let data = try? Data(contentsOf: folder.appendingPathComponent("\(key).json")),
-              let notes = try? JSONDecoder().decode(LinerNotes.self, from: data) else { return nil }
+              let notes = try? JSONDecoder().decode(BackstoryNotes.self, from: data) else { return nil }
         memory[key] = notes
         return notes
     }
 
-    func save(_ notes: LinerNotes, for track: PakNowPlaying, identity: String) {
+    func save(_ notes: BackstoryNotes, for track: PakNowPlaying, identity: String) {
         let key = Self.key(track, identity)
         memory[key] = notes
         guard let folder, let data = try? JSONEncoder().encode(notes) else { return }
@@ -84,11 +84,11 @@ final class LinerNotesCache {
     }
 }
 
-/// Follows what's playing for the Liner Notes window, and looks songs up when the Pak's
+/// Follows what's playing for the Backstory window, and looks songs up when the Pak's
 /// setting says: after a song has played two seconds ("Every track"), or when asked.
 /// Lookups start only while the window is open and the Pak inserted, since each one costs.
 @MainActor
-final class LinerNotesSession {
+final class BackstorySession {
     enum Phase: Equatable {
         /// Nothing is playing.
         case idle
@@ -113,8 +113,8 @@ final class LinerNotesSession {
     /// How long a song plays before it's looked up, so skipping through costs nothing.
     static let delay: TimeInterval = 2
 
-    let pak: LinerNotesPak
-    private let cache: LinerNotesCache
+    let pak: BackstoryPak
+    private let cache: BackstoryCache
     private let clock: () -> TimeInterval
     /// What's playing: the queue item, and whether it's playing now.
     var current: () -> (url: URL?, playing: Bool) = { (nil, false) }
@@ -125,14 +125,14 @@ final class LinerNotesSession {
     private(set) var phase = Phase.idle
     private(set) var track: PakNowPlaying?
     private(set) var artwork: CGImage?
-    private(set) var notes = LinerNotes()
+    private(set) var notes = BackstoryNotes()
     /// Seconds the current song has spent playing.
     private(set) var played: TimeInterval = 0
     private var trackURL: URL?
     private var lastTick: TimeInterval?
     private var task: Task<Void, Never>?
 
-    init(pak: LinerNotesPak, cache: LinerNotesCache, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+    init(pak: BackstoryPak, cache: BackstoryCache, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.pak = pak
         self.cache = cache
         self.clock = clock
@@ -173,7 +173,7 @@ final class LinerNotesSession {
         }
         task?.cancel()
         let identity = pak.identity
-        notes = LinerNotes()
+        notes = BackstoryNotes()
         phase = .looking
         onChange?()
         task = Task { [weak self] in
@@ -194,7 +194,7 @@ final class LinerNotesSession {
                 return
             } catch {
                 guard let self, !Task.isCancelled else { return }
-                self.phase = .failed(error.localizedDescription, badKey: error as? LinerNotesError == .badKey)
+                self.phase = .failed(error.localizedDescription, badKey: error as? BackstoryError == .badKey)
             }
             self?.onChange?()
         }
@@ -216,7 +216,7 @@ final class LinerNotesSession {
         played = 0
         track = nil
         artwork = nil
-        notes = LinerNotes()
+        notes = BackstoryNotes()
         phase = url == nil ? .idle : .reading
         onChange?()
         guard let url else { return }
@@ -242,7 +242,7 @@ final class LinerNotesSession {
             phase = .done
             return
         }
-        notes = LinerNotes()
+        notes = BackstoryNotes()
         switch pak.lookup {
         case .off: phase = .off
         case _ where pak.service() == nil: phase = .needsSetup
@@ -252,7 +252,7 @@ final class LinerNotesSession {
     }
 }
 
-extension LinerNotesSession {
+extension BackstorySession {
     /// The tags and picture of a file or a Pak's track. A song needs a title and an artist
     /// to be looked up; a file's name is never sent in place of its tags.
     static func describe(_ url: URL, paks: PakRegistry) async -> (PakNowPlaying?, CGImage?) {

@@ -1,6 +1,6 @@
 import Foundation
 
-/// What a liner-notes service is told about the song that's playing: its tags, never its
+/// What a backstory service is told about the song that's playing: its tags, never its
 /// audio or its file's name.
 public struct PakNowPlaying: Sendable, Hashable, Codable {
     public var title: String
@@ -15,7 +15,7 @@ public struct PakNowPlaying: Sendable, Hashable, Codable {
 }
 
 /// A web page the notes draw on.
-public struct LinerNotesSource: Sendable, Hashable, Codable {
+public struct BackstorySource: Sendable, Hashable, Codable {
     public var title: String
     public var url: URL
     /// The words on the page the notes rest on, when the service says.
@@ -29,21 +29,21 @@ public struct LinerNotesSource: Sendable, Hashable, Codable {
 }
 
 /// A piece of the notes as they arrive.
-public enum LinerNotesUpdate: Sendable, Equatable {
+public enum BackstoryUpdate: Sendable, Equatable {
     /// More words, to add to what's come so far.
     case text(String)
     /// The sources behind the words that came just before.
-    case cite([LinerNotesSource])
+    case cite([BackstorySource])
 }
 
 /// Something that writes notes about a song, such as Claude or OpenAI with web search.
-public protocol LinerNotesService: Sendable {
+public protocol BackstoryService: Sendable {
     /// The notes, a piece at a time. Ends early with an error if the service fails.
-    func notes(for track: PakNowPlaying) -> AsyncThrowingStream<LinerNotesUpdate, Error>
+    func notes(for track: PakNowPlaying) -> AsyncThrowingStream<BackstoryUpdate, Error>
 }
 
 /// Why a service couldn't write notes, in words for the panel.
-public enum LinerNotesError: Error, Equatable, LocalizedError {
+public enum BackstoryError: Error, Equatable, LocalizedError {
     /// The key is missing, wrong or revoked.
     case badKey
     /// Too many requests, or the account is out of credit.

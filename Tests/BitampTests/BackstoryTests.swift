@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import Testing
 @testable import BitampKit
-@testable import BitampLinerNotes
+@testable import BitampBackstory
 
 // Everything here uses invented songs and canned replies; nothing goes over the network.
 
@@ -60,16 +60,16 @@ event: message_stop
 data: {"type":"message_stop"}
 """
 
-@Suite struct ClaudeLinerNotesTests {
+@Suite struct ClaudeBackstoryTests {
     @Test func readsWordsAndEachBlocksSources() throws {
         var stream = ClaudeStream()
-        var updates: [LinerNotesUpdate] = []
+        var updates: [BackstoryUpdate] = []
         for line in fixture.components(separatedBy: "\n") { updates += try stream.feed(line) }
         try stream.finish()
-        let history = LinerNotesSource(title: "The Low Bits", url: URL(string: "https://lowbits.example/history")!,
+        let history = BackstorySource(title: "The Low Bits", url: URL(string: "https://lowbits.example/history")!,
                                        quote: "recorded in eight days")
         // A citation without a title is named by its site.
-        let zine = LinerNotesSource(title: "chipzine.example", url: URL(string: "https://chipzine.example/low-tide-fm")!,
+        let zine = BackstorySource(title: "chipzine.example", url: URL(string: "https://chipzine.example/low-tide-fm")!,
                                     quote: "a beach house")
         #expect(updates == [.text("The band cut it in eight days"), .cite([history, zine]), .text(" in a rented beach house.")])
     }
@@ -77,10 +77,10 @@ data: {"type":"message_stop"}
     @Test func aRefusalAndAnErrorMidStreamAreErrors() throws {
         var refused = ClaudeStream()
         _ = try refused.feed(#"data: {"type":"message_delta","delta":{"stop_reason":"refusal"}}"#)
-        #expect(throws: LinerNotesError.declined) { try refused.finish() }
+        #expect(throws: BackstoryError.declined) { try refused.finish() }
 
         var busy = ClaudeStream()
-        #expect(throws: LinerNotesError.unavailable("Claude is busy right now. Try again in a moment.")) {
+        #expect(throws: BackstoryError.unavailable("Claude is busy right now. Try again in a moment.")) {
             _ = try busy.feed(#"data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#)
         }
     }
@@ -94,12 +94,12 @@ data: {"type":"message_stop"}
 
         var empty = ClaudeStream()
         _ = try empty.feed(#"data: {"type":"message_delta","delta":{"stop_reason":"pause_turn"}}"#)
-        #expect(throws: LinerNotesError.self) { try empty.finish() }
+        #expect(throws: BackstoryError.self) { try empty.finish() }
     }
 
     @Test func errorsSayWhatToDo() {
-        func error(_ status: Int, _ body: String) -> LinerNotesError {
-            ClaudeLinerNotes.error(status: status, body: Data(body.utf8))
+        func error(_ status: Int, _ body: String) -> BackstoryError {
+            ClaudeBackstory.error(status: status, body: Data(body.utf8))
         }
         #expect(error(401, #"{"error":{"type":"authentication_error","message":"invalid x-api-key"}}"#) == .badKey)
         #expect(error(529, #"{"error":{"type":"overloaded_error","message":"Overloaded"}}"#) == .unavailable("Claude is busy right now. Try again in a moment."))
@@ -111,27 +111,27 @@ data: {"type":"message_stop"}
     /// Search is direct (dynamic filtering leaves the notes without citations), limited to
     /// two searches, and the request names only the song's tags.
     @Test func asksWithDirectSearch() throws {
-        let body = ClaudeLinerNotes.body(for: song, model: .sonnet)
+        let body = ClaudeBackstory.body(for: song, model: .sonnet)
         #expect(body["model"] as? String == "claude-sonnet-5-5")
         #expect(body["stream"] as? Bool == true)
         let tool = try #require((body["tools"] as? [[String: Any]])?.first)
         #expect(tool["type"] as? String == "web_search_20260318")
         #expect(tool["allowed_callers"] as? [String] == ["direct"])
         #expect(tool["max_uses"] as? Int == 2)
-        #expect(ClaudeLinerNotes.body(for: song, model: .opus)["model"] as? String == "claude-opus-5-5")
-        #expect(ClaudeLinerNotes.prompt(for: song) == #"Now playing: "Dial-Up Sunrise" by The Low Bits, from the album "Low Tide FM"."#)
+        #expect(ClaudeBackstory.body(for: song, model: .opus)["model"] as? String == "claude-opus-5-5")
+        #expect(ClaudeBackstory.prompt(for: song) == #"Now playing: "Dial-Up Sunrise" by The Low Bits, from the album "Low Tide FM"."#)
 
-        let request = ClaudeLinerNotes(key: "test-key").request(for: song)
+        let request = ClaudeBackstory(key: "test-key").request(for: song)
         #expect(request.value(forHTTPHeaderField: "x-api-key") == "test-key")
         #expect(request.value(forHTTPHeaderField: "anthropic-version") == "2026-10-21")
     }
 }
 
-@Suite struct LinerNotesTextTests {
+@Suite struct BackstoryTextTests {
     @Test func marksGoAfterTheCitedWordsAndNumbersAreReused() {
-        let a = LinerNotesSource(title: "A", url: URL(string: "https://a.example")!)
-        let b = LinerNotesSource(title: "B", url: URL(string: "https://b.example")!)
-        var notes = LinerNotes()
+        let a = BackstorySource(title: "A", url: URL(string: "https://a.example")!)
+        let b = BackstorySource(title: "B", url: URL(string: "https://b.example")!)
+        var notes = BackstoryNotes()
         notes.apply(.text("First fact. "))
         notes.apply(.cite([a]))
         notes.apply(.text("Second fact.\n\n"))
@@ -142,29 +142,29 @@ data: {"type":"message_stop"}
     }
 
     @Test func punctuationIsMadePlain() {
-        #expect(LinerNotes.plain("It\u{2019}s *Low Tide FM*\u{2014}\u{201C}great\u{201D}\u{2026}") == "It's Low Tide FM - \"great\"...")
+        #expect(BackstoryNotes.plain("It\u{2019}s *Low Tide FM*\u{2014}\u{201C}great\u{201D}\u{2026}") == "It's Low Tide FM - \"great\"...")
     }
 
     @Test func aMarkStaysWithItsWord() {
         let line = "abcdefghij abcdefghij"
         let width = ListFont.width(of: line)
-        #expect(LinerNotesView.wrap(line + " [1]", width: width) == ["abcdefghij", "abcdefghij [1]"])
+        #expect(BackstoryView.wrap(line + " [1]", width: width) == ["abcdefghij", "abcdefghij [1]"])
     }
 }
 
 /// Settings kept in memory, the key included.
-final class LinerNotesMemorySettings: PakSettingsStore {
+final class BackstoryMemorySettings: PakSettingsStore {
     var secrets: [String: String] = [:]
     override func secret(_ pak: String, _ key: String) -> String? { secrets["\(pak).\(key)"] }
     override func setSecret(_ value: String?, _ pak: String, _ key: String) { secrets["\(pak).\(key)"] = value }
 }
 
 /// Answers every song with the same words, counting how often it's asked.
-final class CannedLinerNotes: LinerNotesService, @unchecked Sendable {
+final class CannedBackstory: BackstoryService, @unchecked Sendable {
     var asked = 0
-    var updates: [LinerNotesUpdate] = [.text("Canned notes.")]
+    var updates: [BackstoryUpdate] = [.text("Canned notes.")]
 
-    func notes(for track: PakNowPlaying) -> AsyncThrowingStream<LinerNotesUpdate, Error> {
+    func notes(for track: PakNowPlaying) -> AsyncThrowingStream<BackstoryUpdate, Error> {
         asked += 1
         let updates = updates
         return AsyncThrowingStream { continuation in
@@ -175,12 +175,12 @@ final class CannedLinerNotes: LinerNotesService, @unchecked Sendable {
 }
 
 @MainActor
-@Suite struct LinerNotesSessionTests {
-    let service = CannedLinerNotes()
-    let pak: LinerNotesPak
+@Suite struct BackstorySessionTests {
+    let service = CannedBackstory()
+    let pak: BackstoryPak
     var now: TimeInterval = 0
     let clock: Clock
-    let session: LinerNotesSession
+    let session: BackstorySession
     let player = Player()
 
     final class Clock { var now: TimeInterval = 0 }
@@ -190,12 +190,12 @@ final class CannedLinerNotes: LinerNotesService, @unchecked Sendable {
     }
 
     init() {
-        let store = LinerNotesMemorySettings(defaults: UserDefaults(suiteName: "BitampLinerNotes-\(UUID().uuidString)")!)
+        let store = BackstoryMemorySettings(defaults: UserDefaults(suiteName: "BitampBackstory-\(UUID().uuidString)")!)
         let service = self.service
-        pak = LinerNotesPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5", "Opus 5.5"]) { _, _ in service }], store: store)
+        pak = BackstoryPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5", "Opus 5.5"]) { _, _ in service }], store: store)
         let clock = Clock()
         self.clock = clock
-        session = LinerNotesSession(pak: pak, cache: LinerNotesCache(folder: nil), clock: { clock.now })
+        session = BackstorySession(pak: pak, cache: BackstoryCache(folder: nil), clock: { clock.now })
         let player = self.player
         session.current = { (player.url, player.playing) }
         session.describe = { url in (url.lastPathComponent == "untagged" ? nil : song, nil) }
@@ -214,7 +214,7 @@ final class CannedLinerNotes: LinerNotesService, @unchecked Sendable {
         for _ in 0..<20 { await Task.yield() }
     }
 
-    func start(lookup: LinerNotesPak.Lookup, key: String? = "test-key") async {
+    func start(lookup: BackstoryPak.Lookup, key: String? = "test-key") async {
         pak.save(["lookup": lookup.rawValue] .merging(key.map { ["claude-key": $0] } ?? [:]) { $1 })
         session.update(active: true)
         await settle()
@@ -226,7 +226,7 @@ final class CannedLinerNotes: LinerNotesService, @unchecked Sendable {
     }
 
     @Test func everyTrackWaitsForTwoSecondsOfPlaying() async {
-        #expect(LinerNotesSession.delay == 2)
+        #expect(BackstorySession.delay == 2)
         await start(lookup: .everyTrack)
         #expect(session.phase == .waiting)
         await run(seconds: 1)
@@ -301,39 +301,39 @@ final class CannedLinerNotes: LinerNotesService, @unchecked Sendable {
 }
 
 extension SnapshotTests {
-    /// The Liner Notes window in each state, with invented notes.
-    @Test func linerNotes() async throws {
+    /// The Backstory window in each state, with invented notes.
+    @Test func backstory() async throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         var skins: [(String, Skin)] = [("default", DefaultSkin()), ("millennium", DefaultSkin(theme: .millennium))]
         if let path = ProcessInfo.processInfo.environment["BITAMP_SNAPSHOT_SKIN"] {
             skins.append(("wsz", try WszSkin(url: URL(fileURLWithPath: path))))
         }
-        let service = CannedLinerNotes()
+        let service = CannedBackstory()
         service.updates = [
             .text("Dial-Up Sunrise opens Low Tide FM, the second album by The Low Bits. The band cut it in eight days in a rented beach house"),
-            .cite([LinerNotesSource(title: "The Low Bits: a history", url: URL(string: "https://lowbits.example/history")!)]),
+            .cite([BackstorySource(title: "The Low Bits: a history", url: URL(string: "https://lowbits.example/history")!)]),
             .text(", and the squeal in the intro is a real modem handshake.\n\nIt was their first song on college radio"),
-            .cite([LinerNotesSource(title: "Low Tide FM at ten", url: URL(string: "https://www.chipzine.example/low-tide-fm")!)]),
+            .cite([BackstorySource(title: "Low Tide FM at ten", url: URL(string: "https://www.chipzine.example/low-tide-fm")!)]),
             .text("."),
         ]
         for (name, skin) in skins {
             for state in ["setup", "ready", "notes"] {
-                let store = LinerNotesMemorySettings(defaults: UserDefaults(suiteName: "BitampLinerNotesSnap-\(UUID().uuidString)")!)
-                let pak = LinerNotesPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5", "Opus 5.5"],
+                let store = BackstoryMemorySettings(defaults: UserDefaults(suiteName: "BitampBackstorySnap-\(UUID().uuidString)")!)
+                let pak = BackstoryPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5", "Opus 5.5"],
                                                           costs: ["Sonnet 5.5": "About 4 cents a song"]) { _, _ in service }],
                                         store: store)
                 if state != "setup" { pak.save(["claude-key": "test-key"]) }
-                let session = LinerNotesSession(pak: pak, cache: LinerNotesCache(folder: nil))
+                let session = BackstorySession(pak: pak, cache: BackstoryCache(folder: nil))
                 session.current = { (URL(string: "bitpak-test://track/1"), true) }
                 session.describe = { _ in (song, showcaseCover(17, size: 96)) }
-                let view = LinerNotesView(session: session, paks: PakRegistry([pak]), skin: skin, scale: 2)
+                let view = BackstoryView(session: session, paks: PakRegistry([pak]), skin: skin, scale: 2)
                 session.update(active: true)
                 for _ in 0..<50 { await Task.yield() }
                 if state == "notes" {
                     session.lookUp()
                     for _ in 0..<50 { await Task.yield() }
                 }
-                try save(view, "\(name)-liner-notes-\(state)")
+                try save(view, "\(name)-backstory-\(state)")
             }
         }
     }

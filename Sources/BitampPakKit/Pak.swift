@@ -36,7 +36,7 @@ public protocol Pak: AnyObject {
     /// The picture for `artwork`, about `size` pixels square, or nil if there's none.
     func image(for artwork: PakArtwork, size: Int) async -> CGImage?
 
-    /// False for a companion Pak, such as Liner Notes, which adds to what's playing instead
+    /// False for a companion Pak, such as Backstory, which adds to what's playing instead
     /// of supplying music: it has no tracks, and isn't offered for browsing.
     var isMusicSource: Bool { get }
 }
