@@ -73,6 +73,9 @@ public final class BackstoryPak: Pak, ConfigurablePak {
         // Lookups cost money, so nothing is looked up by itself until the user says so.
         settings.append(PakSettingDefinition(key: "lookup", label: "Look up", kind: .choice,
                                              options: Lookup.allCases.map(\.rawValue), defaultValue: Lookup.whenAsked.rawValue))
+        // A song looked up early and then skipped still costs, so it's off until asked for.
+        settings.append(PakSettingDefinition(key: "prefetch", label: "Next song early", kind: .choice,
+                                             options: ["Off", "On"], defaultValue: "Off"))
         return settings
     }
 
@@ -118,6 +121,13 @@ public final class BackstoryPak: Pak, ConfigurablePak {
     var identity: String {
         let provider = self.provider
         return "\(provider.name)/\(model(of: provider))"
+    }
+
+    /// With "Every track", look the next song up shortly before this one ends, so its notes
+    /// are there when it starts.
+    var prefetch: Bool {
+        get { settingValues()["prefetch"] == "On" }
+        set { save(["prefetch": newValue ? "On" : "Off"]) }
     }
 
     /// The service to ask, or nil until there's a key for it.

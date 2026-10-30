@@ -72,6 +72,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 (controller?.queue.current, controller?.player.state == .playing)
             }
             let paks = self.paks
+            session.upcoming = { [weak controller] in
+                guard let controller, let duration = controller.player.nowPlaying?.duration, duration > 0 else { return (nil, nil) }
+                return (controller.queue.upNext, duration - controller.player.currentTime)
+            }
             session.describe = { url in await BackstorySession.describe(url, paks: paks) }
             let view = BackstoryView(session: session, paks: paks, skin: skin, scale: preferences.scale)
             view.keyFallback = mainView
