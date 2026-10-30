@@ -50,6 +50,8 @@ public enum BackstoryError: Error, Equatable, LocalizedError {
     case limited(String)
     /// The service is busy or down; trying later may work.
     case unavailable(String)
+    /// The service couldn't be reached: no network, or it timed out.
+    case offline(String)
     /// The service wouldn't answer this one.
     case declined
     case failed(String)
@@ -57,7 +59,7 @@ public enum BackstoryError: Error, Equatable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .badKey: "The API key wasn't accepted. Check it in the setup."
-        case .limited(let message), .unavailable(let message), .failed(let message): message
+        case .limited(let message), .unavailable(let message), .offline(let message), .failed(let message): message
         case .declined: "The service declined to write about this song."
         }
     }

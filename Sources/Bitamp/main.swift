@@ -18,7 +18,10 @@ MainActor.assumeIsolated {
     ) { model, key in
         ClaudeBackstory(key: key, model: model == "Opus 5.5" ? .opus : .sonnet)
     }
-    let delegate = AppDelegate(paks: [AppleMusicPak()], backstory: [claude])
+    // Apple's on-device model, offered where macOS has it, and marked wherever it's used.
+    let onDevice = AppleOnDevice.isSupported
+        ? BackstoryPak.OnDevice(isAvailable: { AppleOnDevice.isAvailable }, make: { AppleOnDevice.service() }) : nil
+    let delegate = AppDelegate(paks: [AppleMusicPak()], backstory: [claude], backstoryOnDevice: onDevice)
     NSApplication.shared.delegate = delegate
     NSApplication.shared.setActivationPolicy(.regular)
     NSApplication.shared.run()

@@ -427,6 +427,98 @@ final class GatedBackstory: BackstoryService, @unchecked Sendable {
     }
 }
 
+/// Fails every lookup with `error`, as a cloud service does with no network.
+final class FailingBackstory: BackstoryService, @unchecked Sendable {
+    let error: BackstoryError
+    init(_ error: BackstoryError) { self.error = error }
+
+    func notes(for track: PakNowPlaying) -> AsyncThrowingStream<BackstoryUpdate, Error> {
+        let error = error
+        return AsyncThrowingStream { $0.finish(throwing: error) }
+    }
+}
+
+@MainActor
+@Suite struct BackstoryOnDeviceTests {
+    final class Model: @unchecked Sendable {
+        var available = true
+        let service = CannedBackstory()
+    }
+    let model = Model()
+
+    func pak(cloud: BackstoryService = CannedBackstory(), onDevice: Bool = true) -> BackstoryPak {
+        let store = BackstoryMemorySettings(defaults: UserDefaults(suiteName: "BitampBackstoryOnDevice-\(UUID().uuidString)")!)
+        let model = self.model
+        model.service.updates = [.text("On-device notes.")]
+        return BackstoryPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5"]) { _, _ in cloud }],
+                            onDevice: onDevice ? .init(isAvailable: { model.available }, make: { model.available ? model.service : nil }) : nil,
+                            store: store)
+    }
+
+    @Test func usedWithoutAKeyOrWhenChosen() {
+        let pak = pak()
+        #expect(pak.services == ["Claude", "On-device"])
+        #expect(pak.choice()?.onDevice == true, "no key yet")
+        #expect(pak.account == .connected(name: "On-device model"))
+        pak.save(["claude-key": "test-key"])
+        #expect(pak.choice()?.onDevice == false)
+        pak.save(["service": BackstoryPak.onDeviceName])
+        #expect(pak.choice()?.onDevice == true, "chosen")
+        #expect(pak.choice()?.identity == "On-device")
+    }
+
+    @Test func notOfferedWhereItCantRun() {
+        model.available = false
+        let pak = pak()
+        #expect(pak.choice() == nil)
+        #expect(pak.account == .disconnected)
+        #expect(self.pak(onDevice: false).services == ["Claude"])
+    }
+
+    @Test func answersWhenTheServiceCantBeReached() async {
+        let pak = pak(cloud: FailingBackstory(.offline("Couldn't reach Claude")))
+        pak.save(["claude-key": "test-key"])
+        let session = BackstorySession(pak: pak, cache: BackstoryCache(folder: nil))
+        session.current = { (URL(string: "bitpak-test://track/1"), true) }
+        session.describe = { _ in (song, nil) }
+        session.update(active: true)
+        for _ in 0..<20 { await Task.yield() }
+        session.lookUp()
+        for _ in 0..<20 { await Task.yield() }
+        #expect(session.phase == .done)
+        #expect(session.notes.text == "On-device notes.")
+        #expect(session.notes.isOnDevice)
+        #expect(model.service.asked == 1)
+    }
+
+    @Test func otherFailuresDontFallBack() async {
+        let pak = pak(cloud: FailingBackstory(.badKey))
+        pak.save(["claude-key": "test-key"])
+        let session = BackstorySession(pak: pak, cache: BackstoryCache(folder: nil))
+        session.current = { (URL(string: "bitpak-test://track/1"), true) }
+        session.describe = { _ in (song, nil) }
+        session.update(active: true)
+        for _ in 0..<20 { await Task.yield() }
+        session.lookUp()
+        for _ in 0..<20 { await Task.yield() }
+        #expect(session.phase == .failed(BackstoryError.badKey.localizedDescription, badKey: true))
+        #expect(model.service.asked == 0)
+    }
+
+    @Test func savedOnDeviceNotesKeepTheirMark() throws {
+        var notes = BackstoryNotes()
+        notes.apply(.text("Words."))
+        notes.onDevice = true
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("BitampBackstory-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        BackstoryCache(folder: folder).save(notes, for: song, identity: "On-device")
+        #expect(BackstoryCache(folder: folder).notes(for: song, identity: "On-device")?.isOnDevice == true)
+        // Notes saved before the mark existed read as a cloud service's.
+        let old = try JSONDecoder().decode(BackstoryNotes.self, from: Data(#"{"text":"Old.","sources":[]}"#.utf8))
+        #expect(!old.isOnDevice)
+    }
+}
+
 extension SnapshotTests {
     /// The Backstory window in each state, with invented notes.
     @Test func backstory() async throws {
@@ -443,20 +535,28 @@ extension SnapshotTests {
             .cite([BackstorySource(title: "Low Tide FM at ten", url: URL(string: "https://www.chipzine.example/low-tide-fm")!)]),
             .text("."),
         ]
+        let onDevice = CannedBackstory()
+        onDevice.updates = [.text("Dial-Up Sunrise is a song by The Low Bits from the album Low Tide FM. It mixes chiptune sounds with indie pop.")]
         for (name, skin) in skins {
-            for state in ["setup", "ready", "notes"] {
+            for state in ["setup", "ready", "notes", "on-device", "on-device-setup", "on-device-claude-setup"] {
                 let store = BackstoryMemorySettings(defaults: UserDefaults(suiteName: "BitampBackstorySnap-\(UUID().uuidString)")!)
                 let pak = BackstoryPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5", "Opus 5.5"],
                                                           costs: ["Sonnet 5.5": "About 4 cents a song"]) { _, _ in service }],
+                                        onDevice: state.hasPrefix("on-device") ? .init(isAvailable: { true }, make: { onDevice }) : nil,
                                         store: store)
-                if state != "setup" { pak.save(["claude-key": "test-key"]) }
+                if !state.hasSuffix("setup") && !state.hasPrefix("on-device") { pak.save(["claude-key": "test-key"]) }
                 let session = BackstorySession(pak: pak, cache: BackstoryCache(folder: nil))
                 session.current = { (URL(string: "bitpak-test://track/1"), true) }
                 session.describe = { _ in (song, showcaseCover(17, size: 96)) }
                 let view = BackstoryView(session: session, paks: PakRegistry([pak]), skin: skin, scale: 2)
                 session.update(active: true)
                 for _ in 0..<50 { await Task.yield() }
-                if state == "notes" {
+                if state == "on-device-setup" {
+                    pak.save(["service": BackstoryPak.onDeviceName])
+                    view.showSetup()
+                }
+                if state == "on-device-claude-setup" { view.showSetup() }
+                if state == "notes" || state == "on-device" {
                     session.lookUp()
                     for _ in 0..<50 { await Task.yield() }
                 }

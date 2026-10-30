@@ -25,10 +25,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let fileMenu = NSMenu(title: "File")
 
     /// `paks` are the Expansion Paks built into this copy of Bitamp; `backstory`, the
-    /// services the Backstory Pak can ask (none leaves it out).
-    public init(paks: [Pak] = [], backstory: [BackstoryPak.Provider] = []) {
+    /// services the Backstory Pak can ask (none leaves it out), and `backstoryOnDevice`
+    /// Apple's on-device model where macOS has it.
+    public init(paks: [Pak] = [], backstory: [BackstoryPak.Provider] = [], backstoryOnDevice: BackstoryPak.OnDevice? = nil) {
         builtInPaks = paks
-        backstoryPak = backstory.isEmpty ? nil : BackstoryPak(providers: backstory)
+        backstoryPak = backstory.isEmpty ? nil : BackstoryPak(providers: backstory, onDevice: backstoryOnDevice)
         super.init()
     }
 
