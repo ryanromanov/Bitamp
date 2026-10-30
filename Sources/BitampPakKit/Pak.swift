@@ -35,10 +35,15 @@ public protocol Pak: AnyObject {
     func browse(_ location: PakLocation, after cursor: String?) async throws -> PakPage
     /// The picture for `artwork`, about `size` pixels square, or nil if there's none.
     func image(for artwork: PakArtwork, size: Int) async -> CGImage?
+
+    /// False for a companion Pak, such as Liner Notes, which adds to what's playing instead
+    /// of supplying music: it has no tracks, and isn't offered for browsing.
+    var isMusicSource: Bool { get }
 }
 
 extension Pak {
     public var canBrowse: Bool { false }
+    public var isMusicSource: Bool { true }
 
     /// Search's tracks for `.search`, and nothing anywhere else.
     public func browse(_ location: PakLocation, after cursor: String?) async throws -> PakPage {

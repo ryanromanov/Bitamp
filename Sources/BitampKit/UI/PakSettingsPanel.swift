@@ -1,16 +1,16 @@
 import AppKit
 import BitampPakProtocol
 
-/// A third-party Pak's settings, as a form built from what its manifest lists: text
-/// fields, password fields (kept in the Keychain) and pop-up menus.
+/// A Pak's settings, as a form built from what it lists: text fields, password fields
+/// (kept in the Keychain) and pop-up menus.
 @MainActor
 final class PakSettingsPanel: NSPanel {
-    private let pak: ExternalPak
+    private let pak: ConfigurablePak
     private var fields: [(PakSettingDefinition, NSControl)] = []
     private let status = NSTextField(wrappingLabelWithString: "")
     private let saveButton = NSButton(title: "Save", target: nil, action: nil)
 
-    init(pak: ExternalPak) {
+    init(pak: ConfigurablePak) {
         self.pak = pak
         super.init(contentRect: NSRect(x: 0, y: 0, width: 380, height: 200),
                    styleMask: [.titled, .closable, .utilityWindow], backing: .buffered, defer: false)
@@ -22,7 +22,7 @@ final class PakSettingsPanel: NSPanel {
         let grid = NSGridView()
         grid.rowSpacing = 8
         grid.columnSpacing = 8
-        for setting in pak.manifest.settings ?? [] {
+        for setting in pak.settingDefinitions {
             let control = Self.control(for: setting, value: values[setting.key])
             fields.append((setting, control))
             let label = NSTextField(labelWithString: setting.label + ":")
@@ -32,7 +32,7 @@ final class PakSettingsPanel: NSPanel {
         grid.column(at: 0).xPlacement = .trailing
         if grid.numberOfColumns > 1 { grid.column(at: 1).width = 220 }
 
-        if let description = pak.manifest.description {
+        if let description = pak.settingsDescription {
             status.stringValue = description
         }
         status.textColor = .secondaryLabelColor

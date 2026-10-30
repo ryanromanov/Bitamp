@@ -894,7 +894,7 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
     /// Seeds the playlist's titles, so new rows show names before the Pak is asked.
     private func remember(_ tracks: [PakTrack]) {
         for track in tracks {
-            controller.info.seed(TrackMetadata(title: track.title, artist: track.artist, duration: track.duration), for: track.url)
+            controller.info.seed(TrackMetadata(title: track.title, artist: track.artist, album: track.album, duration: track.duration), for: track.url)
         }
     }
 

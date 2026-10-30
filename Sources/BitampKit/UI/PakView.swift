@@ -90,7 +90,7 @@ final class PakView: SkinnedView {
     /// Opens a Pak's music in the Media Library.
     var onBrowse: ((Pak) -> Void)?
     /// Opens a third-party Pak's settings.
-    var onSettings: ((ExternalPak) -> Void)?
+    var onSettings: ((ConfigurablePak) -> Void)?
     /// Installs a dropped `.bitpak`.
     var onInstall: ((URL) -> Void)?
     /// Asks whether to remove a third-party Pak, and does.
@@ -479,7 +479,7 @@ final class PakView: SkinnedView {
         switch accounts[pak.id] {
         case .connected?: return "READY"
         case .limited?: return "LIMITED"
-        default: return (pak as? ExternalPak)?.hasSettings == true ? "SET UP" : "SIGN IN"
+        default: return (pak as? ConfigurablePak)?.hasSettings == true ? "SET UP" : "SIGN IN"
         }
     }
 
@@ -559,6 +559,7 @@ final class PakView: SkinnedView {
             if !pak.isAvailable {
                 flashMessage?("\(pak.name) PAK NEEDS A NEWER MACOS")
             } else if let external = pak as? ExternalPak, external.hasSettings, external.account == .disconnected {
+                // A companion Pak sets up in its own window, which browsing opens.
                 onSettings?(external)
             } else if controller.paks.isInserted(pak) {
                 onBrowse?(pak)
@@ -585,15 +586,18 @@ final class PakView: SkinnedView {
         let pak = paks[index]
         let menu = NSMenu(title: pak.name)
         let inserted = controller.paks.isInserted(pak)
-        let browse = NSMenuItem(title: "Browse \(pak.name)…", action: inserted && pak.isAvailable ? #selector(browseItem(_:)) : nil, keyEquivalent: "")
+        let browse = NSMenuItem(title: pak.isMusicSource ? "Browse \(pak.name)…" : "Show \(pak.name)",
+                                action: inserted && pak.isAvailable ? #selector(browseItem(_:)) : nil, keyEquivalent: "")
         let toggle = NSMenuItem(title: inserted ? "Eject \(pak.name) Pak" : "Insert \(pak.name) Pak",
                                 action: pak.isAvailable ? #selector(toggleItem(_:)) : nil, keyEquivalent: "")
         var items = [browse, toggle]
-        if let external = pak as? ExternalPak {
+        if let configurable = pak as? ConfigurablePak, configurable.hasSettings || pak is ExternalPak {
             items.append(.separator())
-            if external.hasSettings {
+            if configurable.hasSettings {
                 items.append(NSMenuItem(title: "\(pak.name) Pak Settings…", action: #selector(settingsItem(_:)), keyEquivalent: ""))
             }
+        }
+        if pak is ExternalPak {
             items.append(NSMenuItem(title: "Remove \(pak.name) Pak…", action: #selector(removeItem(_:)), keyEquivalent: ""))
         }
         for item in items where !item.isSeparatorItem {
@@ -624,7 +628,7 @@ final class PakView: SkinnedView {
     }
 
     @objc private func settingsItem(_ sender: NSMenuItem) {
-        if let pak = paks[sender.tag] as? ExternalPak { onSettings?(pak) }
+        if let pak = paks[sender.tag] as? ConfigurablePak { onSettings?(pak) }
     }
 
     @objc private func removeItem(_ sender: NSMenuItem) {

@@ -21,15 +21,19 @@ final class PixelTextBox: NSObject, NSTextFieldDelegate {
     /// Called for Tab or the down arrow, to move on to what's below.
     var onTab: (() -> Void)?
 
-    private let field = ClearTextField()
+    private let field: NSTextField
+    /// Drawn as asterisks, and edited in a secure field: for a password or API key.
+    let secure: Bool
     private weak var view: SkinnedView?
     /// How far the text is scrolled left to keep the caret in view, in pixels.
     private var scroll = 0
     /// Where a drag started, as a UTF-16 offset.
     private var anchor: Int?
 
-    init(in view: SkinnedView, rect: CGRect, placeholder: String) {
+    init(in view: SkinnedView, rect: CGRect, placeholder: String, secure: Bool = false) {
         self.view = view
+        self.secure = secure
+        field = secure ? ClearSecureTextField() : ClearTextField()
         self.rect = rect
         self.placeholder = placeholder
         super.init()
@@ -89,7 +93,7 @@ final class PixelTextBox: NSObject, NSTextFieldDelegate {
                 light: mix(colors.normalBackground, rgb(0), 0.5),
                 dark: mix(colors.normalBackground, colors.normal, editor != nil ? 0.9 : 0.4))
 
-        let text = self.text
+        let text = secure ? String(repeating: "*", count: (self.text as NSString).length) : self.text
         let inner = rect.insetBy(dx: 3, dy: 1)
         let selection = editor?.selectedRange() ?? NSRange(location: (text as NSString).length, length: 0)
         let caret = x(text, selection.location + selection.length)
@@ -215,11 +219,26 @@ private final class ClearTextField: NSTextField {
 
     override func becomeFirstResponder() -> Bool {
         guard super.becomeFirstResponder() else { return false }
-        if let editor = currentEditor() as? NSTextView {
-            editor.insertionPointColor = .clear
-            editor.selectedTextAttributes = [.foregroundColor: NSColor.clear, .backgroundColor: NSColor.clear]
-            editor.markedTextAttributes = [.foregroundColor: NSColor.clear]
-        }
+        clearEditor(currentEditor())
         return true
     }
+}
+
+/// The same, for a secret: the field editor won't let it be copied out.
+private final class ClearSecureTextField: NSSecureTextField {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func becomeFirstResponder() -> Bool {
+        guard super.becomeFirstResponder() else { return false }
+        clearEditor(currentEditor())
+        return true
+    }
+}
+
+@MainActor
+private func clearEditor(_ editor: NSText?) {
+    guard let editor = editor as? NSTextView else { return }
+    editor.insertionPointColor = .clear
+    editor.selectedTextAttributes = [.foregroundColor: NSColor.clear, .backgroundColor: NSColor.clear]
+    editor.markedTextAttributes = [.foregroundColor: NSColor.clear]
 }
