@@ -29,9 +29,11 @@ let package = Package(
         .executableTarget(name: "BitampDemoPak", dependencies: ["BitampPakSDK"], exclude: ["pak.json"]),
         // Expansion Paks built into Bitamp. Each depends on BitampPakKit only.
         .target(name: "BitampAppleMusicPak", dependencies: ["BitampPakKit"]),
-        .executableTarget(name: "Bitamp", dependencies: ["BitampKit", "BitampAppleMusicPak"]),
+        // The services the Liner Notes Pak can ask about a song (Claude so far).
+        .target(name: "BitampLinerNotes", dependencies: ["BitampPakKit"]),
+        .executableTarget(name: "Bitamp", dependencies: ["BitampKit", "BitampAppleMusicPak", "BitampLinerNotes"]),
         .testTarget(name: "BitampTests", dependencies: [
-            "BitampKit", "BitampPakKit", "BitampAppleMusicPak", "BitampPakSDK", "BitampDemoPak",
+            "BitampKit", "BitampPakKit", "BitampAppleMusicPak", "BitampPakSDK", "BitampDemoPak", "BitampLinerNotes",
         ]),
     ]
 )
