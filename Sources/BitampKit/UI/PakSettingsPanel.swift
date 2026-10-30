@@ -25,18 +25,23 @@ final class PakSettingsPanel: NSPanel {
         for setting in pak.settingDefinitions {
             let control = Self.control(for: setting, value: values[setting.key])
             fields.append((setting, control))
+            // A text field is as wide as its text, so a long key would push past the window.
+            if control is NSTextField {
+                control.translatesAutoresizingMaskIntoConstraints = false
+                control.widthAnchor.constraint(equalToConstant: Self.fieldWidth).isActive = true
+            }
             let label = NSTextField(labelWithString: setting.label + ":")
             label.alignment = .right
             grid.addRow(with: [label, control])
         }
         grid.column(at: 0).xPlacement = .trailing
-        if grid.numberOfColumns > 1 { grid.column(at: 1).width = 220 }
-
+        if grid.numberOfColumns > 1 { grid.column(at: 1).width = Self.fieldWidth }
         if let description = pak.settingsDescription {
             status.stringValue = description
         }
         status.textColor = .secondaryLabelColor
-        status.preferredMaxLayoutWidth = 340
+        // The rows set the form's width; the description and status wrap to it.
+        status.preferredMaxLayoutWidth = max(grid.fittingSize.width, 340)
 
         saveButton.target = self
         saveButton.action = #selector(save(_:))
@@ -45,16 +50,29 @@ final class PakSettingsPanel: NSPanel {
         cancel.keyEquivalent = "\u{1b}"
         let buttons = NSStackView(views: [cancel, saveButton])
 
-        let stack = NSStackView(views: [grid, status, buttons])
-        stack.orientation = .vertical
-        stack.alignment = .trailing
-        stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
-        status.translatesAutoresizingMaskIntoConstraints = false
-        status.widthAnchor.constraint(equalToConstant: 340).isActive = true
-        contentView = stack
-        setContentSize(stack.fittingSize)
+        let content = NSView()
+        for view in [grid, status, buttons] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(view)
+        }
+        let margin: CGFloat = 20
+        NSLayoutConstraint.activate([
+            grid.topAnchor.constraint(equalTo: content.topAnchor, constant: margin),
+            grid.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: margin),
+            grid.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -margin),
+            status.topAnchor.constraint(equalTo: grid.bottomAnchor, constant: 14),
+            status.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: margin),
+            status.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
+            status.widthAnchor.constraint(equalToConstant: status.preferredMaxLayoutWidth),
+            buttons.topAnchor.constraint(equalTo: status.bottomAnchor, constant: 14),
+            buttons.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -margin),
+            buttons.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -margin),
+        ])
+        contentView = content
+        setContentSize(content.fittingSize)
     }
+
+    static let fieldWidth: CGFloat = 260
 
     private static func control(for setting: PakSettingDefinition, value: String?) -> NSControl {
         switch setting.kind {
