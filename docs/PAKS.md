@@ -58,6 +58,17 @@ Spike results (2026-10-16; artwork from `spikes/musickit --art`, the search box 
 - Library and catalog ids are both often plain numbers, so a place keeps which it came from. Only playlists say: the listener's start `p.`, the catalog's `pl.`. For You and Recently Played can hold the listener's own playlists.
 - Search drops the catalog's copies of what's in the library, but keeps both artists (the catalog's page has top songs), labelling the library's "In Library".
 
+## Liner Notes
+A companion Pak: it has no music, and tells you about the song that's playing (`LinerNotesPak`, `LinerNotesSession`, `LinerNotesView`; the service in its own target, `BitampLinerNotes`).
+- **Companion Paks** say `isMusicSource` false. Their cartridge opens their own window instead of the Media Library, and they're left out of File ▸ Browse and of the library's choice of Pak. `LinerNotesService` (`BitampPakKit/LinerNotes.swift`) takes the song's tags (`PakNowPlaying`: title, artist, album) and streams words and citations (`LinerNotesUpdate`).
+- **Claude** (`ClaudeLinerNotes`): the Messages API over HTTPS with the user's own key, streamed. Sonnet 5.5 by default, Opus 5.5 as an option. Web search is called directly (`allowed_callers: ["direct"]`) with at most two searches: with dynamic filtering the results pass through code first, and the notes come back citing nothing. A paused turn isn't continued; the notes keep what came. Refusals fall back server-side (`fallbacks: "default"`).
+- **When:** LOOK UP AUTO (after two seconds of playing; paused time doesn't count, and a new song starts over), ASK (a button), or OFF. The first setting is ASK. Lookups start only while the window is open and the Pak inserted. A song needs title and artist tags; a file's name is never sent instead.
+- **Notes** are cleaned for the pixel font (no markdown, plain quotes and dashes), with `[n]` marks after what each source supports. They're saved per song and model in `~/Library/Caches/com.ryanromanov.Bitamp/LinerNotes`, so a song played again shows them at once and costs nothing. Sources open in the browser.
+- **Settings** live where a third-party Pak's do (`PakSettingsStore`; the key in the Keychain as "Bitamp Pak liner-notes"). The window's setup and the cartridge's Settings… form change the same values; `ConfigurablePak` lets that form serve a built-in Pak.
+- **The window** is a panel in the window group (`.linerNotes`, "LinerNotesWindow", ⌥N): hidden by default, 275 wide to start, and resizable by the playlist's tiles.
+- **Spike** (2026-10-30, `spikes/linernotes` on a local branch, seven songs from famous to obscure plus an invented one): Sonnet 5.5 with direct search came to about 4¢ and 5 s a song with 4–5 sources each. Opus 5.5 wrote the richest notes. Haiku 5.5 was about 2¢ but mixed up facts twice. Every model said it found nothing about the invented song. Lower effort saved nothing.
+- **Next:** looking the next song up early (a setting, off by default, since a song skipped after that still costs), OpenAI, Apple's on-device model as a fallback with a marker in the window, and the JSON protocol for third-party companion Paks.
+
 ## Spotify
 Since February 2026, Development Mode apps need a Premium owner and allow five users; extended access is for organizations with 250k+ monthly users. Spotify has no Mac SDK that plays audio in another app. At most this is a remote for the Spotify app. Last in line, maybe never.
 
