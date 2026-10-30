@@ -72,7 +72,7 @@ enum Docking {
 @MainActor
 final class WindowGroup {
     enum Panel: String, CaseIterable {
-        case equalizer, playlist, paks, library, linerNotes
+        case equalizer, playlist, paks, library, backstory
     }
 
     let main: NSWindow
@@ -90,9 +90,9 @@ final class WindowGroup {
         self.panels = panels
         self.defaults = defaults
         // The classic three windows show on first launch; Expansion Paks, the Media Library
-        // and Liner Notes wait to be opened.
+        // and Backstory wait to be opened.
         defaults.register(defaults: Dictionary(uniqueKeysWithValues: Panel.allCases.map {
-            (Self.visibilityKey($0), ![.paks, .library, .linerNotes].contains($0))
+            (Self.visibilityKey($0), ![.paks, .library, .backstory].contains($0))
         }))
         defaults.register(defaults: [Self.mainVisibilityKey: true])
     }
@@ -113,7 +113,7 @@ final class WindowGroup {
         guard let window = panels[panel] else { return }
         defaults.set(visible, forKey: Self.visibilityKey(panel))
         if visible {
-            if panel == .library || panel == .linerNotes { bringOnScreen(window) }
+            if panel == .library || panel == .backstory { bringOnScreen(window) }
             window.orderFront(nil)
         } else {
             window.orderOut(nil)

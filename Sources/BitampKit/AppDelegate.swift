@@ -6,12 +6,12 @@ import UniformTypeIdentifiers
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let preferences = Preferences()
     private let builtInPaks: [Pak]
-    /// The Liner Notes Pak, when this copy of Bitamp has a service for it.
-    private let linerNotesPak: LinerNotesPak?
-    private var linerNotesView: LinerNotesView?
+    /// The Backstory Pak, when this copy of Bitamp has a service for it.
+    private let backstoryPak: BackstoryPak?
+    private var backstoryView: BackstoryView?
     private lazy var pakLibrary = PakLibrary()
     /// The built-in Paks, then the installed ones by name.
-    private lazy var paks = PakRegistry(builtInPaks + [linerNotesPak].compactMap { $0 } + pakLibrary.installed(),
+    private lazy var paks = PakRegistry(builtInPaks + [backstoryPak].compactMap { $0 } + pakLibrary.installed(),
                                         preferences: preferences)
     private var pakView: PakView?
     private var libraryView: MediaLibraryView?
@@ -24,11 +24,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Rebuilt as it opens, since its "Browse…" items follow the installed Paks.
     private let fileMenu = NSMenu(title: "File")
 
-    /// `paks` are the Expansion Paks built into this copy of Bitamp; `linerNotes`, the
-    /// services the Liner Notes Pak can ask (none leaves it out).
-    public init(paks: [Pak] = [], linerNotes: [LinerNotesPak.Provider] = []) {
+    /// `paks` are the Expansion Paks built into this copy of Bitamp; `backstory`, the
+    /// services the Backstory Pak can ask (none leaves it out).
+    public init(paks: [Pak] = [], backstory: [BackstoryPak.Provider] = []) {
         builtInPaks = paks
-        linerNotesPak = linerNotes.isEmpty ? nil : LinerNotesPak(providers: linerNotes)
+        backstoryPak = backstory.isEmpty ? nil : BackstoryPak(providers: backstory)
         super.init()
     }
 
@@ -65,21 +65,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         mainView.onShowPaks = { [weak self] in self?.windowGroup?.setVisible(.paks, true) }
         var extraViews: [SkinnedView] = [libraryView]
-        if let linerNotesPak {
-            let session = LinerNotesSession(pak: linerNotesPak, cache: .standard())
+        if let backstoryPak {
+            let session = BackstorySession(pak: backstoryPak, cache: .standard())
             let controller = self.controller
             session.current = { [weak controller] in
                 (controller?.queue.current, controller?.player.state == .playing)
             }
             let paks = self.paks
-            session.describe = { url in await LinerNotesSession.describe(url, paks: paks) }
-            let view = LinerNotesView(session: session, paks: paks, skin: skin, scale: preferences.scale)
+            session.describe = { url in await BackstorySession.describe(url, paks: paks) }
+            let view = BackstoryView(session: session, paks: paks, skin: skin, scale: preferences.scale)
             view.keyFallback = mainView
-            linerNotesPak.onChange = { [weak view, weak pakView] in
+            backstoryPak.onChange = { [weak view, weak pakView] in
                 view?.settingsChanged()
                 pakView?.needsDisplay = true
             }
-            linerNotesView = view
+            backstoryView = view
             extraViews.append(view)
         }
         for view in [equalizerView, playlistView, pakView] + extraViews {
@@ -94,8 +94,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             .paks: SkinnedWindow(view: pakView, layoutName: "PaksWindow", isMain: false),
             .library: SkinnedWindow(view: libraryView, layoutName: "LibraryWindow", isMain: false),
         ]
-        if let linerNotesView {
-            panels[.linerNotes] = SkinnedWindow(view: linerNotesView, layoutName: "LinerNotesWindow", isMain: false)
+        if let backstoryView {
+            panels[.backstory] = SkinnedWindow(view: backstoryView, layoutName: "BackstoryWindow", isMain: false)
         }
         for window in panels.values { window.actionFallback = mainView }
         let group = WindowGroup(main: main, panels: panels)
@@ -464,8 +464,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Opens the Media Library on `pak`'s music; a companion Pak opens its own window.
     private func showLibrary(_ pak: Pak) {
-        if pak === linerNotesPak {
-            showLinerNotes()
+        if pak === backstoryPak {
+            showBackstory()
             return
         }
         guard pak.isAvailable, paks.isInserted(pak), let libraryView else { return }
@@ -489,13 +489,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowGroup.toggle(.library)
     }
 
-    private func showLinerNotes() {
-        windowGroup?.setVisible(.linerNotes, true)
-        linerNotesView?.window?.makeKeyAndOrderFront(nil)
+    private func showBackstory() {
+        windowGroup?.setVisible(.backstory, true)
+        backstoryView?.window?.makeKeyAndOrderFront(nil)
     }
 
-    @objc private func toggleLinerNotes(_ sender: Any?) {
-        windowGroup?.toggle(.linerNotes)
+    @objc private func toggleBackstory(_ sender: Any?) {
+        windowGroup?.toggle(.backstory)
     }
 
     private func makeMainMenu() -> NSMenu {
@@ -533,11 +533,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let playlistShade = Menus.item("Shade Playlist", #selector(togglePlaylistShade(_:)), "w", [.control, .shift])
         let shadows = Menus.item("Window Shadows", #selector(toggleShadows(_:)))
         let raiseAll = Menus.item("Bring All Windows Forward", #selector(toggleRaiseAllWindows(_:)))
-        let linerNotes = linerNotesPak.map { _ in Menus.item("Liner Notes", #selector(toggleLinerNotes(_:)), "n", [.option]) }
+        let backstory = backstoryPak.map { _ in Menus.item("Backstory", #selector(toggleBackstory(_:)), "b", [.option]) }
         for item in [mainWindow, equalizer, playlist, paksWindow, library, regroup, minimize, equalizerShade, playlistShade, shadows, raiseAll]
-            + [linerNotes].compactMap({ $0 }) { item.target = self }
+            + [backstory].compactMap({ $0 }) { item.target = self }
         let windowMenu = Menus.menu("Window", [
-            mainWindow, equalizer, playlist, paksWindow, library] + [linerNotes].compactMap { $0 } + [regroup, .separator(),
+            mainWindow, equalizer, playlist, paksWindow, library] + [backstory].compactMap { $0 } + [regroup, .separator(),
             mainShade, equalizerShade, playlistShade, .separator(),
             Menus.submenu(Menus.menu("Size", sizes)), shadows, raiseAll, .separator(),
             minimize,
@@ -568,7 +568,7 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(togglePlaylist(_:)): item.state = windowGroup?.isVisible(.playlist) == true ? .on : .off
         case #selector(togglePaks(_:)): item.state = windowGroup?.isVisible(.paks) == true ? .on : .off
         case #selector(toggleLibrary(_:)): item.state = windowGroup?.isVisible(.library) == true ? .on : .off
-        case #selector(toggleLinerNotes(_:)): item.state = windowGroup?.isVisible(.linerNotes) == true ? .on : .off
+        case #selector(toggleBackstory(_:)): item.state = windowGroup?.isVisible(.backstory) == true ? .on : .off
         case #selector(setScale(_:)): item.state = item.representedObject as? CGFloat == preferences.scale ? .on : .off
         case #selector(toggleShadows(_:)): item.state = preferences.windowShadows ? .on : .off
         case #selector(toggleRaiseAllWindows(_:)): item.state = preferences.raiseAllWindows ? .on : .off

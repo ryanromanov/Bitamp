@@ -2,14 +2,14 @@ import BitampPakProtocol
 import CoreGraphics
 import Foundation
 
-/// The Liner Notes Pak: tells you about the song that's playing, from a service the user
+/// The Backstory Pak: tells you about the song that's playing, from a service the user
 /// picks with their own key. A companion Pak: it has no music of its own, and its cartridge
-/// opens the Liner Notes window instead of the Media Library.
+/// opens the Backstory window instead of the Media Library.
 ///
 /// Settings live where a third-party Pak's do (UserDefaults, the key in the Keychain), so
 /// the cartridge's Settings… form and the window's setup change the same values.
 @MainActor
-public final class LinerNotesPak: Pak, ConfigurablePak {
+public final class BackstoryPak: Pak, ConfigurablePak {
     /// A service the notes can come from, such as Claude.
     public struct Provider: Sendable {
         public let name: String
@@ -17,10 +17,10 @@ public final class LinerNotesPak: Pak, ConfigurablePak {
         public let models: [String]
         /// What each model costs, roughly, for the setup: "about 4¢ a song".
         public let costs: [String: String]
-        public let make: @Sendable (_ model: String, _ key: String) -> LinerNotesService
+        public let make: @Sendable (_ model: String, _ key: String) -> BackstoryService
 
         public init(name: String, models: [String], costs: [String: String] = [:],
-                    make: @escaping @Sendable (_ model: String, _ key: String) -> LinerNotesService) {
+                    make: @escaping @Sendable (_ model: String, _ key: String) -> BackstoryService) {
             self.name = name
             self.models = models
             self.costs = costs
@@ -33,9 +33,9 @@ public final class LinerNotesPak: Pak, ConfigurablePak {
         case everyTrack = "Every track", whenAsked = "When I ask", off = "Off"
     }
 
-    static let pakID = "liner-notes"
-    public let id = LinerNotesPak.pakID
-    public let name = "Liner Notes"
+    static let pakID = "backstory"
+    public let id = BackstoryPak.pakID
+    public let name = "Backstory"
     public let schemes: Set<String> = []
     public let isAvailable = true
     public var isMusicSource: Bool { false }
@@ -50,7 +50,7 @@ public final class LinerNotesPak: Pak, ConfigurablePak {
     }
 
     init(providers: [Provider], store: PakSettingsStore) {
-        precondition(!providers.isEmpty, "Liner Notes needs a service")
+        precondition(!providers.isEmpty, "Backstory needs a service")
         self.providers = providers
         self.store = store
     }
@@ -121,7 +121,7 @@ public final class LinerNotesPak: Pak, ConfigurablePak {
     }
 
     /// The service to ask, or nil until there's a key for it.
-    func service() -> LinerNotesService? {
+    func service() -> BackstoryService? {
         let provider = self.provider
         guard let key = key(for: provider) else { return nil }
         return provider.make(model(of: provider), key)

@@ -3,7 +3,7 @@ import Foundation
 
 /// Liner notes from Claude, with web search so they rest on real pages and say which.
 /// Plain HTTPS to the Messages API, streamed, with the user's own key.
-public struct ClaudeLinerNotes: LinerNotesService {
+public struct ClaudeBackstory: BackstoryService {
     public enum Model: String, CaseIterable, Sendable {
         /// The default: accurate and about 4¢ a song in the spike.
         case sonnet = "claude-sonnet-5-5"
@@ -75,7 +75,7 @@ public struct ClaudeLinerNotes: LinerNotesService {
         return request
     }
 
-    public func notes(for track: PakNowPlaying) -> AsyncThrowingStream<LinerNotesUpdate, Error> {
+    public func notes(for track: PakNowPlaying) -> AsyncThrowingStream<BackstoryUpdate, Error> {
         let request = request(for: track)
         let session = session
         return AsyncThrowingStream { continuation in
@@ -96,12 +96,12 @@ public struct ClaudeLinerNotes: LinerNotesService {
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.finish(throwing: CancellationError())
-                } catch let error as LinerNotesError {
+                } catch let error as BackstoryError {
                     continuation.finish(throwing: error)
                 } catch let error as URLError where error.code == .cancelled {
                     continuation.finish(throwing: CancellationError())
                 } catch {
-                    continuation.finish(throwing: LinerNotesError.failed("Couldn't reach Claude: \(error.localizedDescription)"))
+                    continuation.finish(throwing: BackstoryError.failed("Couldn't reach Claude: \(error.localizedDescription)"))
                 }
             }
             continuation.onTermination = { _ in task.cancel() }
@@ -109,7 +109,7 @@ public struct ClaudeLinerNotes: LinerNotesService {
     }
 
     /// What an unsuccessful reply means.
-    static func error(status: Int, body: Data) -> LinerNotesError {
+    static func error(status: Int, body: Data) -> BackstoryError {
         let error = (try? JSONSerialization.jsonObject(with: body) as? [String: Any])?["error"] as? [String: Any]
         let message = error?["message"] as? String
         switch (status, error?["type"] as? String) {
@@ -131,11 +131,11 @@ public struct ClaudeLinerNotes: LinerNotesService {
 /// block's citations once it ends.
 struct ClaudeStream {
     /// The citations of each text block still open, by its index.
-    private var citations: [Int: [LinerNotesSource]] = [:]
+    private var citations: [Int: [BackstorySource]] = [:]
     private var stopReason: String?
     private var wroteText = false
 
-    mutating func feed(_ line: String) throws -> [LinerNotesUpdate] {
+    mutating func feed(_ line: String) throws -> [BackstoryUpdate] {
         guard line.hasPrefix("data:"),
               let event = try? JSONSerialization.jsonObject(with: Data(line.dropFirst(5).utf8)) as? [String: Any]
         else { return [] }
@@ -160,7 +160,7 @@ struct ClaudeStream {
             }
         case "content_block_stop":
             guard let sources = citations.removeValue(forKey: index), !sources.isEmpty else { return [] }
-            var unique: [LinerNotesSource] = []
+            var unique: [BackstorySource] = []
             for source in sources where !unique.contains(where: { $0.url == source.url }) { unique.append(source) }
             return [.cite(unique)]
         case "message_delta":
@@ -169,7 +169,7 @@ struct ClaudeStream {
         case "error":
             let error = event["error"] as? [String: Any]
             let body = (try? JSONSerialization.data(withJSONObject: ["error": error ?? [:]])) ?? Data()
-            throw ClaudeLinerNotes.error(status: 0, body: body)
+            throw ClaudeBackstory.error(status: 0, body: body)
         default:
             return []
         }
@@ -179,21 +179,21 @@ struct ClaudeStream {
     /// notes stop with what's come, which is something unless nothing was written yet.
     func finish() throws {
         switch stopReason {
-        case "refusal": throw LinerNotesError.declined
-        case "pause_turn" where !wroteText: throw LinerNotesError.unavailable("The search took too long. Try again.")
+        case "refusal": throw BackstoryError.declined
+        case "pause_turn" where !wroteText: throw BackstoryError.unavailable("The search took too long. Try again.")
         default: break
         }
     }
 
-    private mutating func text(_ text: String?) -> [LinerNotesUpdate] {
+    private mutating func text(_ text: String?) -> [BackstoryUpdate] {
         guard let text, !text.isEmpty else { return [] }
         wroteText = true
         return [.text(text)]
     }
 
-    static func source(_ citation: [String: Any]) -> LinerNotesSource? {
+    static func source(_ citation: [String: Any]) -> BackstorySource? {
         guard let address = citation["url"] as? String, let url = URL(string: address) else { return nil }
         let title = (citation["title"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? url.host ?? address
-        return LinerNotesSource(title: title, url: url, quote: citation["cited_text"] as? String)
+        return BackstorySource(title: title, url: url, quote: citation["cited_text"] as? String)
     }
 }
