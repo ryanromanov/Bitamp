@@ -100,6 +100,8 @@ public struct ClaudeBackstory: BackstoryService {
                     continuation.finish(throwing: error)
                 } catch let error as URLError where error.code == .cancelled {
                     continuation.finish(throwing: CancellationError())
+                } catch let error as URLError where Self.offlineCodes.contains(error.code) {
+                    continuation.finish(throwing: BackstoryError.offline("Couldn't reach Claude: \(error.localizedDescription)"))
                 } catch {
                     continuation.finish(throwing: BackstoryError.failed("Couldn't reach Claude: \(error.localizedDescription)"))
                 }
@@ -107,6 +109,12 @@ public struct ClaudeBackstory: BackstoryService {
             continuation.onTermination = { _ in task.cancel() }
         }
     }
+
+    /// Failures that mean the network, not Claude.
+    static let offlineCodes: Set<URLError.Code> = [
+        .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .cannotConnectToHost,
+        .dnsLookupFailed, .timedOut, .internationalRoamingOff, .dataNotAllowed,
+    ]
 
     /// What an unsuccessful reply means.
     static func error(status: Int, body: Data) -> BackstoryError {

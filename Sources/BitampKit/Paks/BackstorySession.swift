@@ -8,6 +8,10 @@ import ImageIO
 struct BackstoryNotes: Codable, Equatable {
     var text = ""
     var sources: [BackstorySource] = []
+    /// From Apple's on-device model (nil means a cloud service), which the window marks.
+    var onDevice: Bool?
+
+    var isOnDevice: Bool { onDevice == true }
 
     mutating func apply(_ update: BackstoryUpdate) {
         switch update {
@@ -189,7 +193,7 @@ final class BackstorySession {
     /// Looks the song up now, even if it was before ("Ask again").
     func lookUp() {
         guard let track else { return }
-        guard let service = pak.service() else {
+        guard let choice = pak.choice() else {
             phase = .needsSetup
             onChange?()
             return
@@ -199,32 +203,58 @@ final class BackstorySession {
             early?.task?.cancel()
             early = nil
         }
-        let identity = pak.identity
         notes = BackstoryNotes()
         phase = .looking
         onChange?()
         task = Task { [weak self] in
+            guard let self else { return }
             do {
-                for try await update in service.notes(for: track) {
-                    guard let self, !Task.isCancelled else { return }
-                    self.notes.apply(update)
+                let (notes, identity) = try await self.fetch(track, choice) { notes in
+                    self.notes = notes
                     self.onChange?()
                 }
-                guard let self, !Task.isCancelled else { return }
-                if self.notes.isEmpty {
+                guard !Task.isCancelled else { return }
+                if notes.isEmpty {
                     self.phase = .failed("No notes came back. Try again.", badKey: false)
                 } else {
                     self.phase = .done
-                    self.cache.save(self.notes, for: track, identity: identity)
+                    self.cache.save(notes, for: track, identity: identity)
                 }
             } catch is CancellationError {
                 return
             } catch {
-                guard let self, !Task.isCancelled else { return }
+                guard !Task.isCancelled else { return }
                 self.phase = .failed(error.localizedDescription, badKey: error as? BackstoryError == .badKey)
             }
-            self?.onChange?()
+            self.onChange?()
         }
+    }
+
+    /// Notes for `track` from `choice`, or from the on-device model if the cloud service
+    /// can't be reached; `progress` sees them as they come. Returns them with the name
+    /// they're saved under.
+    private func fetch(_ track: PakNowPlaying, _ choice: BackstoryPak.Choice,
+                       progress: (BackstoryNotes) -> Void) async throws -> (BackstoryNotes, String) {
+        do {
+            return (try await stream(track, choice, progress: progress), choice.identity)
+        } catch BackstoryError.offline(let message) where !choice.onDevice {
+            guard let fallback = pak.onDeviceChoice() else { throw BackstoryError.offline(message) }
+            return (try await stream(track, fallback, progress: progress), fallback.identity)
+        }
+    }
+
+    private func stream(_ track: PakNowPlaying, _ choice: BackstoryPak.Choice,
+                        progress: (BackstoryNotes) -> Void) async throws -> BackstoryNotes {
+        var notes = BackstoryNotes()
+        notes.onDevice = choice.onDevice ? true : nil
+        progress(notes)
+        for try await update in choice.service.notes(for: track) {
+            try Task.checkCancellation()
+            notes.apply(update)
+            progress(notes)
+        }
+        try Task.checkCancellation()
+        return notes
     }
 
     /// Settings changed: shows what fits them, unless notes are on their way or shown.
@@ -239,41 +269,43 @@ final class BackstorySession {
     /// Looks `url` up before it plays and saves the notes. If it starts playing first, the
     /// window shows them as they arrive; if something else plays, the lookup stops.
     private func lookUpEarly(_ url: URL) {
-        guard let service = pak.service() else { return }
+        guard let choice = pak.choice() else { return }
         early?.task?.cancel()
         early = Early(url: url)
-        let identity = pak.identity
         early?.task = Task { [weak self] in
             guard let self else { return }
             let (track, _) = await self.describe(url)
             guard self.early?.url == url, !Task.isCancelled else { return }
-            guard let track, self.cache.notes(for: track, identity: identity) == nil else {
+            guard let track, self.cache.notes(for: track, identity: choice.identity) == nil else {
                 self.early?.finished = true
                 return
             }
-            var failure: Error?
+            var result: Result<(BackstoryNotes, String), Error>
             do {
-                for try await update in service.notes(for: track) {
-                    guard self.early?.url == url, !Task.isCancelled else { return }
-                    self.early?.notes.apply(update)
+                result = .success(try await self.fetch(track, choice) { notes in
+                    guard self.early?.url == url else { return }
+                    self.early?.notes = notes
                     self.showEarly(url)
-                }
+                })
             } catch is CancellationError {
                 return
             } catch {
-                failure = error
+                result = .failure(error)
             }
             guard var early = self.early, early.url == url, !Task.isCancelled else { return }
             early.finished = true
-            self.early = early
-            if failure == nil, !early.notes.isEmpty {
-                self.cache.save(early.notes, for: track, identity: identity)
+            if case .success(let (notes, identity)) = result {
+                early.notes = notes
+                if !notes.isEmpty { self.cache.save(notes, for: track, identity: identity) }
             }
+            self.early = early
             guard self.trackURL == url, self.phase == .looking else { return }
-            if let failure {
+            switch result {
+            case .failure(let failure):
                 self.phase = .failed(failure.localizedDescription, badKey: failure as? BackstoryError == .badKey)
-            } else {
-                self.phase = early.notes.isEmpty ? .failed("No notes came back. Try again.", badKey: false) : .done
+            case .success(let (notes, _)):
+                self.notes = notes
+                self.phase = notes.isEmpty ? .failed("No notes came back. Try again.", badKey: false) : .done
             }
             self.onChange?()
         }
@@ -318,7 +350,7 @@ final class BackstorySession {
             phase = trackURL == nil ? .idle : .untagged
             return
         }
-        if let saved = cache.notes(for: track, identity: pak.identity) {
+        if let saved = cache.notes(for: track, identity: pak.choice()?.identity ?? pak.identity) {
             notes = saved
             phase = .done
             return
@@ -332,7 +364,7 @@ final class BackstorySession {
         notes = BackstoryNotes()
         switch pak.lookup {
         case .off: phase = .off
-        case _ where pak.service() == nil: phase = .needsSetup
+        case _ where pak.choice() == nil: phase = .needsSetup
         case .everyTrack: phase = .waiting
         case .whenAsked: phase = .ready
         }
