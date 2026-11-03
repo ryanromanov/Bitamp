@@ -25,6 +25,7 @@ Bitamp isn't affiliated with or endorsed by Winamp or Nullsoft. Its default skin
 - Spectrum and oscilloscope visualizer, shuffle and repeat, `.m3u` playlists
 - Retro Sound (Playback ▸ Retro Sound, or T): an 8-bit crush that plays the song as 8-bit samples, or an experimental chiptune cover that transcribes the song, follows the sung melody for the lead, and plays it on pulse, triangle and noise voices, with some of the original mixed in if you like
 - [Expansion Paks](#expansion-paks): other music sources in Bitamp's playlist, browsed in a skinned Media Library with album art. Apple Music comes built in, and anyone can write more
+- [Backstory](#backstory): short notes about the song that's playing, with their sources, from Claude or OpenAI with your own key, or from Apple's on-device model
 
 ## Expansion Paks
 
@@ -47,6 +48,19 @@ To install a Pak, double-click its `.bitpak`, drop it on Bitamp, or use File ▸
 **Try the demo Pak.** It plays a few public-domain tunes (Ode to Joy, Für Elise, Greensleeves…) as chiptunes, made on your Mac, with a choice of waveform. Build it with `scripts/make-pak.sh` and double-click the `Demo.bitpak` it makes.
 
 **Write your own.** A Pak is a folder with a small manifest and a program that answers a few questions in JSON: search, describe a track, and say where its audio is. Its songs show in the Media Library's search. Write it in Swift with the `BitampPakSDK` library in this package, or in any language. [Writing an Expansion Pak](docs/PAK-SDK.md) has everything, including a complete Pak in a few dozen lines of Python, and `Bitamp --check-pak` tries a Pak and tells you what to fix.
+
+## Backstory
+
+<p align="center">
+  <img src="docs/images/backstory.png" width="307" alt="The Backstory window docked under the main window: an invented song's cover and title, two short paragraphs about it with [1] and [2] marks, the two sources below, and LOOK UP AUTO, ASK and OFF along the bottom">
+</p>
+
+Backstory is an Expansion Pak that comes plugged in. Instead of music, it tells you about the song that's playing: how it was made, who played on it, samples and covers, with numbered sources you can click (Window ▸ Backstory, ⌥B, or its cartridge). It looks songs up on the web through **Claude** (Sonnet by default, about 4¢ a song, or Opus for richer notes) or **OpenAI** (GPT-5 mini, about 2¢, or GPT-5.5), with your own API key, kept in your Keychain. Without a key, or offline, it uses **Apple's on-device model** (macOS 26 or later, with Apple Intelligence): free and private, but with no web search it knows less, so Backstory marks those notes and lists no sources.
+
+- **When:** along the bottom, choose AUTO to look up each song after it has played two seconds, ASK to look up only when you press the button, or OFF. Songs you skip within two seconds are never sent.
+- **What's sent:** only the song's title, artist and album, never the audio or a file's name, and only while the Backstory window is open. Nothing goes to Bitamp.
+- **Saved notes:** a song you've looked up keeps its notes, so playing it again is free and instant.
+- **EARLY:** in the setup (click the service under the title), this looks up the next song shortly before it starts, so its notes are ready. A song you then skip still costs.
 
 ## Download
 

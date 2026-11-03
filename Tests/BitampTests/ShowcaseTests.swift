@@ -322,3 +322,37 @@ private final class ShowcasePak: Pak {
     func metadata(for url: URL) async -> PakTrack? { nil }
     func playback(for url: URL) throws -> PakPlayback { throw CocoaError(.featureUnsupported) }
 }
+
+extension ShowcaseTests {
+    /// Backstory for the README: notes about the song the main window is playing, docked
+    /// under it, all invented.
+    @Test func backstory() async throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let service = CannedBackstory()
+        service.updates = [
+            .text("Dial-Up Sunrise opens Low Tide FM, the second album by The Low Bits. The band cut it in eight days in a rented beach house"),
+            .cite([BackstorySource(title: "The Low Bits: a history", url: URL(string: "https://lowbits.example/history")!)]),
+            .text(", and the squeal in the intro is a real modem handshake from the drummer's old PC.\n\nIt was their first song on college radio"),
+            .cite([BackstorySource(title: "Low Tide FM at ten", url: URL(string: "https://chipzine.example/low-tide-fm")!)]),
+            .text(", and Mira Vance covered it on Cassette Hearts."),
+        ]
+        let store = BackstoryMemorySettings(defaults: UserDefaults(suiteName: "BitampShowcase-\(UUID().uuidString)")!)
+        let pak = BackstoryPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5", "Opus 5.5"]) { _, _ in service }], store: store)
+        pak.save(["claude-key": "showcase", "lookup": BackstoryPak.Lookup.everyTrack.rawValue])
+        let session = BackstorySession(pak: pak, cache: BackstoryCache(folder: nil))
+        let playing = Self.playlist[Self.playing]
+        session.current = { (URL(string: "showcase://track/1"), true) }
+        session.describe = { _ in
+            (PakNowPlaying(title: playing.title, artist: playing.artist, album: "Low Tide FM"), showcaseCover(9, size: 96))
+        }
+        let view = BackstoryView(session: session, paks: PakRegistry([pak]), skin: DefaultSkin(), scale: 1)
+        session.update(active: true)
+        for _ in 0..<50 { await Task.yield() }
+        session.lookUp()
+        for _ in 0..<50 { await Task.yield() }
+
+        let main = try stack(DefaultSkin(), playlistRows: 0)[0]
+        try compose([main, Placed(image: try image(view), size: view.pixelSize, origin: CGPoint(x: 0, y: main.size.height))], factor: 2)
+            .write(to: folder.appendingPathComponent("backstory.png"))
+    }
+}
