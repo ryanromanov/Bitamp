@@ -18,10 +18,16 @@ MainActor.assumeIsolated {
     ) { model, key in
         ClaudeBackstory(key: key, model: model == "Opus 5.5" ? .opus : .sonnet)
     }
+    let openAI = BackstoryPak.Provider(
+        name: "OpenAI", models: ["GPT-5 mini", "GPT-5.5"],
+        costs: ["GPT-5 mini": "About 2 cents a song", "GPT-5.5": "Richer notes, about 7 cents a song"]
+    ) { model, key in
+        OpenAIBackstory(key: key, model: model == "GPT-5.5" ? .full : .mini)
+    }
     // Apple's on-device model, offered where macOS has it, and marked wherever it's used.
     let onDevice = AppleOnDevice.isSupported
         ? BackstoryPak.OnDevice(isAvailable: { AppleOnDevice.isAvailable }, make: { AppleOnDevice.service() }) : nil
-    let delegate = AppDelegate(paks: [AppleMusicPak()], backstory: [claude], backstoryOnDevice: onDevice)
+    let delegate = AppDelegate(paks: [AppleMusicPak()], backstory: [claude, openAI], backstoryOnDevice: onDevice)
     NSApplication.shared.delegate = delegate
     NSApplication.shared.setActivationPolicy(.regular)
     NSApplication.shared.run()
