@@ -16,7 +16,10 @@ struct BackstoryNotes: Codable, Equatable {
     mutating func apply(_ update: BackstoryUpdate) {
         switch update {
         case .text(let words):
-            text += Self.plain(words)
+            let words = Self.plain(words)
+            // No spaces left at the end of a line, such as one before a citation's mark.
+            if words.first == "\n" { while text.last == " " { text.removeLast() } }
+            text += words
         case .cite(let cited):
             var numbers: [Int] = []
             for source in cited {
@@ -40,7 +43,7 @@ struct BackstoryNotes: Codable, Equatable {
     static func plain(_ text: String) -> String {
         var text = text
         for (fancy, plain) in [("\u{2018}", "'"), ("\u{2019}", "'"), ("\u{201C}", "\""), ("\u{201D}", "\""),
-                               ("\u{2014}", " - "), ("\u{2013}", "-"), ("\u{2026}", "..."), ("\u{00A0}", " "),
+                               (" \u{2014} ", " - "), ("\u{2014}", " - "), ("\u{2010}", "-"), ("\u{2011}", "-"), ("\u{202F}", " "), ("\u{2013}", "-"), ("\u{2026}", "..."), ("\u{00A0}", " "),
                                ("*", ""), ("#", ""), ("`", "")] {
             text = text.replacingOccurrences(of: fancy, with: plain)
         }

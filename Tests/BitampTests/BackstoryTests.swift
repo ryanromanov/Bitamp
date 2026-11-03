@@ -143,12 +143,84 @@ data: {"type":"message_stop"}
 
     @Test func punctuationIsMadePlain() {
         #expect(BackstoryNotes.plain("It\u{2019}s *Low Tide FM*\u{2014}\u{201C}great\u{201D}\u{2026}") == "It's Low Tide FM - \"great\"...")
+        #expect(BackstoryNotes.plain("co\u{2011}writer \u{2014} and more") == "co-writer - and more")
     }
 
     @Test func aMarkStaysWithItsWord() {
         let line = "abcdefghij abcdefghij"
         let width = ListFont.width(of: line)
         #expect(BackstoryView.wrap(line + " [1]", width: width) == ["abcdefghij", "abcdefghij [1]"])
+    }
+}
+
+@Suite struct OpenAIBackstoryTests {
+    /// Events shaped like a real stream: the citation's link arrives split across pieces,
+    /// with its annotation after it.
+    static func event(_ json: String) -> String { "data: " + json }
+
+    func read(_ lines: [String]) throws -> [BackstoryUpdate] {
+        var stream = OpenAIStream()
+        var updates: [BackstoryUpdate] = []
+        for line in lines { updates += try stream.feed(line) }
+        return updates + (try stream.finish())
+    }
+
+    func delta(_ text: String) -> String {
+        let data = try! JSONSerialization.data(withJSONObject: ["type": "response.output_text.delta", "delta": text])
+        return "data: " + String(decoding: data, as: UTF8.self)
+    }
+
+    @Test func linksBecomeCitations() throws {
+        let updates = try read([
+            Self.event(#"{"type":"response.web_search_call.searching"}"#),
+            delta("The band cut it in eight days. "),
+            delta("([lowbits.example](https://lowbits.example/history?utm_source=openai)"),
+            delta(")\n\nIt was their"),
+            Self.event(#"{"type":"response.output_text.annotation.added","annotation":{"type":"url_citation","start_index":31,"end_index":90,"title":"The Low Bits: a history","url":"https://lowbits.example/history?utm_source=openai"}}"#),
+            delta(" first single."),
+            Self.event(#"{"type":"response.completed","response":{"status":"completed"}}"#),
+        ])
+        var notes = BackstoryNotes()
+        updates.forEach { notes.apply($0) }
+        #expect(notes.text == "The band cut it in eight days. [1]\n\nIt was their first single.")
+        #expect(notes.sources == [BackstorySource(title: "The Low Bits: a history", url: URL(string: "https://lowbits.example/history")!)])
+    }
+
+    @Test func aLinkThatIsNeverNamedKeepsItsLabel() throws {
+        let updates = try read([delta("Fact one [chipzine.example](https://chipzine.example/a). Next.")])
+        var notes = BackstoryNotes()
+        updates.forEach { notes.apply($0) }
+        #expect(notes.text == "Fact one [1]. Next.")
+        #expect(notes.sources.map(\.title) == ["chipzine.example"])
+    }
+
+    @Test func bracketsThatArentLinksStay() {
+        #expect(OpenAIStream.link(at: "[sic] and more") == .none)
+        #expect(OpenAIStream.link(at: "(1998) was") == .none)
+        #expect(OpenAIStream.link(at: "([site](htt") == .incomplete)
+        #expect(OpenAIStream.link(at: "([site](https://a.example/b)") == .incomplete)
+        #expect(OpenAIStream.link(at: "[site](https://a.example/b) x")
+                == .link(length: 27, label: "site", url: URL(string: "https://a.example/b")!))
+    }
+
+    @Test func failuresSayWhatToDo() throws {
+        #expect(OpenAIBackstory.error(status: 401, body: Data()) == .badKey)
+        #expect(OpenAIBackstory.error(status: 429, body: Data(#"{"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}"#.utf8))
+                == .limited("The OpenAI account is out of credit."))
+        #expect(throws: BackstoryError.declined) {
+            try read([Self.event(#"{"type":"response.incomplete","response":{"incomplete_details":{"reason":"content_filter"}}}"#)])
+        }
+    }
+
+    @Test func asksBrieflyAndForCitations() throws {
+        let body = OpenAIBackstory.body(for: song, model: .mini)
+        #expect(body["model"] as? String == "gpt-5-mini")
+        #expect((body["reasoning"] as? [String: String])?["effort"] == "low")
+        #expect(body["max_tool_calls"] as? Int == 2)
+        #expect((body["instructions"] as? String)?.hasSuffix("Cite the web pages each fact comes from.") == true)
+        let tool = try #require((body["tools"] as? [[String: Any]])?.first)
+        #expect(tool["search_context_size"] as? String == "low")
+        #expect(OpenAIBackstory(key: "test-key").request(for: song).value(forHTTPHeaderField: "authorization") == "Bearer test-key")
     }
 }
 
@@ -541,7 +613,8 @@ extension SnapshotTests {
             for state in ["setup", "ready", "notes", "on-device", "on-device-setup", "on-device-claude-setup"] {
                 let store = BackstoryMemorySettings(defaults: UserDefaults(suiteName: "BitampBackstorySnap-\(UUID().uuidString)")!)
                 let pak = BackstoryPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5", "Opus 5.5"],
-                                                          costs: ["Sonnet 5.5": "About 4 cents a song"]) { _, _ in service }],
+                                                          costs: ["Sonnet 5.5": "About 4 cents a song"]) { _, _ in service },
+                                                   .init(name: "OpenAI", models: ["GPT-5 mini", "GPT-5.5"]) { _, _ in service }],
                                         onDevice: state.hasPrefix("on-device") ? .init(isAvailable: { true }, make: { onDevice }) : nil,
                                         store: store)
                 if !state.hasSuffix("setup") && !state.hasPrefix("on-device") { pak.save(["claude-key": "test-key"]) }
