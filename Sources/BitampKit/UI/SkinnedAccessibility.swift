@@ -27,23 +27,39 @@ struct AccessibleControl {
     var press: (() -> Void)?
     var increment: (() -> Void)?
     var decrement: (() -> Void)?
+    /// Sets a slider to a value from 0 to 1, as VoiceOver may.
+    var setValue: ((Double) -> Void)?
+
+    /// Which element class shows it; a control whose kind changes gets a new element.
+    var elementClass: SkinnedAccessibilityElement.Type {
+        switch kind {
+        case .button: SkinnedButtonElement.self
+        case .checkBox: SkinnedCheckBoxElement.self
+        case .slider: SkinnedSliderElement.self
+        case .text: SkinnedTextElement.self
+        case .link: SkinnedLinkElement.self
+        }
+    }
 }
 
 /// One of a skinned window's controls, for VoiceOver. It asks its window for what's current
 /// each time, so labels and values stay live and its outline follows the window.
+///
+/// There's a subclass for each kind. The slider's adopts `NSAccessibilitySlider`, which is
+/// how AppKit learns VoiceOver can step it.
 @MainActor
-final class SkinnedAccessibilityElement: NSAccessibilityElement {
+class SkinnedAccessibilityElement: NSAccessibilityElement {
     weak var owner: SkinnedView?
     let id: AnyHashable
 
-    init(owner: SkinnedView, id: AnyHashable) {
+    required init(owner: SkinnedView, id: AnyHashable) {
         self.owner = owner
         self.id = id
         super.init()
         setAccessibilityParent(owner)
     }
 
-    private var control: AccessibleControl? { owner?.accessibleControl(id) }
+    var control: AccessibleControl? { owner?.accessibleControl(id) }
 
     override func isAccessibilityElement() -> Bool { true }
 
@@ -96,12 +112,39 @@ final class SkinnedAccessibilityElement: NSAccessibilityElement {
         step(control?.decrement)
     }
 
-    private func step(_ action: (() -> Void)?) -> Bool {
+    override func setAccessibilityValue(_ value: Any?) {
+        guard let control, control.isEnabled, let setValue = control.setValue,
+              let number = (value as? NSNumber)?.doubleValue ?? (value as? String).flatMap(Double.init) else { return }
+        setValue(min(max(number, 0), 1))
+        changed()
+    }
+
+    fileprivate func step(_ action: (() -> Void)?) -> Bool {
         guard let control, control.isEnabled, let action else { return false }
         action()
+        changed()
+        return true
+    }
+
+    private func changed() {
         NSAccessibility.post(element: self, notification: .valueChanged)
         owner?.needsDisplay = true
-        return true
+    }
+}
+
+final class SkinnedButtonElement: SkinnedAccessibilityElement {}
+final class SkinnedCheckBoxElement: SkinnedAccessibilityElement {}
+final class SkinnedTextElement: SkinnedAccessibilityElement {
+    override func accessibilityValue() -> Any? { control?.label }
+}
+final class SkinnedLinkElement: SkinnedAccessibilityElement {}
+
+/// Adopting `NSAccessibilitySlider` is what makes VoiceOver offer its steps.
+final class SkinnedSliderElement: SkinnedAccessibilityElement, @preconcurrency NSAccessibilitySlider {
+    override func accessibilityIdentifier() -> String { "\(id)" }
+
+    override func isAccessibilitySelectorAllowed(_ selector: Selector) -> Bool {
+        selector == #selector(setAccessibilityValue(_:)) ? control?.setValue != nil : super.isAccessibilitySelectorAllowed(selector)
     }
 }
 

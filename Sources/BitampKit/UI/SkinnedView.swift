@@ -196,10 +196,15 @@ class SkinnedView: NSView {
     override func accessibilityChildren() -> [Any]? {
         let controls = accessibleControls()
         let ids = controls.map(\.id)
-        if ids != accessibilityOrder {
+        // A control that became another kind needs another element.
+        let retyped = controls.filter { control in
+            accessibilityElements[control.id].map { type(of: $0) != control.elementClass } ?? false
+        }
+        if ids != accessibilityOrder || !retyped.isEmpty {
             accessibilityElements = accessibilityElements.filter { ids.contains($0.key) }
-            for id in ids where accessibilityElements[id] == nil {
-                accessibilityElements[id] = SkinnedAccessibilityElement(owner: self, id: id)
+            for control in retyped { accessibilityElements[control.id] = nil }
+            for control in controls where accessibilityElements[control.id] == nil {
+                accessibilityElements[control.id] = control.elementClass.init(owner: self, id: control.id)
             }
             let changed = !accessibilityOrder.isEmpty
             accessibilityOrder = ids

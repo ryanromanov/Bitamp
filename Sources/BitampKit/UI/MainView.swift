@@ -490,12 +490,12 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     override func accessibleControls() -> [AccessibleControl] {
         var controls: [AccessibleControl] = []
         func add(_ control: Control, _ kind: AccessibleControl.Kind, _ label: String, help: String? = nil,
-                 enabled: Bool = true, press: (() -> Void)? = nil, step: ((Double) -> Void)? = nil) {
+                 enabled: Bool = true, press: (() -> Void)? = nil, step: ((Double) -> Void)? = nil, set: ((Double) -> Void)? = nil) {
             guard let rect = accessibilityRect(control) else { return }
             controls.append(AccessibleControl(
                 id: control, kind: kind, label: label, rect: rect, help: help, isEnabled: enabled,
                 press: press ?? { [weak self] in self?.perform(control) },
-                increment: step.map { step in { step(1) } }, decrement: step.map { step in { step(-1) } }))
+                increment: step.map { step in { step(1) } }, decrement: step.map { step in { step(-1) } }, setValue: set))
         }
 
         let titles: [(TitleButton, String)] = [
@@ -543,14 +543,20 @@ final class MainView: SkinnedView, NSMenuItemValidation {
             step: { [weak self] direction in
                 guard let self, self.canSeek else { return }
                 self.player.seek(to: min(max(self.player.currentTime + direction * 5, 0), duration))
+            },
+            set: { [weak self] value in
+                guard let self, self.canSeek else { return }
+                self.player.seek(to: value * duration)
             })
         let volumeLimit = controller.limitation(.volume)
         add(.volume, .slider(controller.volume, description: controller.volumeDescription),
             "Volume", help: volumeLimit, enabled: volumeLimit == nil, press: {},
-            step: { [weak self] direction in self?.controller.stepVolume(direction) })
+            step: { [weak self] direction in self?.controller.stepVolume(direction) },
+            set: { [weak self] value in self?.controller.volume = value })
         add(.balance, .slider(BalanceMapping.slider(fromBalance: controller.balance), description: controller.balanceDescription),
             "Balance", help: volumeLimit, enabled: volumeLimit == nil, press: {},
-            step: { [weak self] direction in self?.controller.stepBalance(direction) })
+            step: { [weak self] direction in self?.controller.stepBalance(direction) },
+            set: { [weak self] value in self?.controller.balance = BalanceMapping.balance(fromSlider: value) })
 
         let toggles: [(ToggleButton, String)] = [(.shuffle, "Shuffle"), (.repeatTrack, "Repeat"), (.equalizer, "Equalizer"), (.playlist, "Playlist")]
         for (button, label) in toggles { add(.toggle(button), .checkBox(isOn(button)), label) }
