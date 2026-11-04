@@ -60,6 +60,65 @@ final class EqualizerView: SkinnedView {
         set { controller.equalizer = newValue }
     }
 
+    // MARK: - Accessibility
+
+    override var accessibilityName: String { "Equalizer" }
+
+    override func accessibleControls() -> [AccessibleControl] {
+        let window = AccessibleControl(id: EQLayout.Control.shade, kind: .button, label: isShaded ? "Unshade" : "Shade",
+                                       rect: ShadeLayout.eqShadeButton,
+                                       press: { [weak self] in self?.windowGroup?.toggleShade(.equalizer) })
+        let close = AccessibleControl(id: EQLayout.Control.close, kind: .button, label: "Close", rect: EQLayout.close,
+                                      press: { [weak self] in self?.windowGroup?.setVisible(.equalizer, false) })
+        if isShaded {
+            let limit = controller.limitation(.volume)
+            return [window, close,
+                    AccessibleControl(id: "volume", kind: .slider(controller.volume, description: controller.volumeDescription),
+                                      label: "Volume", rect: ShadeLayout.eqVolume, help: limit, isEnabled: limit == nil,
+                                      increment: { [weak self] in self?.controller.stepVolume(1) },
+                                      decrement: { [weak self] in self?.controller.stepVolume(-1) }),
+                    AccessibleControl(id: "balance", kind: .slider(BalanceMapping.slider(fromBalance: controller.balance),
+                                                                     description: controller.balanceDescription),
+                                      label: "Balance", rect: ShadeLayout.eqBalance, help: limit, isEnabled: limit == nil,
+                                      increment: { [weak self] in self?.controller.stepBalance(1) },
+                                      decrement: { [weak self] in self?.controller.stepBalance(-1) })]
+        }
+        let limit = controller.limitation(.equalizer)
+        var controls = [window, close]
+        controls.append(AccessibleControl(id: EQLayout.Control.button(.on), kind: .checkBox(settings.enabled), label: "Equalizer on",
+                                          rect: EQLayout.button(.on), help: limit, isEnabled: limit == nil,
+                                          press: { [weak self] in
+                                              self?.settings.enabled.toggle()
+                                              self?.needsDisplay = true
+                                          }))
+        controls.append(AccessibleControl(id: EQLayout.Control.button(.auto), kind: .button, label: "Auto",
+                                          rect: EQLayout.button(.auto), help: "Not available yet.", isEnabled: false))
+        controls.append(AccessibleControl(id: EQLayout.Control.button(.presets), kind: .button, label: "Presets",
+                                          rect: EQLayout.button(.presets), help: limit, isEnabled: limit == nil,
+                                          press: { [weak self] in
+                                              guard let self else { return }
+                                              let rect = self.viewRect(forPixels: EQLayout.button(.presets))
+                                              self.presetsMenu().popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.minY), in: self)
+                                          }))
+        func slider(_ control: EQLayout.Control, _ label: String, _ value: Float, set: @escaping (Float) -> Void) -> AccessibleControl {
+            let range = EqualizerSettings.range
+            return AccessibleControl(
+                id: control, kind: .slider(Double((value - range.lowerBound) / (range.upperBound - range.lowerBound)),
+                                           description: EqualizerLabels.spokenDecibels(value)),
+                label: label, rect: control.rect, help: limit, isEnabled: limit == nil,
+                // A decibel a step, landing on whole ones.
+                increment: { [weak self] in set(min((value + 0.01).rounded(.down) + 1, range.upperBound)); self?.needsDisplay = true },
+                decrement: { [weak self] in set(max((value - 0.01).rounded(.up) - 1, range.lowerBound)); self?.needsDisplay = true })
+        }
+        controls.append(slider(.preamp, "Preamp", settings.preamp) { [weak self] in self?.settings.preamp = $0 })
+        for index in 0..<EqualizerSettings.bandCount {
+            controls.append(slider(.band(index), EqualizerLabels.spokenNames[index], settings.bands[index]) { [weak self] in
+                self?.settings.bands[index] = $0
+            })
+        }
+        return controls
+    }
+
     // MARK: - Drawing
 
     override func render(into c: Canvas) {
