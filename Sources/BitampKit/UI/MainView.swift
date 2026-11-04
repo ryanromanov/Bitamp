@@ -463,6 +463,115 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         player.state != .stopped && (player.nowPlaying?.duration ?? 0) > 0
     }
 
+    // MARK: - Accessibility
+
+    override var accessibilityName: String { "Bitamp" }
+
+    /// Where `control` is drawn now: the classic layout, the Orb's, or the shade strip's.
+    /// Nil where this layout doesn't have it.
+    private func accessibilityRect(_ control: Control) -> CGRect? {
+        if isShaded {
+            switch control {
+            case .title(let button): return button.rect
+            case .transport(let button): return ShadeLayout.mainTransport(button)
+            case .visualizer: return ShadeLayout.mainVisualizer
+            case .timeDisplay: return ShadeLayout.mainTime
+            case .position: return ShadeLayout.mainPosition
+            default: return nil
+            }
+        }
+        if orb != nil {
+            let rect = OrbLayout.rect(of: control)
+            return rect == .zero ? nil : rect
+        }
+        return control.rect
+    }
+
+    override func accessibleControls() -> [AccessibleControl] {
+        var controls: [AccessibleControl] = []
+        func add(_ control: Control, _ kind: AccessibleControl.Kind, _ label: String, help: String? = nil,
+                 enabled: Bool = true, press: (() -> Void)? = nil, step: ((Double) -> Void)? = nil) {
+            guard let rect = accessibilityRect(control) else { return }
+            controls.append(AccessibleControl(
+                id: control, kind: kind, label: label, rect: rect, help: help, isEnabled: enabled,
+                press: press ?? { [weak self] in self?.perform(control) },
+                increment: step.map { step in { step(1) } }, decrement: step.map { step in { step(-1) } }))
+        }
+
+        let titles: [(TitleButton, String)] = [
+            (.options, "Options"), (.minimize, "Minimize"), (.shade, isShaded ? "Unshade" : "Shade"), (.close, "Quit Bitamp"),
+        ]
+        for (button, label) in titles { add(.title(button), .button, label) }
+
+        // The song, in full rather than the marquee's scrolling excerpt.
+        if !isShaded {
+            let rect = orb == nil ? Layout.marquee : OrbLayout.marquee
+            controls.append(AccessibleControl(id: "song", kind: .text, label: titleText, rect: rect))
+        }
+        let remaining = preferences.showRemaining
+        var timeLabel = "Time"
+        if let track = player.nowPlaying {
+            let elapsed = currentTime(of: track)
+            timeLabel = remaining ? "Time remaining, \(TimeFormat.clock(max(track.duration - elapsed, 0)))"
+                : "Time elapsed, \(TimeFormat.clock(elapsed))"
+        }
+        add(.timeDisplay, .button, timeLabel,
+            help: "Switches between the time elapsed and the time remaining.",
+            press: { [weak self] in
+                self?.preferences.showRemaining.toggle()
+                self?.needsDisplay = true
+            })
+        if orb == nil, !isShaded, let track = player.nowPlaying {
+            let parts = [track.kbps.map { "\($0) kbps" }, track.sampleRate.map { "\(Int(($0 / 1000).rounded())) kHz" },
+                         track.channels.map { $0 == 1 ? "mono" : "stereo" }].compactMap { $0 }
+            if !parts.isEmpty {
+                controls.append(AccessibleControl(id: "format", kind: .text, label: parts.joined(separator: ", "),
+                                                  rect: Layout.kbps.union(Layout.stereo)))
+            }
+        }
+
+        let transport: [(TransportButton, String)] = [
+            (.previous, "Previous"), (.play, "Play"), (.pause, "Pause"), (.stop, "Stop"), (.next, "Next"), (.eject, "Open Files"),
+        ]
+        for (button, label) in transport { add(.transport(button), .button, label) }
+
+        let seekable = canSeek
+        let duration = player.nowPlaying?.duration ?? 0
+        add(.position, .slider(seekable ? sliderValue(for: .position) : 0,
+                               description: seekable ? "\(TimeFormat.clock(player.currentTime)) of \(TimeFormat.clock(duration))" : "Nothing playing"),
+            "Position", help: "Seeks through the song, 5 seconds a step.", enabled: seekable, press: {},
+            step: { [weak self] direction in
+                guard let self, self.canSeek else { return }
+                self.player.seek(to: min(max(self.player.currentTime + direction * 5, 0), duration))
+            })
+        let volumeLimit = controller.limitation(.volume)
+        add(.volume, .slider(controller.volume, description: controller.volumeDescription),
+            "Volume", help: volumeLimit, enabled: volumeLimit == nil, press: {},
+            step: { [weak self] direction in self?.controller.stepVolume(direction) })
+        add(.balance, .slider(BalanceMapping.slider(fromBalance: controller.balance), description: controller.balanceDescription),
+            "Balance", help: volumeLimit, enabled: volumeLimit == nil, press: {},
+            step: { [weak self] direction in self?.controller.stepBalance(direction) })
+
+        let toggles: [(ToggleButton, String)] = [(.shuffle, "Shuffle"), (.repeatTrack, "Repeat"), (.equalizer, "Equalizer"), (.playlist, "Playlist")]
+        for (button, label) in toggles { add(.toggle(button), .checkBox(isOn(button)), label) }
+
+        let modeName = ["spectrum": "spectrum", "oscilloscope": "oscilloscope", "off": "off"][preferences.visMode.rawValue] ?? ""
+        add(.visualizer, .button, badgePak == nil ? "Visualizer, \(modeName)" : "Expansion Paks",
+            help: badgePak == nil ? "Switches between spectrum, oscilloscope and off." : "Shows the Expansion Paks window.",
+            press: { [weak self] in
+                guard let self else { return }
+                if self.badgePak != nil {
+                    self.onShowPaks?()
+                } else {
+                    let modes = VisMode.allCases
+                    self.preferences.visMode = modes[(modes.firstIndex(of: self.preferences.visMode)! + 1) % modes.count]
+                }
+                self.needsDisplay = true
+            })
+        if orb == nil, !isShaded { add(.about, .button, "About Bitamp") }
+        return controls
+    }
+
     // MARK: - Mouse
 
     override func pixelMouseDown(at point: CGPoint, event: NSEvent) -> Bool {

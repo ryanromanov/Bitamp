@@ -149,6 +149,7 @@ class SkinnedView: NSView {
         timer?.invalidate()
         timer = nil
         guard window != nil else { return }
+        if !accessibilityName.isEmpty { window?.setAccessibilityTitle(accessibilityName) }
         updateWindowShape()
         let timer = Timer(timeInterval: 1 / Self.framesPerSecond, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.frameTick() }
@@ -170,6 +171,66 @@ class SkinnedView: NSView {
     /// happens returns false while nothing moves, and sets `needsDisplay` when it changes;
     /// clicks, drags and key presses redraw it anyway.
     var redrawsEveryFrame: Bool { true }
+
+    // MARK: - Accessibility
+
+    /// What VoiceOver calls this window, such as "Equalizer".
+    var accessibilityName: String { "" }
+
+    /// The window's controls for VoiceOver, in reading order. Windows override this; it's
+    /// asked often, so it should be quick, and it should follow what's drawn now (shade
+    /// mode, the skin's shape).
+    func accessibleControls() -> [AccessibleControl] { [] }
+
+    private var accessibilityElements: [AnyHashable: SkinnedAccessibilityElement] = [:]
+    private var accessibilityOrder: [AnyHashable] = []
+
+    func accessibleControl(_ id: AnyHashable) -> AccessibleControl? {
+        accessibleControls().first { $0.id == id }
+    }
+
+    /// The view itself isn't one; its controls stand in its place, beside any real subviews
+    /// (a text box's field).
+    override func isAccessibilityElement() -> Bool { false }
+
+    override func accessibilityChildren() -> [Any]? {
+        let controls = accessibleControls()
+        let ids = controls.map(\.id)
+        if ids != accessibilityOrder {
+            accessibilityElements = accessibilityElements.filter { ids.contains($0.key) }
+            for id in ids where accessibilityElements[id] == nil {
+                accessibilityElements[id] = SkinnedAccessibilityElement(owner: self, id: id)
+            }
+            let changed = !accessibilityOrder.isEmpty
+            accessibilityOrder = ids
+            if changed {
+                // After this answer, so VoiceOver asks again.
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    NSAccessibility.post(element: self, notification: .layoutChanged)
+                }
+            }
+        }
+        let fields = subviews.filter { !$0.isHidden && $0.isAccessibilityElement() }
+        return ids.compactMap { accessibilityElements[$0] } + fields
+    }
+
+    override func accessibilityHitTest(_ point: NSPoint) -> Any? {
+        guard let window else { return super.accessibilityHitTest(point) }
+        let inView = convert(window.convertPoint(fromScreen: point), from: nil)
+        let pixel = CGPoint(x: inView.x / scale, y: (bounds.height - inView.y) / scale)
+        if let control = accessibleControls().last(where: { $0.rect.contains(pixel) }) {
+            _ = accessibilityChildren()
+            return accessibilityElements[control.id]
+        }
+        return super.accessibilityHitTest(point)
+    }
+
+    /// Tells VoiceOver a control's value changed by itself, such as a new song.
+    func announceValueChange(_ id: AnyHashable) {
+        guard let element = accessibilityElements[id] else { return }
+        NSAccessibility.post(element: element, notification: .valueChanged)
+    }
 
     // MARK: - Drawing
 
