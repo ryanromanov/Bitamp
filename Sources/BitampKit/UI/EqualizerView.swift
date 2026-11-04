@@ -76,12 +76,14 @@ final class EqualizerView: SkinnedView {
                     AccessibleControl(id: "volume", kind: .slider(controller.volume, description: controller.volumeDescription),
                                       label: "Volume", rect: ShadeLayout.eqVolume, help: limit, isEnabled: limit == nil,
                                       increment: { [weak self] in self?.controller.stepVolume(1) },
-                                      decrement: { [weak self] in self?.controller.stepVolume(-1) }),
+                                      decrement: { [weak self] in self?.controller.stepVolume(-1) },
+                                      setValue: { [weak self] in self?.controller.volume = $0 }),
                     AccessibleControl(id: "balance", kind: .slider(BalanceMapping.slider(fromBalance: controller.balance),
                                                                      description: controller.balanceDescription),
                                       label: "Balance", rect: ShadeLayout.eqBalance, help: limit, isEnabled: limit == nil,
                                       increment: { [weak self] in self?.controller.stepBalance(1) },
-                                      decrement: { [weak self] in self?.controller.stepBalance(-1) })]
+                                      decrement: { [weak self] in self?.controller.stepBalance(-1) },
+                                      setValue: { [weak self] in self?.controller.balance = BalanceMapping.balance(fromSlider: $0) })]
         }
         let limit = controller.limitation(.equalizer)
         var controls = [window, close]
@@ -108,7 +110,11 @@ final class EqualizerView: SkinnedView {
                 label: label, rect: control.rect, help: limit, isEnabled: limit == nil,
                 // A decibel a step, landing on whole ones.
                 increment: { [weak self] in set(min((value + 0.01).rounded(.down) + 1, range.upperBound)); self?.needsDisplay = true },
-                decrement: { [weak self] in set(max((value - 0.01).rounded(.up) - 1, range.lowerBound)); self?.needsDisplay = true })
+                decrement: { [weak self] in set(max((value - 0.01).rounded(.up) - 1, range.lowerBound)); self?.needsDisplay = true },
+                setValue: { [weak self] in
+                    set((range.lowerBound + Float($0) * (range.upperBound - range.lowerBound)).rounded())
+                    self?.needsDisplay = true
+                })
         }
         controls.append(slider(.preamp, "Preamp", settings.preamp) { [weak self] in self?.settings.preamp = $0 })
         for index in 0..<EqualizerSettings.bandCount {

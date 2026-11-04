@@ -57,6 +57,21 @@ import Testing
         #expect(balance.accessibilityValueDescription() == "10% left")
     }
 
+    /// Sliders are sliders to AppKit, so VoiceOver offers their steps, and they take a value.
+    @Test func slidersCanBeSet() throws {
+        let view = MainView(controller: controller, preferences: preferences, skin: DefaultSkin())
+        let balance = try element(view, "Balance")
+        #expect(balance is NSAccessibilitySlider)
+        #expect(balance.isAccessibilitySelectorAllowed(#selector(NSAccessibilityElement.setAccessibilityValue(_:))))
+        balance.setAccessibilityValue(NSNumber(value: 1.0))
+        #expect(controller.balance == 1)
+        let equalizer = EqualizerView(controller: controller, skin: DefaultSkin(), scale: 1)
+        let band = try element(equalizer, "60 Hz")
+        band.setAccessibilityValue(NSNumber(value: 0.75))
+        #expect(controller.equalizer.bands[0] == 6)
+        #expect(!(try element(view, "Play") is NSAccessibilitySlider))
+    }
+
     /// The same element stays while its control does, so VoiceOver keeps its place.
     @Test func elementsStayTheSame() throws {
         let view = MainView(controller: controller, preferences: preferences, skin: DefaultSkin())
