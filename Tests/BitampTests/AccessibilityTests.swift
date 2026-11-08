@@ -92,6 +92,25 @@ import Testing
         #expect(before("Repeat", "About Bitamp"))
     }
 
+    /// Window ▸ Cycle Through Windows goes top to bottom, then left to right.
+    @Test func windowsCycleInReadingOrder() {
+        func window(_ x: CGFloat, _ top: CGFloat) -> NSWindow {
+            let window = NSWindow(contentRect: NSRect(x: x, y: top - 100, width: 100, height: 100), styleMask: .borderless,
+                                  backing: .buffered, defer: true)
+            window.isReleasedWhenClosed = false
+            window.orderFront(nil)
+            return window
+        }
+        let main = window(0, 900), equalizer = window(0, 800), playlist = window(0, 700), library = window(300, 900)
+        defer { [main, equalizer, playlist, library].forEach { $0.orderOut(nil) } }
+        let group = WindowGroup(main: main, panels: [.equalizer: equalizer, .playlist: playlist, .library: library],
+                                defaults: UserDefaults(suiteName: "BitampCycle-\(UUID().uuidString)")!)
+        #expect(group.window(after: main) === library)
+        #expect(group.window(after: library) === equalizer)
+        #expect(group.window(after: playlist) === main)
+        #expect(group.window(after: main, backwards: true) === playlist)
+    }
+
     /// The same element stays while its control does, so VoiceOver keeps its place.
     @Test func elementsStayTheSame() throws {
         let view = MainView(controller: controller, preferences: preferences, skin: DefaultSkin())

@@ -6,6 +6,9 @@ import UniformTypeIdentifiers
 /// Everything, track names included, is drawn in skin pixels: names use `ListFont`, which
 /// falls back to unsmoothed Arial for characters it doesn't have.
 final class PlaylistView: SkinnedView {
+    /// What VoiceOver calls the window.
+    override var accessibilityName: String { "Playlist" }
+
 
     let controller: PlaybackController
     let preferences: Preferences

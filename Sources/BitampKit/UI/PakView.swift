@@ -86,6 +86,9 @@ enum PakLayout {
 /// the cartridges are drawn in fixed colors, as the plastic things they are. Dropping a
 /// `.bitpak` on the window installs it.
 final class PakView: SkinnedView {
+    /// What VoiceOver calls the window.
+    override var accessibilityName: String { "Expansion Paks" }
+
     let controller: PlaybackController
     /// Opens a Pak's music in the Media Library.
     var onBrowse: ((Pak) -> Void)?

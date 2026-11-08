@@ -494,6 +494,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowGroup.toggle(.library)
     }
 
+    @objc private func cycleWindows(_ sender: Any?) {
+        windowGroup?.window(after: NSApp.keyWindow)?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func cycleWindowsBackwards(_ sender: Any?) {
+        windowGroup?.window(after: NSApp.keyWindow, backwards: true)?.makeKeyAndOrderFront(nil)
+    }
+
     private func showBackstory() {
         windowGroup?.setVisible(.backstory, true)
         backstoryView?.window?.makeKeyAndOrderFront(nil)
@@ -525,6 +533,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let library = Menus.item("Media Library", #selector(toggleLibrary(_:)), "l", [.option])
         let regroup = Menus.item("Regroup Windows", #selector(regroupWindows(_:)), "r", [.option])
         let minimize = Menus.item("Minimize", #selector(minimize(_:)), "m", [.command])
+        let cycle = Menus.item("Cycle Through Windows", #selector(cycleWindows(_:)), "`", [.command])
+        let cycleBack = Menus.item("Cycle Backwards Through Windows", #selector(cycleWindowsBackwards(_:)), "`", [.command, .shift])
+        cycleBack.isAlternate = true
         let sizes = SkinnedView.scales.enumerated().map { index, scale -> NSMenuItem in
             let title = scale.rounded() == scale ? String(Int(scale)) : String(Double(scale))
             let item = Menus.item("\(title)×", #selector(setScale(_:)), "\(index + 1)", [.command])
@@ -545,8 +556,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             mainWindow, equalizer, playlist, paksWindow, library] + [backstory].compactMap { $0 } + [regroup, .separator(),
             mainShade, equalizerShade, playlistShade, .separator(),
             Menus.submenu(Menus.menu("Size", sizes)), shadows, raiseAll, .separator(),
-            minimize,
+            minimize, cycle, cycleBack,
         ])
+        cycle.target = self
+        cycleBack.target = self
         NSApp.windowsMenu = windowMenu
 
         skinsMenu.delegate = self

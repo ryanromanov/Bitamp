@@ -49,6 +49,9 @@ enum BackstoryLayout {
 /// OFF); the setup (service, model, key) shows in the window when there's no key yet, or
 /// when the service line under the title is clicked.
 final class BackstoryView: SkinnedView {
+    /// What VoiceOver calls the window.
+    override var accessibilityName: String { "Backstory" }
+
     let session: BackstorySession
     let paks: PakRegistry
     private var pak: BackstoryPak { session.pak }
