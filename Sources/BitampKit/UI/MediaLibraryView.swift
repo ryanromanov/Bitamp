@@ -17,6 +17,8 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
     static let draggedItems = NSPasteboard.PasteboardType("com.ryanromanov.bitamp.library-items")
 
     let controller: PlaybackController
+    /// Remembers the Pak and section last shown, for the next launch; nil remembers nothing.
+    private let defaults: UserDefaults?
     /// Gets keys the library doesn't use, such as the transport letters.
     weak var keyFallback: NSResponder?
 
@@ -73,14 +75,15 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
     private var wantedCovers: Set<CoverCache.Key> = []
 
     private enum Press: Equatable {
-        case close, back, play, add, grip(startSize: CGSize, startMouse: NSPoint), thumb(grab: CGFloat), search, items
+        case close, shade, back, play, add, grip(startSize: CGSize, startMouse: NSPoint), thumb(grab: CGFloat), search, items
     }
     private var pressed: Press?
     private var pressedInside = false
 
     /// `covers` keeps them in memory only unless given a folder; Bitamp gives it one.
-    init(controller: PlaybackController, skin: Skin, scale: CGFloat, covers: CoverCache = CoverCache()) {
+    init(controller: PlaybackController, skin: Skin, scale: CGFloat, covers: CoverCache = CoverCache(), defaults: UserDefaults? = nil) {
         self.controller = controller
+        self.defaults = defaults
         self.covers = covers
         super.init(pixelSize: LibraryLayout.defaultSize, skin: skin, scale: scale)
         search = PixelTextBox(in: self, rect: parts.search, placeholder: "Search")
@@ -101,7 +104,14 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
     }
 
     override func normalizedPixelSize(_ proposed: CGSize) -> CGSize {
-        LibraryLayout.snapped(proposed)
+        let size = LibraryLayout.snapped(proposed)
+        return isShaded ? CGSize(width: size.width, height: ShadeLayout.height) : size
+    }
+
+    override func setShaded(_ shaded: Bool) {
+        super.setShaded(shaded)
+        search.isHidden = shaded
+        if shaded { keysInSections = false }
     }
 
     /// Nothing moves in the library but the search box's caret, so it redraws when it
@@ -138,9 +148,15 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
         relayout()
     }
 
+    /// Laid out at the full height even while shaded, so the page keeps its place.
     private var parts: LibraryLayout.Parts {
-        LibraryLayout.Parts(size: pixelSize, gen: skin.gen != nil)
+        let size = isShaded ? CGSize(width: pixelSize.width, height: unshadedPixelHeight ?? LibraryLayout.defaultSize.height) : pixelSize
+        return LibraryLayout.Parts(size: size, gen: skin.gen != nil)
     }
+
+    /// The Pak and section last shown; the app opens the library on that Pak again.
+    static let pakKey = "LibraryPak"
+    private static let sectionKey = "LibrarySection"
 
     private var title: String {
         (pak?.name ?? "Media Library").uppercased()
@@ -153,6 +169,10 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
         guard pak !== self.pak || shown == nil else { return }
         clear()
         self.pak = pak
+        if let defaults, defaults.string(forKey: Self.pakKey) != pak.id {
+            defaults.set(pak.id, forKey: Self.pakKey)
+            defaults.removeObject(forKey: Self.sectionKey)
+        }
         search.placeholder = "Search \(pak.name)"
         if pak.canBrowse {
             loadSidebar()
@@ -198,7 +218,9 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
                     return shelf.title.map { [(title: $0, place: nil)] + sections } ?? sections
                 }
                 message = nil
-                if let first = sidebar.lazy.compactMap(\.place).first { openSection(first) }
+                // The section shown last time, else the first.
+                let saved = defaults?.string(forKey: Self.sectionKey)
+                if let place = sectionPlaces.first(where: { $0.id == saved }) ?? sectionPlaces.first { openSection(place) }
             } catch {
                 guard generation == self.generation else { return }
                 message = error.localizedDescription
@@ -209,6 +231,7 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
 
     private func openSection(_ place: PakPlace) {
         selectedSection = place.id
+        defaults?.set(place.id, forKey: Self.sectionKey)
         history = []
         open(.place(place.id), title: place.title, pushing: false)
     }
@@ -359,11 +382,20 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
     // MARK: - Drawing
 
     override func render(into c: Canvas) {
+        if isShaded {
+            renderShade(c)
+            return
+        }
         let parts = self.parts
         let colors = skin.playlistColors
         let dim = mix(colors.normal, colors.normalBackground, 0.45)
-        PanelFrame(skin: skin, size: pixelSize, title: title, active: isActive)
-            .draw(c, closePressed: pressed == .close && pressedInside)
+        let frame = PanelFrame(skin: skin, size: pixelSize, title: title, active: isActive)
+        frame.draw(c, closePressed: pressed == .close && pressedInside)
+        if !frame.usesGen {
+            // The playlist's shade button, beside the close button, as the playlist draws it.
+            c.draw(skin.image(for: .playlistShadeButton(pressed: pressed == .shade && pressedInside)),
+                   at: ShadeLayout.playlistShadeButton(width: pixelSize.width).origin)
+        }
         c.fill(skin.gen == nil ? CGRect(x: parts.content.minX, y: parts.content.minY,
                                         width: parts.scrollTrack.minX - parts.content.minX, height: parts.content.height)
                                : parts.content, colors.normalBackground)
@@ -396,6 +428,31 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
     private var isDraggingThumb: Bool {
         if case .thumb? = pressed { return true }
         return false
+    }
+
+    /// The shade strip: the playlist's, with the Pak and the page shown.
+    private func renderShade(_ c: Canvas) {
+        let width = pixelSize.width
+        let w = Int(width)
+        for x in stride(from: 25, to: w - 50, by: 25) {
+            c.draw(skin.image(for: .playlistShadeTile), x, 0)
+        }
+        c.draw(skin.image(for: .playlistShadeLeft(active: isActive)), 0, 0)
+        c.draw(skin.image(for: .playlistShadeRight(active: isActive)), w - 50, 0)
+        c.draw(skin.image(for: .playlistUnshadeButton(pressed: pressed == .shade && pressedInside)),
+               at: ShadeLayout.playlistUnshade(width: width).origin)
+        c.draw(skin.image(for: .playlistCloseButton(pressed: pressed == .close && pressedInside)),
+               at: ShadeLayout.playlistClose(width: width).origin)
+        let strip = ShadeLayout.libraryTitle(width: width)
+        c.context.saveGState()
+        c.context.clip(to: strip)
+        drawPixelText(c, shadeText, Int(strip.minX), Int(strip.minY))
+        c.context.restoreGState()
+    }
+
+    /// "Apple Music: Albums", or just the Pak.
+    private var shadeText: String {
+        [pak?.name ?? "Media Library", shown?.title].compactMap { $0 }.joined(separator: ": ")
     }
 
     private func drawSidebar(_ c: Canvas, _ parts: LibraryLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor) {
@@ -571,10 +628,21 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
     }
 
     override func accessibleControls() -> [AccessibleControl] {
+        let close: () -> Void = { [weak self] in self?.windowGroup?.setVisible(.library, false) }
+        let shade: () -> Void = { [weak self] in self?.windowGroup?.toggleShade(.library) }
+        if isShaded {
+            let width = pixelSize.width
+            return [AccessibleControl(id: "shown", kind: .text, label: shadeText, rect: ShadeLayout.libraryTitle(width: width)),
+                    AccessibleControl(id: "unshade", kind: .button, label: "Unshade", rect: ShadeLayout.playlistUnshade(width: width), press: shade),
+                    AccessibleControl(id: "close", kind: .button, label: "Close", rect: ShadeLayout.playlistClose(width: width), press: close)]
+        }
         let parts = self.parts
-        var controls = [AccessibleControl(id: "close", kind: .button, label: "Close",
-                                          rect: PanelFrame(skin: skin, size: pixelSize, title: title, active: isActive).close,
-                                          press: { [weak self] in self?.windowGroup?.setVisible(.library, false) })]
+        let frame = PanelFrame(skin: skin, size: pixelSize, title: title, active: isActive)
+        var controls = [AccessibleControl(id: "close", kind: .button, label: "Close", rect: frame.close, press: close)]
+        if !frame.usesGen {
+            controls.append(AccessibleControl(id: "shade", kind: .button, label: "Shade",
+                                              rect: ShadeLayout.playlistShadeButton(width: pixelSize.width), press: shade))
+        }
 
         // The Pak's sections, under their group headings.
         var sections: [AccessibleControl] = []
@@ -708,9 +776,16 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
     }
 
     private func press(at point: CGPoint) -> Press? {
+        if isShaded {
+            if ShadeLayout.playlistUnshade(width: pixelSize.width).contains(point) { return .shade }
+            if ShadeLayout.playlistClose(width: pixelSize.width).contains(point) { return .close }
+            return nil
+        }
         let parts = self.parts
         let frame = PanelFrame(skin: skin, size: pixelSize, title: title, active: isActive)
         if frame.close.contains(point) { return .close }
+        // The playlist frame's title bar has a shade button; a gen.bmp frame's doesn't.
+        if !frame.usesGen, ShadeLayout.playlistShadeButton(width: pixelSize.width).contains(point) { return .shade }
         if parts.grip.contains(point) { return .grip(startSize: .zero, startMouse: .zero) }
         if isScrollable, parts.scrollTrack.contains(point) { return .thumb(grab: 0) }
         if parts.search.contains(point) { return .search }
@@ -725,6 +800,12 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
     // MARK: - Mouse
 
     override func pixelMouseDown(at point: CGPoint, event: NSEvent) -> Bool {
+        // Double-clicking the title bar, or anywhere on the shade strip, shades or unshades.
+        let titleBar = isShaded || point.y < CGFloat(skin.gen != nil ? GenArt.topHeight : PanelFrame.top)
+        if event.clickCount == 2, titleBar, press(at: point) == nil {
+            windowGroup?.toggleShade(.library)
+            return true
+        }
         guard let press = press(at: point) else { return false }
         switch press {
         case .search:
@@ -841,6 +922,7 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
         switch pressed {
         case .search?: search.mouseUp()
         case .close? where pressedInside: windowGroup?.setVisible(.library, false)
+        case .shade? where pressedInside: windowGroup?.toggleShade(.library)
         case .back? where pressedInside: goBack()
         case .play? where pressedInside: playOrAdd(play: true)
         case .add? where pressedInside: playOrAdd(play: false)
@@ -849,6 +931,7 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        guard !isShaded else { return }
         let pixels = event.hasPreciseScrollingDeltas
             ? event.scrollingDeltaY / scale : event.scrollingDeltaY * CGFloat(LibraryLayout.rowHeight) * 3
         if parts.sidebar.contains(pixel(for: event)) {
@@ -897,6 +980,10 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
 
     override func keyDown(with event: NSEvent) {
         defer { needsDisplay = true }
+        if isShaded {
+            if let keyFallback { keyFallback.keyDown(with: event) } else { super.keyDown(with: event) }
+            return
+        }
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "f" {
             search.focus()
             return

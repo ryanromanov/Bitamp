@@ -77,6 +77,15 @@ final class PixelTextBox: NSObject, NSTextFieldDelegate {
 
     var isEditing: Bool { editor != nil }
 
+    /// Hides the field, as in a shaded window, giving up the keyboard if it had it.
+    var isHidden: Bool {
+        get { field.isHidden }
+        set {
+            if newValue, isEditing { view?.window?.makeFirstResponder(view) }
+            field.isHidden = newValue
+        }
+    }
+
     func focus() {
         view?.window?.makeFirstResponder(field)
     }
