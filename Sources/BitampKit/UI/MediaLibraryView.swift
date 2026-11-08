@@ -48,6 +48,10 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
     private var anchor: Int?
     /// The item the arrow keys move from.
     private(set) var focus: Int?
+    /// Whether the arrow keys go through the sections instead of the page, and the section
+    /// they're on.
+    private(set) var keysInSections = false
+    private(set) var keyedSection: String?
     /// Each item's block and column, for moving up and down through rows of covers.
     private var positions: [(block: Int, column: Int)] = []
     /// How far the sidebar is scrolled, for a Pak with more sections than fit.
@@ -84,7 +88,11 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
         search.onTab = { [weak self] in
             guard let self else { return }
             window?.makeFirstResponder(self)
-            if focus == nil { moveFocus(to: 0) }
+            if let section = selectedSection ?? sectionPlaces.first?.id {
+                focusSection(section)
+            } else {
+                enterPage()
+            }
         }
     }
 
@@ -161,6 +169,8 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
         pak = nil
         sidebar = []
         selectedSection = nil
+        keysInSections = false
+        keyedSection = nil
         shown = nil
         history = []
         selection = []
@@ -400,6 +410,14 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
                 if place.id == selectedSection {
                     c.fill(Int(parts.sidebar.minX) + 1, y, Int(parts.sidebar.width) - 2, LibraryLayout.sidebarRow, colors.selectedBackground)
                 }
+                if keysInSections, isActive, place.id == keyedSection {
+                    // The keyboard's place, outlined.
+                    let (left, width, height) = (Int(parts.sidebar.minX) + 1, Int(parts.sidebar.width) - 2, LibraryLayout.sidebarRow)
+                    c.fill(left, y, width, 1, colors.normal)
+                    c.fill(left, y + height - 1, width, 1, colors.normal)
+                    c.fill(left, y, 1, height, colors.normal)
+                    c.fill(left + width - 1, y, 1, height, colors.normal)
+                }
                 ListFont.draw(ListFont.truncate(entry.title, toWidth: Int(parts.sidebar.width) - 14), in: c, x: x + 8, y: y + 1, color: colors.normal)
             } else {
                 // A little ▾ before a group's title.
@@ -510,6 +528,151 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
         c.fill(nx, ny + 6, 4, 2, dim)
     }
 
+    // MARK: - Accessibility
+
+    /// One of the page's items, by its place on the page; a new page gets new elements.
+    private struct ItemRow: Hashable { let generation: Int, index: Int }
+    private struct SectionRow: Hashable { let id: String }
+
+    override var accessibilityFocusedID: AnyHashable? {
+        if keysInSections { return keyedSection.map(SectionRow.init) }
+        guard let focus, itemRect(focus) != nil else { return nil }
+        return ItemRow(generation: generation, index: focus)
+    }
+
+    /// Where item `index` is drawn now, or nil when it's scrolled out of view.
+    private func itemRect(_ index: Int) -> CGRect? {
+        guard positions.indices.contains(index) else { return nil }
+        let parts = self.parts
+        let (blockIndex, column) = positions[index]
+        let block = blocks[blockIndex]
+        let top = parts.list.minY + CGFloat(block.y) - scroll
+        guard top + CGFloat(block.height) > parts.list.minY, top < parts.list.maxY else { return nil }
+        if case .grid = block.kind {
+            let cell = LibraryLayout.cell.width
+            return CGRect(x: parts.list.minX + CGFloat(column) * cell, y: top, width: cell, height: CGFloat(block.height))
+        }
+        return CGRect(x: parts.list.minX, y: top, width: parts.list.width, height: CGFloat(block.height))
+    }
+
+    private func itemLabel(_ item: PakItem) -> String {
+        switch item {
+        case .track(let track):
+            return [track.title, track.artist, track.duration.map(TimeFormat.clock)].compactMap { $0 }.joined(separator: ", ")
+        case .place(let place):
+            let kind: String? = switch place.kind {
+            case .album: "album"
+            case .artist: "artist"
+            case .playlist: "playlist"
+            case .section: nil
+            }
+            return [place.title, place.subtitle, kind].compactMap { $0 }.joined(separator: ", ")
+        }
+    }
+
+    override func accessibleControls() -> [AccessibleControl] {
+        let parts = self.parts
+        var controls = [AccessibleControl(id: "close", kind: .button, label: "Close",
+                                          rect: PanelFrame(skin: skin, size: pixelSize, title: title, active: isActive).close,
+                                          press: { [weak self] in self?.windowGroup?.setVisible(.library, false) })]
+
+        // The Pak's sections, under their group headings.
+        var sections: [AccessibleControl] = []
+        var y = parts.sectionsTop - Int(sidebarScroll)
+        for (index, entry) in sidebar.enumerated() {
+            if entry.place == nil, index > 0 { y += 3 }
+            let rect = CGRect(x: parts.sidebar.minX, y: CGFloat(y), width: parts.sidebar.width, height: CGFloat(LibraryLayout.sidebarRow))
+            y += LibraryLayout.sidebarRow
+            guard rect.minY >= CGFloat(parts.sectionsTop) - 1, rect.maxY <= parts.sidebar.maxY + 1 else { continue }
+            if let place = entry.place {
+                sections.append(AccessibleControl(id: SectionRow(id: place.id), kind: .row(selected: place.id == selectedSection),
+                                                  label: entry.title, rect: rect,
+                                                  press: { [weak self] in
+                                                      self?.openSection(place)
+                                                      self?.focusSection(place.id)
+                                                  },
+                                                  takeFocus: { [weak self] in self?.focusSection(place.id, announce: false) }))
+            } else {
+                sections.append(AccessibleControl(id: "group-\(index)", kind: .text, label: entry.title, rect: rect))
+            }
+        }
+        if !sections.isEmpty {
+            controls.append(AccessibleControl(id: "sections", kind: .list, label: "Sections",
+                                              rect: CGRect(x: parts.sidebar.minX, y: CGFloat(parts.sectionsTop), width: parts.sidebar.width,
+                                                           height: parts.sidebar.maxY - CGFloat(parts.sectionsTop)),
+                                              children: sections))
+        }
+
+        if !history.isEmpty {
+            controls.append(AccessibleControl(id: "back", kind: .button, label: "Back", rect: backRect,
+                                              press: { [weak self] in self?.goBack() }))
+        }
+        let (play, add) = buttonRects(parts)
+        if let shown {
+            controls.append(AccessibleControl(id: "title", kind: .text, label: shown.title,
+                                              rect: CGRect(x: parts.bar.minX + 40, y: parts.bar.minY, width: play.minX - parts.bar.minX - 40, height: parts.bar.height)))
+        }
+        controls.append(AccessibleControl(id: "play", kind: .button, label: "Play", rect: play,
+                                          help: "Plays what's selected, or the whole album or playlist.",
+                                          press: { [weak self] in self?.playOrAdd(play: true) }))
+        controls.append(AccessibleControl(id: "add", kind: .button, label: "Add", rect: add,
+                                          help: "Adds what's selected, or the whole album or playlist, to the playlist.",
+                                          press: { [weak self] in self?.playOrAdd(play: false) }))
+
+        // The page: its header, shelf titles, and the songs and covers in view.
+        var page: [AccessibleControl] = []
+        for (number, block) in blocks.enumerated() {
+            let top = parts.list.minY + CGFloat(block.y) - scroll
+            guard top + CGFloat(block.height) > parts.list.minY, top < parts.list.maxY else { continue }
+            let rect = CGRect(x: parts.list.minX, y: top, width: parts.list.width, height: CGFloat(block.height))
+            switch block.kind {
+            case .header:
+                if let header = shown?.header {
+                    page.append(AccessibleControl(id: "header", kind: .text,
+                                                  label: [header.title, header.subtitle, header.detail].compactMap { $0 }.joined(separator: ", "),
+                                                  rect: rect))
+                }
+            case .shelfTitle(let title):
+                page.append(AccessibleControl(id: "shelf-\(number)", kind: .text, label: title, rect: rect))
+            case .track(let index):
+                page.append(itemControl(index))
+            case .grid(let indices):
+                page += indices.map(itemControl)
+            }
+        }
+        if let message {
+            page.append(AccessibleControl(id: "message", kind: .text, label: message, rect: parts.list))
+        }
+        controls.append(AccessibleControl(id: "page", kind: .list, label: shown.map { "\($0.title), \(items.count) item\(items.count == 1 ? "" : "s")" } ?? "Nothing shown",
+                                          rect: parts.list, help: "Arrow keys move through it; Return opens or plays.", children: page))
+        return controls
+    }
+
+    private func itemControl(_ index: Int) -> AccessibleControl {
+        let item = items[index]
+        var actions: [(name: String, perform: () -> Void)] = [
+            ("Play", { [weak self] in self?.select(index, then: true) }),
+            ("Add to Playlist", { [weak self] in self?.select(index, then: false) }),
+        ]
+        if case .place(let place) = item { actions.insert(("Open", { [weak self] in self?.open(place) }), at: 0) }
+        return AccessibleControl(
+            id: ItemRow(generation: generation, index: index), kind: .row(selected: selection.contains(index)),
+            label: itemLabel(item), rect: itemRect(index) ?? .zero,
+            press: { [weak self] in self?.moveFocus(to: index) },
+            actions: actions,
+            takeFocus: { [weak self] in
+                self?.keysInSections = false
+                self?.focus = index
+                self?.anchor = index
+            })
+    }
+
+    /// Plays or adds one item, by selecting it first.
+    private func select(_ index: Int, then play: Bool) {
+        moveFocus(to: index)
+        playOrAdd(play: play)
+    }
+
     // MARK: - Hit testing
 
     /// The item at `point` in the list, by its index in `items`.
@@ -583,7 +746,9 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
             window?.makeFirstResponder(self)
             if let place = sidebarPlace(at: point) {
                 openSection(place)
+                focusSection(place.id, announce: false)
             } else if let index = item(at: point) {
+                keysInSections = false
                 let plain = event.modifierFlags.isDisjoint(with: [.command, .shift])
                 // A plain click on a selected item keeps the rest selected, in case it's dragged.
                 if plain && selection.contains(index) {
@@ -736,6 +901,7 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
             search.focus()
             return
         }
+        if keysInSections, sectionKey(event) { return }
         let extend = event.modifierFlags.contains(.shift)
         switch event.specialKey {
         case .carriageReturn?, .enter?:
@@ -754,10 +920,66 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
         case .pageDown?: moveFocus(to: focus.map { page(from: $0, by: 1) } ?? 0, extend: extend)
         case .home?: moveFocus(to: 0, extend: extend)
         case .end?: moveFocus(to: items.count - 1, extend: extend)
-        case .tab?: search.focus()
+        case .tab?:
+            keysInSections = false
+            search.focus()
         default:
             if let keyFallback { keyFallback.keyDown(with: event) } else { super.keyDown(with: event) }
         }
+    }
+
+    private var sectionPlaces: [PakPlace] { sidebar.compactMap(\.place) }
+
+    /// The arrow keys in the sections: up and down open the one above or below, as in a
+    /// Mac sidebar; Return, Right Arrow and Tab go into its page. False for the rest.
+    private func sectionKey(_ event: NSEvent) -> Bool {
+        let places = sectionPlaces
+        let current = places.firstIndex { $0.id == keyedSection }
+        switch event.specialKey {
+        case .upArrow?, .downArrow?:
+            let step = event.specialKey == .upArrow ? -1 : 1
+            let target = places.indices.contains((current ?? -step) + step) ? (current ?? -step) + step : current
+            guard let target else { return true }
+            if places[target].id != selectedSection { openSection(places[target]) }
+            focusSection(places[target].id)
+        case .home?, .end?:
+            guard let place = event.specialKey == .home ? places.first : places.last else { return true }
+            openSection(place)
+            focusSection(place.id)
+        case .carriageReturn?, .enter?, .rightArrow?, .tab?:
+            if let current, places[current].id != selectedSection { openSection(places[current]) }
+            enterPage()
+        default:
+            return false
+        }
+        return true
+    }
+
+    /// Puts the arrow keys on section `id`, scrolled into view.
+    private func focusSection(_ id: String, announce: Bool = true) {
+        keysInSections = true
+        keyedSection = id
+        var y = CGFloat(0)
+        for (index, entry) in sidebar.enumerated() {
+            if entry.place == nil, index > 0 { y += 3 }
+            if entry.place?.id == id { break }
+            y += CGFloat(LibraryLayout.sidebarRow)
+        }
+        let room = parts.sidebar.maxY - CGFloat(parts.sectionsTop)
+        if y < sidebarScroll {
+            sidebarScroll = y
+        } else if y + CGFloat(LibraryLayout.sidebarRow) > sidebarScroll + room {
+            sidebarScroll = y + CGFloat(LibraryLayout.sidebarRow) - room
+        }
+        needsDisplay = true
+        if announce { accessibilityFocusMoved() }
+    }
+
+    /// Puts the arrow keys on the page, at its first item if there's one.
+    private func enterPage() {
+        keysInSections = false
+        if !items.isEmpty { moveFocus(to: focus ?? 0) }
+        needsDisplay = true
     }
 
     /// Moves the focus, and the selection with it (or from the anchor, extending), and
@@ -774,6 +996,8 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
             anchor = index
         }
         focus = index
+        keysInSections = false
+        defer { accessibilityFocusMoved() }
         let block = blocks[positions[index].block]
         let top = CGFloat(block.y), bottom = CGFloat(block.y + block.height)
         if top < scroll {

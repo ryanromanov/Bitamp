@@ -245,6 +245,98 @@ import Testing
     }
 }
 
+extension AccessibilityTests {
+    func draw(_ view: SkinnedView) {
+        view.drawsAsActive = true
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+    }
+
+    // MARK: - Media Library
+
+    @Test func libraryHasSectionsAPageAndSearch() async throws {
+        let pak = LibraryPak()
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences, paks: PakRegistry([pak]))
+        let view = MediaLibraryView(controller: controller, skin: DefaultSkin(), scale: 1)
+        view.show(pak)
+        for _ in 0..<200 where view.shown?.items.isEmpty != false { try await Task.sleep(for: .milliseconds(5)) }
+        let lists = elements(view).filter { $0.accessibilityRole() == .list }
+        #expect(lists.map { $0.accessibilityLabel() ?? "" }.first == "Sections")
+        let page = try #require(lists.last)
+        let rows = (page.accessibilityChildren() ?? []).compactMap { $0 as? SkinnedAccessibilityElement }.filter { $0.accessibilityRole() == .row }
+        #expect(!rows.isEmpty)
+        #expect(rows.first?.accessibilityCustomActions()?.map(\.name).contains("Add to Playlist") == true)
+        let labels = elements(view).compactMap { $0.accessibilityLabel() }
+        #expect(labels.contains("Play") && labels.contains("Add"))
+        // The search box is a real text field, named for what it's for.
+        let field = try #require(view.accessibilityChildren()?.compactMap { $0 as? NSTextField }.first)
+        #expect(field.cell?.accessibilityLabel()?.hasPrefix("Search") == true)
+
+        view.moveFocus(to: 1)
+        let focused = try #require(view.accessibilityFocusedUIElement as? SkinnedAccessibilityElement)
+        #expect(focused.isAccessibilitySelected())
+        #expect(focused.accessibilityLabel() == rows[1].accessibilityLabel())
+    }
+
+    /// Once VoiceOver's cursor is in the sections, the arrow keys go through them, opening
+    /// each, as in a Mac sidebar; Return goes into the page.
+    @Test func arrowKeysFollowVoiceOverIntoTheSections() async throws {
+        let pak = LibraryPak()
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences, paks: PakRegistry([pak]))
+        let view = MediaLibraryView(controller: controller, skin: DefaultSkin(), scale: 1)
+        view.show(pak)
+        for _ in 0..<200 where view.shown?.items.isEmpty != false { try await Task.sleep(for: .milliseconds(5)) }
+        let sections = try #require(elements(view).first { $0.accessibilityLabel() == "Sections" })
+        let rows = (sections.accessibilityChildren() ?? []).compactMap { $0 as? SkinnedAccessibilityElement }.filter { $0.accessibilityRole() == .row }
+        #expect(rows.map { $0.accessibilityLabel() ?? "" } == ["Albums", "Songs"])
+        #expect(rows[0].isAccessibilitySelectorAllowed(#selector(NSAccessibilityElement.setAccessibilityFocused(_:))))
+
+        rows[0].setAccessibilityFocused(true)
+        #expect(view.keysInSections)
+        view.keyDown(with: key(125, NSDownArrowFunctionKey))
+        #expect(view.shown?.title == "Songs")
+        #expect((view.accessibilityFocusedUIElement as? SkinnedAccessibilityElement)?.accessibilityLabel() == "Songs")
+
+        for _ in 0..<200 where view.shown?.items.isEmpty != false { try await Task.sleep(for: .milliseconds(5)) }
+        view.keyDown(with: key(36, 13))
+        #expect(!view.keysInSections)
+        #expect(view.focus == 0)
+        #expect(view.shown?.title == "Songs")
+    }
+
+    // MARK: - Backstory
+
+    @Test func backstoryReadsItsNotesAndSources() async throws {
+        let service = CannedBackstory()
+        service.updates = [.text("Words about the song."),
+                           .cite([BackstorySource(title: "A history", url: URL(string: "https://lowbits.example/history")!)])]
+        let store = BackstoryMemorySettings(defaults: UserDefaults(suiteName: "BitampA11yBackstory-\(UUID().uuidString)")!)
+        let pak = BackstoryPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5"]) { _, _ in service }], store: store)
+        pak.save(["claude-key": "test-key"])
+        let session = BackstorySession(pak: pak, cache: BackstoryCache(folder: nil))
+        session.current = { (URL(string: "bitpak-test://track/1"), true) }
+        session.describe = { _ in (PakNowPlaying(title: "Dial-Up Sunrise", artist: "The Low Bits"), nil) }
+        let view = BackstoryView(session: session, paks: PakRegistry([pak]), skin: DefaultSkin(), scale: 1)
+        session.update(active: true)
+        for _ in 0..<50 { await Task.yield() }
+        session.lookUp()
+        for _ in 0..<50 { await Task.yield() }
+        draw(view)
+        let all = elements(view)
+        let notes = try #require(all.first { $0.accessibilityRole() == .staticText && $0.accessibilityLabel()?.hasPrefix("Words") == true })
+        #expect(notes.accessibilityLabel() == "Words about the song. [1]")
+        let link = try #require(all.first { $0.accessibilityRole() == .link })
+        #expect(link.accessibilityLabel() == "1: A history - lowbits.example")
+        let auto = try element(view, "Auto")
+        #expect(auto.accessibilityRole() == .checkBox)
+        #expect(auto.accessibilityValue() as? Int == 0)
+        #expect(auto.accessibilityPerformPress())
+        #expect(pak.lookup == .everyTrack)
+        #expect(all.contains { $0.accessibilityLabel() == "Service: Claude, Sonnet 5.5" })
+        #expect(all.firstIndex(of: notes)! < all.firstIndex(of: link)!, "the notes, then their sources")
+    }
+}
+
 /// A Pak with nothing in it, for the Paks window.
 @MainActor
 private final class A11yPak: Pak {

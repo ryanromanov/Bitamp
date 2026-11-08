@@ -7,6 +7,8 @@ import Security
 @MainActor
 class PakSettingsStore {
     private let defaults: UserDefaults
+    /// Passwords already read, so asking for settings every frame doesn't go to the Keychain.
+    private var secrets: [String: String?] = [:]
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -17,7 +19,7 @@ class PakSettingsStore {
         var values: [String: String] = [:]
         let saved = defaults.dictionary(forKey: Self.key(manifest.id)) as? [String: String] ?? [:]
         for setting in manifest.settings ?? [] {
-            let value = setting.kind == .password ? secret(manifest.id, setting.key) : saved[setting.key]
+            let value = setting.kind == .password ? rememberedSecret(manifest.id, setting.key) : saved[setting.key]
             if let value = value ?? setting.defaultValue { values[setting.key] = value }
         }
         return values
@@ -28,6 +30,7 @@ class PakSettingsStore {
         for setting in manifest.settings ?? [] {
             guard let value = values[setting.key] else { continue }
             if setting.kind == .password {
+                secrets["\(manifest.id)/\(setting.key)"] = nil
                 setSecret(value, manifest.id, setting.key)
             } else {
                 plain[setting.key] = value
@@ -40,6 +43,7 @@ class PakSettingsStore {
     func remove(_ manifest: PakManifest) {
         defaults.removeObject(forKey: Self.key(manifest.id))
         for setting in manifest.settings ?? [] where setting.kind == .password {
+            secrets["\(manifest.id)/\(setting.key)"] = nil
             setSecret(nil, manifest.id, setting.key)
         }
     }
@@ -47,6 +51,14 @@ class PakSettingsStore {
     private static func key(_ id: String) -> String { "pakSettings.\(id)" }
 
     // MARK: - Keychain
+
+    private func rememberedSecret(_ pak: String, _ key: String) -> String? {
+        let id = "\(pak)/\(key)"
+        if let known = secrets[id] { return known }
+        let value = secret(pak, key)
+        secrets[id] = .some(value)
+        return value
+    }
 
     /// Passwords, one generic Keychain item per setting. Overridden in tests.
     func secret(_ pak: String, _ key: String) -> String? {

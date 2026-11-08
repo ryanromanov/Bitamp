@@ -13,7 +13,10 @@ final class PixelTextBox: NSObject, NSTextFieldDelegate {
     var rect: CGRect {
         didSet { place() }
     }
-    var placeholder: String
+    var placeholder: String {
+        // VoiceOver names the field by what it's for.
+        didSet { name(placeholder) }
+    }
     /// Called with the text when Return is pressed.
     var onSubmit: ((String) -> Void)?
     /// Called when Escape is pressed in an empty box.
@@ -46,8 +49,16 @@ final class PixelTextBox: NSObject, NSTextFieldDelegate {
         field.cell?.wraps = false
         field.cell?.usesSingleLineMode = true
         field.delegate = self
+        name(placeholder)
         view.addSubview(field)
         place()
+    }
+
+    /// VoiceOver reads a text field's name from its cell.
+    private func name(_ label: String) {
+        field.setAccessibilityLabel(label)
+        field.cell?.setAccessibilityLabel(label)
+        field.cell?.setAccessibilityPlaceholderValue(label)
     }
 
     var text: String {
