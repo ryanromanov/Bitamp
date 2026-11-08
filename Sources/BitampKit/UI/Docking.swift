@@ -105,6 +105,18 @@ final class WindowGroup {
         for window in windows { window.hasShadow = shadows }
     }
 
+    /// The window after `current` among those showing, in reading order: top to bottom,
+    /// then left to right, wrapping around. Window ▸ Cycle Through Windows (⌘`) follows
+    /// it, so VoiceOver users meet the windows in the order they sit.
+    func window(after current: NSWindow?, backwards: Bool = false) -> NSWindow? {
+        let showing = windows.filter(\.isVisible).sorted {
+            abs($0.frame.maxY - $1.frame.maxY) > 4 ? $0.frame.maxY > $1.frame.maxY : $0.frame.minX < $1.frame.minX
+        }
+        guard !showing.isEmpty else { return nil }
+        guard let current, let index = showing.firstIndex(of: current) else { return showing.first }
+        return showing[(index + (backwards ? showing.count - 1 : 1)) % showing.count]
+    }
+
     func isVisible(_ panel: Panel) -> Bool {
         panels[panel]?.isVisible ?? false
     }

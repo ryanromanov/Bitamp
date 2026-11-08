@@ -10,6 +10,9 @@ import AppKit
 ///
 /// Everything is drawn in skin pixels in the frame the Expansion Paks window wears.
 final class MediaLibraryView: SkinnedView, NSDraggingSource {
+    /// What VoiceOver calls the window.
+    override var accessibilityName: String { "Media Library" }
+
     /// What a drag from the library carries; the items themselves stay with the view.
     static let draggedItems = NSPasteboard.PasteboardType("com.ryanromanov.bitamp.library-items")
 
