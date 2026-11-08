@@ -186,16 +186,29 @@ class SkinnedView: NSView {
     private var accessibilityElements: [AnyHashable: SkinnedAccessibilityElement] = [:]
     private var accessibilityOrder: [AnyHashable] = []
 
+    /// The control with `id`, at the top or inside a list.
     func accessibleControl(_ id: AnyHashable) -> AccessibleControl? {
-        accessibleControls().first { $0.id == id }
+        func find(_ controls: [AccessibleControl]) -> AccessibleControl? {
+            for control in controls {
+                if control.id == id { return control }
+                if let found = find(control.children) { return found }
+            }
+            return nil
+        }
+        return find(accessibleControls())
     }
+
+    /// The control the window's keyboard is on, such as a playlist row, which VoiceOver
+    /// follows. Windows with a keyboard focus of their own override this.
+    var accessibilityFocusedID: AnyHashable? { nil }
 
     /// The view itself isn't one; its controls stand in its place, beside any real subviews
     /// (a text box's field).
     override func isAccessibilityElement() -> Bool { false }
 
     /// `controls` in the order they're seen: rows from the top, each from the left. A
-    /// control joins a row when its middle is within a few pixels of the row's first.
+    /// control joins a row when its middle is within a few pixels of the row's first. A
+    /// list's own children keep their order.
     static func readingOrder(_ controls: [AccessibleControl]) -> [AccessibleControl] {
         var rows: [(midY: CGFloat, controls: [AccessibleControl])] = []
         for control in controls.sorted(by: { $0.rect.midY < $1.rect.midY }) {
@@ -208,21 +221,33 @@ class SkinnedView: NSView {
         return rows.flatMap { $0.controls.sorted { $0.rect.minX < $1.rect.minX } }
     }
 
-    override func accessibilityChildren() -> [Any]? {
+    /// Makes sure every control, inside lists too, has its element, and returns the top
+    /// level's in reading order. Elements stay while their controls do.
+    @discardableResult
+    func syncAccessibilityElements() -> [SkinnedAccessibilityElement] {
         let controls = Self.readingOrder(accessibleControls())
-        let ids = controls.map(\.id)
-        // A control that became another kind needs another element.
-        let retyped = controls.filter { control in
-            accessibilityElements[control.id].map { type(of: $0) != control.elementClass } ?? false
-        }
-        if ids != accessibilityOrder || !retyped.isEmpty {
-            accessibilityElements = accessibilityElements.filter { ids.contains($0.key) }
-            for control in retyped { accessibilityElements[control.id] = nil }
-            for control in controls where accessibilityElements[control.id] == nil {
-                accessibilityElements[control.id] = control.elementClass.init(owner: self, id: control.id)
+        var seen: [AnyHashable] = []
+        func sync(_ controls: [AccessibleControl], parent: Any) -> [SkinnedAccessibilityElement] {
+            controls.map { control in
+                seen.append(control.id)
+                // A control that became another kind needs another element.
+                let element: SkinnedAccessibilityElement
+                if let existing = accessibilityElements[control.id], type(of: existing) == control.elementClass {
+                    element = existing
+                } else {
+                    element = control.elementClass.init(owner: self, id: control.id)
+                    accessibilityElements[control.id] = element
+                }
+                element.setAccessibilityParent(parent)
+                element.childElements = sync(control.children, parent: element)
+                return element
             }
+        }
+        let top = sync(controls, parent: self)
+        if seen != accessibilityOrder {
+            accessibilityElements = accessibilityElements.filter { seen.contains($0.key) }
             let changed = !accessibilityOrder.isEmpty
-            accessibilityOrder = ids
+            accessibilityOrder = seen
             if changed {
                 // After this answer, so VoiceOver asks again.
                 DispatchQueue.main.async { [weak self] in
@@ -231,19 +256,45 @@ class SkinnedView: NSView {
                 }
             }
         }
+        return top
+    }
+
+    override func accessibilityChildren() -> [Any]? {
         let fields = subviews.filter { !$0.isHidden && $0.isAccessibilityElement() }
-        return ids.compactMap { accessibilityElements[$0] } + fields
+        return syncAccessibilityElements() + fields
     }
 
     override func accessibilityHitTest(_ point: NSPoint) -> Any? {
         guard let window else { return super.accessibilityHitTest(point) }
         let inView = convert(window.convertPoint(fromScreen: point), from: nil)
         let pixel = CGPoint(x: inView.x / scale, y: (bounds.height - inView.y) / scale)
-        if let control = accessibleControls().last(where: { $0.rect.contains(pixel) }) {
-            _ = accessibilityChildren()
+        // The innermost control there: a row before its list.
+        func hit(_ controls: [AccessibleControl]) -> AccessibleControl? {
+            guard let control = controls.last(where: { $0.rect.contains(pixel) }) else { return nil }
+            return hit(control.children) ?? control
+        }
+        if let control = hit(accessibleControls()) {
+            syncAccessibilityElements()
             return accessibilityElements[control.id]
         }
         return super.accessibilityHitTest(point)
+    }
+
+    override var accessibilityFocusedUIElement: Any? {
+        guard let id = accessibilityFocusedID else { return super.accessibilityFocusedUIElement }
+        syncAccessibilityElements()
+        return accessibilityElements[id] ?? super.accessibilityFocusedUIElement
+    }
+
+    /// Tells VoiceOver the keyboard moved, to `accessibilityFocusedID`, and that its list's
+    /// selection may have changed, so it says where it is.
+    func accessibilityFocusMoved() {
+        syncAccessibilityElements()
+        guard let id = accessibilityFocusedID, let element = accessibilityElements[id] else { return }
+        if let list = element.accessibilityParent() as? SkinnedAccessibilityElement {
+            NSAccessibility.post(element: list, notification: .selectedChildrenChanged)
+        }
+        NSAccessibility.post(element: element, notification: .focusedUIElementChanged)
     }
 
     /// Tells VoiceOver a control's value changed by itself, such as a new song.

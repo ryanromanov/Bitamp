@@ -131,9 +131,9 @@ import Testing
         #expect(shadeLabels.contains("Unshade"))
         #expect(shadeLabels.contains("Play"))
         #expect(!shadeLabels.contains("Volume"))
-        // Frames are inside the strip.
+        // Everything is inside the strip.
         for element in elements(classic) {
-            #expect(element.accessibilityFrameInParentSpace().maxY <= classic.bounds.height + 0.5)
+            #expect((element.control?.rect.maxY ?? .infinity) <= ShadeLayout.height)
         }
     }
 
@@ -163,4 +163,99 @@ import Testing
         let labels = elements(view).compactMap { $0.accessibilityLabel() }
         #expect(labels == ["Volume", "Balance", "Unshade", "Close"])
     }
+
+    // MARK: - Playlist
+
+    func playlist(songs: Int) -> PlaylistView {
+        let urls = (1...songs).map { URL(fileURLWithPath: "/tmp/bitamp-a11y-\($0).mp3") }
+        for (index, url) in urls.enumerated() {
+            controller.info.seed(TrackMetadata(title: "Song \(index + 1)", artist: "The Low Bits", duration: 200), for: url)
+        }
+        controller.setQueueItems(urls, current: 1)
+        return PlaylistView(controller: controller, preferences: preferences, skin: DefaultSkin())
+    }
+
+    func list(_ view: SkinnedView) throws -> SkinnedAccessibilityElement {
+        try #require(elements(view).first { $0.accessibilityRole() == .list })
+    }
+
+    func key(_ code: UInt16, _ character: Int) -> NSEvent {
+        let characters = String(UnicodeScalar(character)!)
+        return NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                                characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code)!
+    }
+
+    @Test func playlistIsAListOfTheSongsInView() throws {
+        let view = playlist(songs: 40)
+        let list = try list(view)
+        #expect(list.accessibilityLabel() == "Playlist, 40 songs")
+        let rows = (list.accessibilityChildren() ?? []).compactMap { $0 as? SkinnedAccessibilityElement }
+        #expect(rows.count > 3 && rows.count < 40, "only the rows in view")
+        #expect(rows.first?.accessibilityRole() == .row)
+        #expect(rows.first?.accessibilityLabel() == "1. The Low Bits - Song 1, 3:20")
+        #expect(rows[1].accessibilityLabel()?.hasSuffix(", current song") == true, "highlighted, but not playing")
+        let labels = elements(view).compactMap { $0.accessibilityLabel() }
+        for label in ["Add", "Remove", "Select", "Arrange", "Playlist File", "Play", "Close", "Shade"] {
+            #expect(labels.contains(label), "missing \(label)")
+        }
+    }
+
+    /// The playlist's own arrow keys move through the songs, and VoiceOver follows.
+    @Test func voiceOverFollowsTheArrowKeys() throws {
+        let view = playlist(songs: 40)
+        view.keyDown(with: key(125, NSDownArrowFunctionKey))
+        view.keyDown(with: key(125, NSDownArrowFunctionKey))
+        let focused = try #require(view.accessibilityFocusedUIElement as? SkinnedAccessibilityElement)
+        #expect(focused.accessibilityLabel()?.hasPrefix("2. ") == true)
+        #expect(focused.isAccessibilitySelected())
+        #expect(try list(view).accessibilitySelectedChildren()?.count == 1)
+        // Far down the list, it's still a row VoiceOver can reach.
+        view.keyDown(with: key(119, NSEndFunctionKey))
+        let last = try #require(view.accessibilityFocusedUIElement as? SkinnedAccessibilityElement)
+        #expect(last.accessibilityLabel()?.hasPrefix("40. ") == true)
+    }
+
+    @Test func songsCanBeMovedWithoutDragging() throws {
+        let view = playlist(songs: 5)
+        let rows = try list(view).accessibilityChildren()?.compactMap { $0 as? SkinnedAccessibilityElement } ?? []
+        let first = try #require(rows.first)
+        #expect(first.accessibilityCustomActions()?.map(\.name) == ["Play", "Remove", "Move Up", "Move Down"])
+        let moveDown = try #require(first.accessibilityCustomActions()?.first { $0.name == "Move Down" })
+        _ = moveDown.handler?()
+        #expect(controller.queue.items[1].lastPathComponent == "bitamp-a11y-1.mp3")
+        let focused = try #require(view.accessibilityFocusedUIElement as? SkinnedAccessibilityElement)
+        #expect(focused.accessibilityLabel()?.hasPrefix("2. The Low Bits - Song 1") == true)
+        // Pressing a row selects it, as in any Mac list; Return plays.
+        #expect(rows[3].accessibilityPerformPress())
+        #expect(view.selection == [3])
+    }
+
+    // MARK: - Expansion Paks
+
+    @Test func cartridgesAndPlates() throws {
+        let pak = A11yPak()
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences, paks: PakRegistry([pak], preferences: preferences))
+        let view = PakView(controller: controller, skin: DefaultSkin(), scale: 1)
+        let labels = elements(view).compactMap { $0.accessibilityLabel() }
+        #expect(labels.contains { $0.hasPrefix("Radio Pak, ") })
+        let plate = try element(view, "Eject Radio Pak")
+        #expect(plate.accessibilityPerformPress())
+        #expect(!controller.paks.isInserted(pak))
+        #expect(try element(view, "Insert Radio Pak").accessibilityLabel() == "Insert Radio Pak")
+    }
+}
+
+/// A Pak with nothing in it, for the Paks window.
+@MainActor
+private final class A11yPak: Pak {
+    let id = "radio"
+    let name = "Radio"
+    let schemes: Set<String> = ["radio-test"]
+    let isAvailable = true
+    let account = PakAccount.connected(name: nil)
+    func connect() async throws {}
+    func disconnect() {}
+    func search(_ term: String) async throws -> [PakTrack] { [] }
+    func metadata(for url: URL) async -> PakTrack? { nil }
+    func playback(for url: URL) throws -> PakPlayback { throw CocoaError(.featureUnsupported) }
 }
