@@ -18,7 +18,9 @@ import Testing
     }
 
     func element(_ view: SkinnedView, _ label: String) throws -> SkinnedAccessibilityElement {
-        try #require(elements(view).first { $0.accessibilityLabel()?.hasPrefix(label) == true }, "no \(label)")
+        let all = elements(view)
+        return try #require(all.first { $0.accessibilityLabel() == label } ?? all.first { $0.accessibilityLabel()?.hasPrefix(label) == true },
+                            "no \(label)")
     }
 
     @Test func mainWindowNamesItsControls() throws {
@@ -72,6 +74,24 @@ import Testing
         #expect(!(try element(view, "Play") is NSAccessibilitySlider))
     }
 
+    /// VoiceOver goes through the controls as they're seen: row by row, left to right.
+    @Test func readsRowByRow() {
+        let view = MainView(controller: controller, preferences: preferences, skin: DefaultSkin())
+        let labels = elements(view).compactMap { $0.accessibilityLabel() }
+        func before(_ a: String, _ b: String) -> Bool {
+            (labels.firstIndex { $0.hasPrefix(a) } ?? .max) < (labels.firstIndex { $0.hasPrefix(b) } ?? .max)
+        }
+        #expect(before("Options", "Quit Bitamp"))
+        #expect(before("Volume", "Balance"))
+        #expect(before("Balance", "Equalizer"))
+        #expect(before("Equalizer", "Playlist"))
+        #expect(before("Playlist", "Position"))
+        #expect(before("Position", "Previous"))
+        #expect(before("Open Files", "Shuffle"))
+        #expect(before("Shuffle", "Repeat"))
+        #expect(before("Repeat", "About Bitamp"))
+    }
+
     /// The same element stays while its control does, so VoiceOver keeps its place.
     @Test func elementsStayTheSame() throws {
         let view = MainView(controller: controller, preferences: preferences, skin: DefaultSkin())
@@ -122,6 +142,6 @@ import Testing
         let view = EqualizerView(controller: controller, skin: DefaultSkin(), scale: 1)
         view.setShaded(true)
         let labels = elements(view).compactMap { $0.accessibilityLabel() }
-        #expect(labels == ["Unshade", "Close", "Volume", "Balance"])
+        #expect(labels == ["Volume", "Balance", "Unshade", "Close"])
     }
 }
