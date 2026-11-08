@@ -177,7 +177,8 @@ class SkinnedView: NSView {
     /// What VoiceOver calls this window, such as "Equalizer".
     var accessibilityName: String { "" }
 
-    /// The window's controls for VoiceOver, in reading order. Windows override this; it's
+    /// The window's controls for VoiceOver, in any order: VoiceOver gets them in reading
+    /// order, row by row (`readingOrder`). Windows override this; it's
     /// asked often, so it should be quick, and it should follow what's drawn now (shade
     /// mode, the skin's shape).
     func accessibleControls() -> [AccessibleControl] { [] }
@@ -193,8 +194,22 @@ class SkinnedView: NSView {
     /// (a text box's field).
     override func isAccessibilityElement() -> Bool { false }
 
+    /// `controls` in the order they're seen: rows from the top, each from the left. A
+    /// control joins a row when its middle is within a few pixels of the row's first.
+    static func readingOrder(_ controls: [AccessibleControl]) -> [AccessibleControl] {
+        var rows: [(midY: CGFloat, controls: [AccessibleControl])] = []
+        for control in controls.sorted(by: { $0.rect.midY < $1.rect.midY }) {
+            if let last = rows.last, control.rect.midY - last.midY <= 6 {
+                rows[rows.count - 1].controls.append(control)
+            } else {
+                rows.append((control.rect.midY, [control]))
+            }
+        }
+        return rows.flatMap { $0.controls.sorted { $0.rect.minX < $1.rect.minX } }
+    }
+
     override func accessibilityChildren() -> [Any]? {
-        let controls = accessibleControls()
+        let controls = Self.readingOrder(accessibleControls())
         let ids = controls.map(\.id)
         // A control that became another kind needs another element.
         let retyped = controls.filter { control in
