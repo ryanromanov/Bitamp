@@ -226,6 +226,118 @@ final class PlaylistView: SkinnedView {
         c.context.restoreGState()
     }
 
+    // MARK: - Accessibility
+
+    /// A song's row, by its place in the playlist; the same file can be in it twice.
+    private struct SongRow: Hashable { let index: Int }
+
+    override var accessibilityFocusedID: AnyHashable? {
+        guard let focus, visibleRange.contains(focus) else { return nil }
+        return SongRow(index: focus)
+    }
+
+    /// "3. The Low Bits - Dial-Up Sunrise, 4:05, playing" (or "current song" while stopped).
+    private func songLabel(_ index: Int) -> String {
+        let url = queue.items[index]
+        var label = "\(index + 1). \(controller.info.displayName(for: url))"
+        if let duration = controller.info.duration(for: url) { label += ", \(TimeFormat.clock(duration))" }
+        if index == queue.playingIndex { label += controller.player.state == .playing ? ", playing" : ", current song" }
+        return label
+    }
+
+    override func accessibleControls() -> [AccessibleControl] {
+        let size = pixelSize
+        var controls: [AccessibleControl] = []
+        if isShaded {
+            controls.append(AccessibleControl(id: "unshade", kind: .button, label: "Unshade", rect: ShadeLayout.playlistUnshade(width: size.width),
+                                              press: { [weak self] in self?.windowGroup?.toggleShade(.playlist) }))
+            controls.append(AccessibleControl(id: "close", kind: .button, label: "Close", rect: ShadeLayout.playlistClose(width: size.width),
+                                              press: { [weak self] in self?.windowGroup?.setVisible(.playlist, false) }))
+            if let index = queue.playingIndex ?? queue.currentIndex {
+                controls.append(AccessibleControl(id: "song", kind: .text, label: songLabel(index), rect: ShadeLayout.playlistTitle(width: size.width)))
+            }
+            return controls
+        }
+        controls.append(AccessibleControl(id: "shade", kind: .button, label: "Shade", rect: ShadeLayout.playlistShadeButton(width: size.width),
+                                          press: { [weak self] in self?.windowGroup?.toggleShade(.playlist) }))
+        controls.append(AccessibleControl(id: "close", kind: .button, label: "Close", rect: PlaylistLayout.close(in: size),
+                                          press: { [weak self] in self?.windowGroup?.setVisible(.playlist, false) }))
+
+        // The songs in view; the arrow keys move through the rest, and VoiceOver follows.
+        let rows = visibleRange.map { index in
+            AccessibleControl(
+                id: SongRow(index: index), kind: .row(selected: selection.contains(index)), label: songLabel(index), rect: rowRect(index),
+                press: { [weak self] in self?.focusRow(index) },
+                actions: [("Play", { [weak self] in self?.controller.playItem(at: index) }),
+                          ("Remove", { [weak self] in self?.removeRow(index) }),
+                          ("Move Up", { [weak self] in self?.moveRow(index, by: -1) }),
+                          ("Move Down", { [weak self] in self?.moveRow(index, by: 1) })])
+        }
+        let count = queue.count
+        controls.append(AccessibleControl(id: "songs", kind: .list, label: count == 0 ? "Playlist, empty" : "Playlist, \(count) song\(count == 1 ? "" : "s")",
+                                          rect: listRect, help: "Arrow keys move through the songs; Return plays; Delete removes.",
+                                          children: rows))
+
+        let buttons: [(PlaylistLayout.Button, String)] = [
+            (.add, "Add"), (.remove, "Remove"), (.select, "Select"), (.misc, "Arrange"), (.list, "Playlist File"),
+        ]
+        for (button, label) in buttons {
+            controls.append(AccessibleControl(id: button, kind: .button, label: label, rect: PlaylistLayout.rect(button, in: size),
+                                              press: { [weak self] in self?.showMenu(for: button) }))
+        }
+        let running = PlaylistLayout.runningTime(in: size)
+        let times = runningTimeText.split(separator: "/")
+        controls.append(AccessibleControl(id: "running", kind: .text,
+                                          label: "Selected \(times.first ?? ""), total \(times.last.map { $0.replacingOccurrences(of: "+", with: " so far") } ?? "")",
+                                          rect: CGRect(x: running.x, y: running.y, width: 60, height: 6)))
+        let transport: [(TransportButton, String)] = [
+            (.previous, "Previous"), (.play, "Play"), (.pause, "Pause"), (.stop, "Stop"), (.next, "Next"), (.eject, "Open Files"),
+        ]
+        for (button, label) in transport {
+            controls.append(AccessibleControl(id: "transport-\(label)", kind: .button, label: label, rect: PlaylistLayout.rect(button, in: size),
+                                              press: { [weak self] in self?.transport(button) }))
+        }
+        if controller.player.nowPlaying != nil {
+            let mini = PlaylistLayout.miniTime(in: size)
+            controls.append(AccessibleControl(id: "time", kind: .text, label: "Time, \(TimeFormat.clock(controller.player.currentTime))",
+                                              rect: CGRect(x: mini.x, y: mini.y, width: 25, height: 6)))
+        }
+        return controls
+    }
+
+    private func showMenu(for button: PlaylistLayout.Button) {
+        let rect = viewRect(forPixels: PlaylistLayout.rect(button, in: pixelSize))
+        menu(for: button).popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.maxY), in: self)
+    }
+
+    /// Selects one song and puts the keyboard there, as clicking it would.
+    private func focusRow(_ index: Int) {
+        guard index < queue.count else { return }
+        selection = [index]
+        anchor = index
+        focus = index
+        needsDisplay = true
+    }
+
+    private func removeRow(_ index: Int) {
+        guard index < queue.count else { return }
+        controller.remove([index])
+        selection = []
+        focus = queue.count == 0 ? nil : min(index, queue.count - 1)
+        needsDisplay = true
+        accessibilityFocusMoved()
+    }
+
+    private func moveRow(_ index: Int, by offset: Int) {
+        guard index < queue.count, let moved = controller.move([index], by: offset).first else { return }
+        selection = [moved]
+        anchor = moved
+        focus = moved
+        scrollToShow(moved)
+        needsDisplay = true
+        accessibilityFocusMoved()
+    }
+
     // MARK: - Mouse
 
     private func row(at point: CGPoint) -> Int {
@@ -272,8 +384,7 @@ final class PlaylistView: SkinnedView {
                 scrollRow = min(max(scrollRow, 0), maxScrollRow)
             }
         case .button(let button):
-            let rect = viewRect(forPixels: PlaylistLayout.rect(button, in: pixelSize))
-            menu(for: button).popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.maxY), in: self)
+            showMenu(for: button)
         case .transport(let button):
             transport(button)
         case .resizeGrip:
@@ -434,6 +545,7 @@ final class PlaylistView: SkinnedView {
         }
         focus = to
         scrollToShow(to)
+        accessibilityFocusMoved()
     }
 
     // MARK: - Button menus

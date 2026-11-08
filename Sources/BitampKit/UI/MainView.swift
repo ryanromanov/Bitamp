@@ -575,6 +575,14 @@ final class MainView: SkinnedView, NSMenuItemValidation {
                 self.needsDisplay = true
             })
         if orb == nil, !isShaded { add(.about, .button, "About Bitamp") }
+        // The visualizer's right-click menu, for VO-Shift-M.
+        if let index = controls.firstIndex(where: { $0.id == AnyHashable(Control.visualizer) }), let rect = accessibilityRect(.visualizer) {
+            controls[index].showMenu = { [weak self] in
+                guard let self else { return }
+                let at = self.viewRect(forPixels: rect)
+                Menus.visualization().popUp(positioning: nil, at: NSPoint(x: at.minX, y: at.minY), in: self)
+            }
+        }
         return controls
     }
 

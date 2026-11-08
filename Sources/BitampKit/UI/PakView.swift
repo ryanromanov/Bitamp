@@ -501,6 +501,49 @@ final class PakView: SkinnedView {
         return lines.prefix(2).map { String($0.prefix(fit)) }
     }
 
+    // MARK: - Accessibility
+
+    private struct Cartridge: Hashable { let index: Int }
+    private struct Plate: Hashable { let index: Int }
+
+    override func accessibleControls() -> [AccessibleControl] {
+        var controls = [AccessibleControl(id: "close", kind: .button, label: "Close", rect: closeRect,
+                                          press: { [weak self] in self?.windowGroup?.setVisible(.paks, false) })]
+        let area = slotArea
+        for index in visibleIndices {
+            let pak = paks[index]
+            let available = isAvailable(pak), inserted = controller.paks.isInserted(pak)
+            let rise = Int((rise[pak.id] ?? 0).rounded())
+            let plate = PakLayout.plate(index).offsetBy(dx: 0, dy: CGFloat(-offset))
+            let cartridge = PakLayout.cartridge(index, rise: rise).offsetBy(dx: 0, dy: CGFloat(-offset))
+            let shown = CGRect(x: cartridge.minX, y: cartridge.minY, width: cartridge.width, height: plate.minY - cartridge.minY)
+                .intersection(area)
+            let status = status(of: pak, available: available, inserted: inserted).lowercased()
+            let menu: () -> Void = { [weak self] in
+                guard let self else { return }
+                let rect = self.viewRect(forPixels: shown)
+                self.cartridgeMenu(index).popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.minY), in: self)
+            }
+            if !shown.isEmpty {
+                controls.append(AccessibleControl(
+                    id: Cartridge(index: index), kind: .button, label: "\(pak.name) Pak, \(status)", rect: shown,
+                    help: "Opens it. Its menu (VO-Shift-M) has settings, eject and remove.", isEnabled: available,
+                    press: { [weak self] in self?.activateCartridge(index) }, showMenu: menu))
+            }
+            let plateShown = plate.intersection(area)
+            if !plateShown.isEmpty {
+                controls.append(AccessibleControl(
+                    id: Plate(index: index), kind: .button, label: inserted ? "Eject \(pak.name) Pak" : "Insert \(pak.name) Pak",
+                    rect: plateShown, isEnabled: available,
+                    press: { [weak self] in
+                        guard let self else { return }
+                        self.setInserted(!self.controller.paks.isInserted(pak), pak)
+                    }))
+            }
+        }
+        return controls
+    }
+
     // MARK: - Mouse
 
     private func press(at point: CGPoint) -> Press? {
@@ -558,21 +601,26 @@ final class PakView: SkinnedView {
         case .close:
             windowGroup?.setVisible(.paks, false)
         case .cartridge(let index):
-            let pak = paks[index]
-            if !pak.isAvailable {
-                flashMessage?("\(pak.name) PAK NEEDS A NEWER MACOS")
-            } else if let external = pak as? ExternalPak, external.hasSettings, external.account == .disconnected {
-                // A companion Pak sets up in its own window, which browsing opens.
-                onSettings?(external)
-            } else if controller.paks.isInserted(pak) {
-                onBrowse?(pak)
-            } else {
-                setInserted(true, pak)
-            }
+            activateCartridge(index)
         case .plate(let index):
             let pak = paks[index]
             guard pak.isAvailable else { return }
             setInserted(!controller.paks.isInserted(pak), pak)
+        }
+    }
+
+    /// What clicking a cartridge does: open it, set it up, or put it back in.
+    private func activateCartridge(_ index: Int) {
+        let pak = paks[index]
+        if !pak.isAvailable {
+            flashMessage?("\(pak.name) PAK NEEDS A NEWER MACOS")
+        } else if let external = pak as? ExternalPak, external.hasSettings, external.account == .disconnected {
+            // A companion Pak sets up in its own window, which browsing opens.
+            onSettings?(external)
+        } else if controller.paks.isInserted(pak) {
+            onBrowse?(pak)
+        } else {
+            setInserted(true, pak)
         }
     }
 
@@ -586,6 +634,11 @@ final class PakView: SkinnedView {
         guard case .cartridge(let index)? = press(at: pixel(for: event)) ?? plateIndex(at: pixel(for: event)) else {
             return Menus.context()
         }
+        return cartridgeMenu(index)
+    }
+
+    /// A cartridge's menu: browse, eject or insert, settings, remove.
+    private func cartridgeMenu(_ index: Int) -> NSMenu {
         let pak = paks[index]
         let menu = NSMenu(title: pak.name)
         let inserted = controller.paks.isInserted(pak)

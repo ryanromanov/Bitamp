@@ -14,6 +14,10 @@ struct AccessibleControl {
         case text
         /// A link, such as a source to open in the browser.
         case link
+        /// A list of `children`, such as the playlist's songs.
+        case list
+        /// One of a list's items; selected or not.
+        case row(selected: Bool)
     }
 
     /// Stays the same while the control does, so VoiceOver keeps its place.
@@ -29,6 +33,13 @@ struct AccessibleControl {
     var decrement: (() -> Void)?
     /// Sets a slider to a value from 0 to 1, as VoiceOver may.
     var setValue: ((Double) -> Void)?
+    /// A list's items.
+    var children: [AccessibleControl] = []
+    /// More it can do, offered in VoiceOver's actions menu (VO-Command-Space): a song's
+    /// Play or Move Up, say.
+    var actions: [(name: String, perform: () -> Void)] = []
+    /// Its right-click menu, shown for VoiceOver's VO-Shift-M.
+    var showMenu: (() -> Void)?
 
     /// Which element class shows it; a control whose kind changes gets a new element.
     var elementClass: SkinnedAccessibilityElement.Type {
@@ -38,6 +49,8 @@ struct AccessibleControl {
         case .slider: SkinnedSliderElement.self
         case .text: SkinnedTextElement.self
         case .link: SkinnedLinkElement.self
+        case .list: SkinnedListElement.self
+        case .row: SkinnedRowElement.self
         }
     }
 }
@@ -60,6 +73,8 @@ class SkinnedAccessibilityElement: NSAccessibilityElement {
     }
 
     var control: AccessibleControl? { owner?.accessibleControl(id) }
+    /// A list's row elements, kept by the owner.
+    var childElements: [SkinnedAccessibilityElement] = []
 
     override func isAccessibilityElement() -> Bool { true }
 
@@ -69,6 +84,8 @@ class SkinnedAccessibilityElement: NSAccessibilityElement {
         case .checkBox?: .checkBox
         case .slider?: .slider
         case .link?: .link
+        case .list?: .list
+        case .row?: .row
         case .text?, nil: .staticText
         }
     }
@@ -93,9 +110,45 @@ class SkinnedAccessibilityElement: NSAccessibilityElement {
     override func accessibilityMinValue() -> Any? { 0.0 }
     override func accessibilityMaxValue() -> Any? { 1.0 }
 
-    override func accessibilityFrameInParentSpace() -> NSRect {
-        guard let owner, let control else { return .zero }
-        return owner.viewRect(forPixels: control.rect)
+    // On screen, worked out when asked, so it follows the window; rows inside a list
+    // can't count on AppKit converting from their parent's space.
+    override func accessibilityFrame() -> NSRect {
+        guard let owner, let control, owner.window != nil else { return .zero }
+        return NSAccessibility.screenRect(fromView: owner, rect: owner.viewRect(forPixels: control.rect))
+    }
+
+    override func accessibilityChildren() -> [Any]? {
+        childElements.isEmpty ? nil : childElements
+    }
+
+    override func isAccessibilitySelected() -> Bool {
+        if case .row(let selected)? = control?.kind { return selected }
+        return false
+    }
+
+    override func accessibilitySelectedChildren() -> [Any]? {
+        childElements.filter { $0.isAccessibilitySelected() }
+    }
+
+    override func isAccessibilityFocused() -> Bool {
+        owner?.accessibilityFocusedID == id
+    }
+
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        guard let actions = control?.actions, !actions.isEmpty else { return nil }
+        return actions.map { action in
+            NSAccessibilityCustomAction(name: action.name) { [weak self] in
+                action.perform()
+                self?.owner?.needsDisplay = true
+                return true
+            }
+        }
+    }
+
+    override func accessibilityPerformShowMenu() -> Bool {
+        guard let showMenu = control?.showMenu else { return false }
+        showMenu()
+        return true
     }
 
     override func accessibilityPerformPress() -> Bool {
@@ -138,6 +191,8 @@ final class SkinnedTextElement: SkinnedAccessibilityElement {
     override func accessibilityValue() -> Any? { control?.label }
 }
 final class SkinnedLinkElement: SkinnedAccessibilityElement {}
+final class SkinnedListElement: SkinnedAccessibilityElement {}
+final class SkinnedRowElement: SkinnedAccessibilityElement {}
 
 /// Adopting `NSAccessibilitySlider` is what makes VoiceOver offer its steps.
 final class SkinnedSliderElement: SkinnedAccessibilityElement, @preconcurrency NSAccessibilitySlider {
