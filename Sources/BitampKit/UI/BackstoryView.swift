@@ -500,6 +500,89 @@ final class BackstoryView: SkinnedView {
         }
     }
 
+    // MARK: - Accessibility
+
+    /// What the notes area says now, for VoiceOver.
+    private var bodyText: String? {
+        if !isInserted { return "The Backstory Pak is ejected. Insert it in the Expansion Paks window to look songs up." }
+        let service = usesOnDevice ? "the on-device model" : pak.provider.name
+        switch session.phase {
+        case .idle: return "Nothing playing."
+        case .reading, .needsSetup: return nil
+        case .untagged: return "Nothing to look up: this song has no title or artist tags."
+        case .off: return "Looking up is off."
+        case .waiting: return "Looking this song up in \(session.secondsUntilLookup) seconds."
+        case .ready: return usesOnDevice ? "Stays on this Mac, with Apple's on-device model." : "Sends the title, artist and album to \(service)."
+        case .looking where session.notes.isEmpty: return "Asking \(service)."
+        case .looking, .done:
+            var text = session.notes.text.replacingOccurrences(of: "\n\n", with: "\n")
+            if session.notes.isOnDevice { text += "\nNo sources: the on-device model knows less, and can get details wrong." }
+            return text
+        case .failed(let message, _): return message
+        }
+    }
+
+    private func buttonControl(_ number: Int, _ rect: CGRect, _ button: Button) -> AccessibleControl {
+        let selectedService = draftProvider ?? (pak.choosesOnDevice ? BackstoryPak.onDeviceName : pak.provider.name)
+        let kind: AccessibleControl.Kind, label: String
+        switch button {
+        case .lookup(let lookup):
+            kind = .checkBox(lookup == pak.lookup)
+            label = ["Every track": "Auto, look up every song", "When I ask": "Ask, look up when asked", "Off": "Off, don't look up"][lookup.rawValue] ?? lookup.rawValue
+        case .askAgain: (kind, label) = (.button, "Ask Again")
+        case .ask: (kind, label) = (.button, "Tell Me About This Song")
+        case .setUp where rect.height <= 8:
+            (kind, label) = (.button, usesOnDevice ? "Service: on-device model" : "Service: \(pak.provider.name), \(pak.model(of: pak.provider))")
+        case .setUp: (kind, label) = (.button, "Set Up")
+        case .provider(let name): (kind, label) = (.checkBox(name == selectedService), "Service: \(name)")
+        case .model(let name):
+            let provider = pak.providers.first { $0.name == selectedService } ?? pak.provider
+            (kind, label) = (.checkBox(name == (draftModel ?? pak.model(of: provider))), "Model: \(name)")
+        case .prefetch(let on): (kind, label) = (.checkBox(on == (draftPrefetch ?? pak.prefetch)), on ? "Next song early" : "Next song when it plays")
+        case .save: (kind, label) = (.button, "Save")
+        case .cancel: (kind, label) = (.button, "Cancel")
+        }
+        return AccessibleControl(id: "button-\(number)", kind: kind, label: label, rect: rect,
+                                 press: { [weak self] in
+                                     self?.click(button)
+                                     self?.needsDisplay = true
+                                 })
+    }
+
+    /// Built from what the last frame drew: its buttons and source links.
+    override func accessibleControls() -> [AccessibleControl] {
+        let parts = self.parts
+        var controls = [AccessibleControl(id: "close", kind: .button, label: "Close",
+                                          rect: PanelFrame(skin: skin, size: pixelSize, title: "BACKSTORY", active: isActive).close,
+                                          press: { [weak self] in self?.windowGroup?.setVisible(.backstory, false) })]
+        if let track = session.track {
+            controls.append(AccessibleControl(id: "song", kind: .text,
+                                              label: [track.title, track.artist, track.album].compactMap { $0 }.joined(separator: ", "),
+                                              rect: CGRect(x: parts.header.minX + CGFloat(BackstoryLayout.cover) + 6, y: parts.header.minY,
+                                                           width: parts.header.width - CGFloat(BackstoryLayout.cover) - 6, height: 22)))
+        }
+        if !showsSetup, let text = bodyText {
+            // As tall as the words, so the sources under them come after.
+            let lines = text.components(separatedBy: "\n").reduce(0) { $0 + max(1, Self.wrap($1, width: Int(parts.body.width)).count) }
+            let height = min(parts.body.height, CGFloat(lines * ListFont.lineHeight) - scroll)
+            controls.append(AccessibleControl(id: "notes", kind: .text, label: text,
+                                              rect: CGRect(x: parts.body.minX, y: parts.body.minY, width: parts.body.width, height: max(height, 8))))
+        } else if showsSetup {
+            controls.append(AccessibleControl(id: "about", kind: .text,
+                                              label: "Only the song's title, artist and album are sent, never the audio. Nothing goes to Bitamp.",
+                                              rect: CGRect(x: parts.body.minX, y: parts.body.minY, width: parts.body.width, height: 20)))
+        }
+        for (number, (rect, button)) in buttons.enumerated() where rect.intersects(parts.content) {
+            controls.append(buttonControl(number, rect, button))
+        }
+        for (number, (rect, url)) in sourceRects.enumerated() where rect.intersects(parts.body) {
+            let label = session.notes.sources.first { $0.url == url }.map { "\(number + 1): \(Self.sourceLabel($0))" } ?? url.absoluteString
+            controls.append(AccessibleControl(id: "source-\(number)", kind: .link, label: label, rect: rect,
+                                              press: { NSWorkspace.shared.open(url) }))
+        }
+        return controls
+    }
+
     // MARK: - Mouse
 
     private func press(at point: CGPoint) -> Press? {

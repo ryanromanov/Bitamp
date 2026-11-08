@@ -510,6 +510,141 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
         c.fill(nx, ny + 6, 4, 2, dim)
     }
 
+    // MARK: - Accessibility
+
+    /// One of the page's items, by its place on the page; a new page gets new elements.
+    private struct ItemRow: Hashable { let generation: Int, index: Int }
+    private struct SectionRow: Hashable { let id: String }
+
+    override var accessibilityFocusedID: AnyHashable? {
+        guard let focus, itemRect(focus) != nil else { return nil }
+        return ItemRow(generation: generation, index: focus)
+    }
+
+    /// Where item `index` is drawn now, or nil when it's scrolled out of view.
+    private func itemRect(_ index: Int) -> CGRect? {
+        guard positions.indices.contains(index) else { return nil }
+        let parts = self.parts
+        let (blockIndex, column) = positions[index]
+        let block = blocks[blockIndex]
+        let top = parts.list.minY + CGFloat(block.y) - scroll
+        guard top + CGFloat(block.height) > parts.list.minY, top < parts.list.maxY else { return nil }
+        if case .grid = block.kind {
+            let cell = LibraryLayout.cell.width
+            return CGRect(x: parts.list.minX + CGFloat(column) * cell, y: top, width: cell, height: CGFloat(block.height))
+        }
+        return CGRect(x: parts.list.minX, y: top, width: parts.list.width, height: CGFloat(block.height))
+    }
+
+    private func itemLabel(_ item: PakItem) -> String {
+        switch item {
+        case .track(let track):
+            return [track.title, track.artist, track.duration.map(TimeFormat.clock)].compactMap { $0 }.joined(separator: ", ")
+        case .place(let place):
+            let kind: String? = switch place.kind {
+            case .album: "album"
+            case .artist: "artist"
+            case .playlist: "playlist"
+            case .section: nil
+            }
+            return [place.title, place.subtitle, kind].compactMap { $0 }.joined(separator: ", ")
+        }
+    }
+
+    override func accessibleControls() -> [AccessibleControl] {
+        let parts = self.parts
+        var controls = [AccessibleControl(id: "close", kind: .button, label: "Close",
+                                          rect: PanelFrame(skin: skin, size: pixelSize, title: title, active: isActive).close,
+                                          press: { [weak self] in self?.windowGroup?.setVisible(.library, false) })]
+
+        // The Pak's sections, under their group headings.
+        var sections: [AccessibleControl] = []
+        var y = parts.sectionsTop - Int(sidebarScroll)
+        for (index, entry) in sidebar.enumerated() {
+            if entry.place == nil, index > 0 { y += 3 }
+            let rect = CGRect(x: parts.sidebar.minX, y: CGFloat(y), width: parts.sidebar.width, height: CGFloat(LibraryLayout.sidebarRow))
+            y += LibraryLayout.sidebarRow
+            guard rect.minY >= CGFloat(parts.sectionsTop) - 1, rect.maxY <= parts.sidebar.maxY + 1 else { continue }
+            if let place = entry.place {
+                sections.append(AccessibleControl(id: SectionRow(id: place.id), kind: .row(selected: place.id == selectedSection),
+                                                  label: entry.title, rect: rect,
+                                                  press: { [weak self] in self?.openSection(place) }))
+            } else {
+                sections.append(AccessibleControl(id: "group-\(index)", kind: .text, label: entry.title, rect: rect))
+            }
+        }
+        if !sections.isEmpty {
+            controls.append(AccessibleControl(id: "sections", kind: .list, label: "Sections",
+                                              rect: CGRect(x: parts.sidebar.minX, y: CGFloat(parts.sectionsTop), width: parts.sidebar.width,
+                                                           height: parts.sidebar.maxY - CGFloat(parts.sectionsTop)),
+                                              children: sections))
+        }
+
+        if !history.isEmpty {
+            controls.append(AccessibleControl(id: "back", kind: .button, label: "Back", rect: backRect,
+                                              press: { [weak self] in self?.goBack() }))
+        }
+        let (play, add) = buttonRects(parts)
+        if let shown {
+            controls.append(AccessibleControl(id: "title", kind: .text, label: shown.title,
+                                              rect: CGRect(x: parts.bar.minX + 40, y: parts.bar.minY, width: play.minX - parts.bar.minX - 40, height: parts.bar.height)))
+        }
+        controls.append(AccessibleControl(id: "play", kind: .button, label: "Play", rect: play,
+                                          help: "Plays what's selected, or the whole album or playlist.",
+                                          press: { [weak self] in self?.playOrAdd(play: true) }))
+        controls.append(AccessibleControl(id: "add", kind: .button, label: "Add", rect: add,
+                                          help: "Adds what's selected, or the whole album or playlist, to the playlist.",
+                                          press: { [weak self] in self?.playOrAdd(play: false) }))
+
+        // The page: its header, shelf titles, and the songs and covers in view.
+        var page: [AccessibleControl] = []
+        for (number, block) in blocks.enumerated() {
+            let top = parts.list.minY + CGFloat(block.y) - scroll
+            guard top + CGFloat(block.height) > parts.list.minY, top < parts.list.maxY else { continue }
+            let rect = CGRect(x: parts.list.minX, y: top, width: parts.list.width, height: CGFloat(block.height))
+            switch block.kind {
+            case .header:
+                if let header = shown?.header {
+                    page.append(AccessibleControl(id: "header", kind: .text,
+                                                  label: [header.title, header.subtitle, header.detail].compactMap { $0 }.joined(separator: ", "),
+                                                  rect: rect))
+                }
+            case .shelfTitle(let title):
+                page.append(AccessibleControl(id: "shelf-\(number)", kind: .text, label: title, rect: rect))
+            case .track(let index):
+                page.append(itemControl(index))
+            case .grid(let indices):
+                page += indices.map(itemControl)
+            }
+        }
+        if let message {
+            page.append(AccessibleControl(id: "message", kind: .text, label: message, rect: parts.list))
+        }
+        controls.append(AccessibleControl(id: "page", kind: .list, label: shown.map { "\($0.title), \(items.count) item\(items.count == 1 ? "" : "s")" } ?? "Nothing shown",
+                                          rect: parts.list, help: "Arrow keys move through it; Return opens or plays.", children: page))
+        return controls
+    }
+
+    private func itemControl(_ index: Int) -> AccessibleControl {
+        let item = items[index]
+        var actions: [(name: String, perform: () -> Void)] = [
+            ("Play", { [weak self] in self?.select(index, then: true) }),
+            ("Add to Playlist", { [weak self] in self?.select(index, then: false) }),
+        ]
+        if case .place(let place) = item { actions.insert(("Open", { [weak self] in self?.open(place) }), at: 0) }
+        return AccessibleControl(
+            id: ItemRow(generation: generation, index: index), kind: .row(selected: selection.contains(index)),
+            label: itemLabel(item), rect: itemRect(index) ?? .zero,
+            press: { [weak self] in self?.moveFocus(to: index) },
+            actions: actions)
+    }
+
+    /// Plays or adds one item, by selecting it first.
+    private func select(_ index: Int, then play: Bool) {
+        moveFocus(to: index)
+        playOrAdd(play: play)
+    }
+
     // MARK: - Hit testing
 
     /// The item at `point` in the list, by its index in `items`.
@@ -774,6 +909,7 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
             anchor = index
         }
         focus = index
+        defer { accessibilityFocusMoved() }
         let block = blocks[positions[index].block]
         let top = CGFloat(block.y), bottom = CGFloat(block.y + block.height)
         if top < scroll {

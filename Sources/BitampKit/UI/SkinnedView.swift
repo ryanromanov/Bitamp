@@ -260,7 +260,8 @@ class SkinnedView: NSView {
     }
 
     override func accessibilityChildren() -> [Any]? {
-        let fields = subviews.filter { !$0.isHidden && $0.isAccessibilityElement() }
+        // A text field says it isn't an element (its cell is), so it's given as it is.
+        let fields = subviews.filter { !$0.isHidden }
         return syncAccessibilityElements() + fields
     }
 
