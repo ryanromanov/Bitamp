@@ -278,6 +278,32 @@ extension AccessibilityTests {
         #expect(focused.accessibilityLabel() == rows[1].accessibilityLabel())
     }
 
+    /// Once VoiceOver's cursor is in the sections, the arrow keys go through them, opening
+    /// each, as in a Mac sidebar; Return goes into the page.
+    @Test func arrowKeysFollowVoiceOverIntoTheSections() async throws {
+        let pak = LibraryPak()
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences, paks: PakRegistry([pak]))
+        let view = MediaLibraryView(controller: controller, skin: DefaultSkin(), scale: 1)
+        view.show(pak)
+        for _ in 0..<200 where view.shown?.items.isEmpty != false { try await Task.sleep(for: .milliseconds(5)) }
+        let sections = try #require(elements(view).first { $0.accessibilityLabel() == "Sections" })
+        let rows = (sections.accessibilityChildren() ?? []).compactMap { $0 as? SkinnedAccessibilityElement }.filter { $0.accessibilityRole() == .row }
+        #expect(rows.map { $0.accessibilityLabel() ?? "" } == ["Albums", "Songs"])
+        #expect(rows[0].isAccessibilitySelectorAllowed(#selector(NSAccessibilityElement.setAccessibilityFocused(_:))))
+
+        rows[0].setAccessibilityFocused(true)
+        #expect(view.keysInSections)
+        view.keyDown(with: key(125, NSDownArrowFunctionKey))
+        #expect(view.shown?.title == "Songs")
+        #expect((view.accessibilityFocusedUIElement as? SkinnedAccessibilityElement)?.accessibilityLabel() == "Songs")
+
+        for _ in 0..<200 where view.shown?.items.isEmpty != false { try await Task.sleep(for: .milliseconds(5)) }
+        view.keyDown(with: key(36, 13))
+        #expect(!view.keysInSections)
+        #expect(view.focus == 0)
+        #expect(view.shown?.title == "Songs")
+    }
+
     // MARK: - Backstory
 
     @Test func backstoryReadsItsNotesAndSources() async throws {

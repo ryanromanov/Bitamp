@@ -40,6 +40,9 @@ struct AccessibleControl {
     var actions: [(name: String, perform: () -> Void)] = []
     /// Its right-click menu, shown for VoiceOver's VO-Shift-M.
     var showMenu: (() -> Void)?
+    /// Brings the window's keyboard to it, when VoiceOver's cursor lands on it and the
+    /// keyboard follows (VoiceOver's default): a sidebar section, say.
+    var takeFocus: (() -> Void)?
 
     /// Which element class shows it; a control whose kind changes gets a new element.
     var elementClass: SkinnedAccessibilityElement.Type {
@@ -132,6 +135,16 @@ class SkinnedAccessibilityElement: NSAccessibilityElement {
 
     override func isAccessibilityFocused() -> Bool {
         owner?.accessibilityFocusedID == id
+    }
+
+    override func setAccessibilityFocused(_ focused: Bool) {
+        guard focused, let takeFocus = control?.takeFocus else { return }
+        takeFocus()
+        owner?.needsDisplay = true
+    }
+
+    override func isAccessibilitySelectorAllowed(_ selector: Selector) -> Bool {
+        selector == #selector(setAccessibilityFocused(_:)) ? control?.takeFocus != nil : super.isAccessibilitySelectorAllowed(selector)
     }
 
     override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
