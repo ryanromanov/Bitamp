@@ -125,6 +125,79 @@ final class LibraryPak: Pak {
         #expect(pak.browsed.count == 2)
     }
 
+    /// The library opens again on the section it showed last; another Pak starts at its first.
+    @Test func remembersTheSectionItShowed() async throws {
+        _ = NSApplication.shared
+        let pak = LibraryPak()
+        let defaults = UserDefaults(suiteName: "BitampLibraryPlace-\(UUID().uuidString)")!
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences(), paks: PakRegistry([pak]))
+        let view = MediaLibraryView(controller: controller, skin: DefaultSkin(), scale: 1, defaults: defaults)
+        view.show(pak)
+        try await settle { view.shown?.shelves.isEmpty == false }
+        #expect(defaults.string(forKey: MediaLibraryView.pakKey) == "shelf")
+        let songs = try #require(sectionRow(view, "Songs"))
+        #expect(songs.accessibilityPerformPress())
+        #expect(view.shown?.title == "Songs")
+
+        let again = MediaLibraryView(controller: controller, skin: DefaultSkin(), scale: 1, defaults: defaults)
+        again.show(pak)
+        try await settle { again.shown?.shelves.isEmpty == false }
+        #expect(again.shown?.title == "Songs")
+    }
+
+    private func sectionRow(_ view: SkinnedView, _ label: String) -> SkinnedAccessibilityElement? {
+        func walk(_ elements: [Any]) -> SkinnedAccessibilityElement? {
+            for case let element as SkinnedAccessibilityElement in elements {
+                if element.accessibilityRole() == .row, element.accessibilityLabel() == label { return element }
+                if let found = walk(element.accessibilityChildren() ?? []) { return found }
+            }
+            return nil
+        }
+        return walk(view.accessibilityChildren() ?? [])
+    }
+
+    /// Shaded, the library is the playlist's strip with the Pak and page on it, and it comes
+    /// back to its size; the shade is kept for the next launch.
+    @Test func shadesToAStrip() async throws {
+        _ = NSApplication.shared
+        let pak = LibraryPak()
+        let defaults = UserDefaults(suiteName: "BitampLibraryShade-\(UUID().uuidString)")!
+        let preferences = Preferences(defaults: defaults)
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences, paks: PakRegistry([pak]))
+        func windows() -> (SkinnedWindow, SkinnedWindow, WindowGroup, MediaLibraryView) {
+            let main = SkinnedWindow(view: MainView(controller: controller, preferences: preferences, skin: DefaultSkin()),
+                                     layoutName: "MainWindow", isMain: true)
+            let view = MediaLibraryView(controller: controller, skin: DefaultSkin(), scale: preferences.scale)
+            let library = SkinnedWindow(view: view, layoutName: "LibraryWindow", isMain: false)
+            let group = WindowGroup(main: main, panels: [.library: library], defaults: defaults)
+            group.restore()
+            return (main, library, group, view)
+        }
+        let (main, library, group, view) = windows()
+        defer { main.orderOut(nil); library.orderOut(nil) }
+        view.show(pak)
+        try await settle { view.shown?.shelves.isEmpty == false }
+        group.setVisible(.library, true)
+        let full = view.pixelSize
+
+        group.toggleShade(.library)
+        #expect(view.pixelSize == CGSize(width: full.width, height: ShadeLayout.height))
+        let labels = (view.accessibilityChildren() ?? []).compactMap { ($0 as? SkinnedAccessibilityElement)?.accessibilityLabel() }
+        #expect(labels.contains("Shelf: Albums") && labels.contains("Unshade") && labels.contains("Close"))
+        #expect(!labels.contains("Play"))
+        group.saveLayout()
+
+        let (main2, library2, group2, view2) = windows()
+        defer { main2.orderOut(nil); library2.orderOut(nil) }
+        #expect(view2.isShaded)
+        group2.toggleShade(.library)
+        #expect(view2.pixelSize == full)
+
+        group.toggleShade(.library)
+        #expect(view.pixelSize == full)
+        #expect(view.shown?.items.count == 8)
+    }
+
     @Test func playAddsAWholeAlbumWhenNothingIsSelected() async throws {
         _ = NSApplication.shared
         let pak = LibraryPak()

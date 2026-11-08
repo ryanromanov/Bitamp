@@ -50,7 +50,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let playlistView = PlaylistView(controller: controller, preferences: preferences, skin: skin)
         playlistView.keyFallback = mainView
         let pakView = PakView(controller: controller, skin: skin, scale: preferences.scale)
-        let libraryView = MediaLibraryView(controller: controller, skin: skin, scale: preferences.scale, covers: .standard())
+        let libraryView = MediaLibraryView(controller: controller, skin: skin, scale: preferences.scale, covers: .standard(), defaults: .standard)
         libraryView.keyFallback = mainView
         playlistView.onLibraryDrop = { [weak libraryView] index in libraryView?.dropDragged(at: index) }
         self.libraryView = libraryView
@@ -117,9 +117,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         windowGroup?.restore()
-        // A library left open at quit opens on the first Pak that can show it.
+        // A library left open at quit opens on the Pak it showed, or the first that can.
         if windowGroup?.isVisible(.library) == true {
-            if let pak = firstMusicPak {
+            if let pak = libraryPak {
                 libraryView?.show(pak)
             } else {
                 windowGroup?.setVisible(.library, false)
@@ -394,6 +394,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowGroup?.toggleShade(.playlist)
     }
 
+    @objc private func toggleLibraryShade(_ sender: Any?) {
+        windowGroup?.toggleShade(.library)
+    }
+
     @objc private func toggleShadows(_ sender: Any?) {
         preferences.windowShadows.toggle()
         windowGroup?.setShadows(preferences.windowShadows)
@@ -467,6 +471,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         paks.paks.first { $0.isMusicSource && $0.isAvailable && paks.isInserted($0) }
     }
 
+    /// The Pak the library showed last, if it can be browsed now; else the first that can.
+    private var libraryPak: Pak? {
+        let saved = UserDefaults.standard.string(forKey: MediaLibraryView.pakKey)
+        return paks.paks.first { $0.id == saved && $0.isMusicSource && $0.isAvailable && paks.isInserted($0) } ?? firstMusicPak
+    }
+
     /// Opens the Media Library on `pak`'s music; a companion Pak opens its own window.
     private func showLibrary(_ pak: Pak) {
         if pak === backstoryPak {
@@ -488,7 +498,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleLibrary(_ sender: Any?) {
         guard let windowGroup else { return }
-        if !windowGroup.isVisible(.library), libraryView?.pak == nil, let pak = firstMusicPak {
+        if !windowGroup.isVisible(.library), libraryView?.pak == nil, let pak = libraryPak {
             libraryView?.show(pak)
         }
         windowGroup.toggle(.library)
@@ -547,14 +557,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let mainShade = Menus.item("Shade Main Window", #selector(MainView.toggleShade(_:)), "w", [.control])
         let equalizerShade = Menus.item("Shade Equalizer", #selector(toggleEqualizerShade(_:)), "w", [.control, .option])
         let playlistShade = Menus.item("Shade Playlist", #selector(togglePlaylistShade(_:)), "w", [.control, .shift])
+        let libraryShade = Menus.item("Shade Media Library", #selector(toggleLibraryShade(_:)))
         let shadows = Menus.item("Window Shadows", #selector(toggleShadows(_:)))
         let raiseAll = Menus.item("Bring All Windows Forward", #selector(toggleRaiseAllWindows(_:)))
         let backstory = backstoryPak.map { _ in Menus.item("Backstory", #selector(toggleBackstory(_:)), "b", [.option]) }
-        for item in [mainWindow, equalizer, playlist, paksWindow, library, regroup, minimize, equalizerShade, playlistShade, shadows, raiseAll]
+        for item in [mainWindow, equalizer, playlist, paksWindow, library, regroup, minimize, equalizerShade, playlistShade, libraryShade, shadows, raiseAll]
             + [backstory].compactMap({ $0 }) { item.target = self }
         let windowMenu = Menus.menu("Window", [
             mainWindow, equalizer, playlist, paksWindow, library] + [backstory].compactMap { $0 } + [regroup, .separator(),
-            mainShade, equalizerShade, playlistShade, .separator(),
+            mainShade, equalizerShade, playlistShade, libraryShade, .separator(),
             Menus.submenu(Menus.menu("Size", sizes)), shadows, raiseAll, .separator(),
             minimize, cycle, cycleBack,
         ])
@@ -599,6 +610,9 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(togglePlaylistShade(_:)):
             item.state = windowGroup.map { $0.isShaded(.playlist) } == true ? .on : .off
             return windowGroup?.isVisible(.playlist) == true
+        case #selector(toggleLibraryShade(_:)):
+            item.state = windowGroup.map { $0.isShaded(.library) } == true ? .on : .off
+            return windowGroup?.isVisible(.library) == true
         default: break
         }
         return true

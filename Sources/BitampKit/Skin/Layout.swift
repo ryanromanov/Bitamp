@@ -285,6 +285,11 @@ enum ShadeLayout {
         CGRect(x: 5, y: 4, width: width - 57, height: 6)
     }
 
+    /// The Media Library's strip has no time, so its text runs up to the buttons.
+    static func libraryTitle(width: CGFloat) -> CGRect {
+        CGRect(x: 5, y: 4, width: width - 26, height: 6)
+    }
+
     static func playlistTime(width: CGFloat) -> CGPoint {
         CGPoint(x: width - 48, y: 4)
     }
