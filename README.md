@@ -58,12 +58,12 @@ To install a Pak, double-click its `.bitpak`, drop it on Bitamp, or use File ▸
 Backstory is an Expansion Pak that comes plugged in. Instead of music, it tells you about the song that's playing: how it was made, who played on it, samples and covers, with numbered sources you can click (Window ▸ Backstory, ⌥B, or its cartridge).
 
 - **Free, with nothing to set up:** on macOS 26 or later with Apple Intelligence turned on, it uses **Apple's on-device model**. It's free and private, but on its own it knows little, so Backstory marks those notes and lists no sources. Turn on **Wikipedia** in the setup and it writes from the song's Wikipedia article instead (or the album's or artist's), with the article as its source; that sends the title, artist and album to Wikipedia. Songs without an article get notes from memory, marked as before.
-- **Richer notes, with sources:** click the service under the song's title and pick **Claude** (Sonnet by default, about 4¢ a song, or Opus for richer notes) or **OpenAI** (GPT-5 mini, about 2¢, or GPT-5.5), with your own API key, kept in your Keychain. These look the song up on the web. Offline, the on-device model answers instead.
+- **Richer notes, with sources:** click **SETTINGS** in the Backstory window (or right-click its cartridge ▸ Settings…), choose **Claude** (Sonnet by default, about 4¢ a song, or Opus for richer notes) or **OpenAI** (GPT-5 mini, about 2¢, or GPT-5.5), with your own API key, kept in your Keychain. These look the song up on the web. Offline, the on-device model answers instead.
 
 - **When:** along the bottom, choose AUTO to look up each song after it has played two seconds, ASK to look up only when you press the button, or OFF. Songs you skip within two seconds are never looked up. AUTO is the start with the on-device model; with Claude or OpenAI, which cost money, it's ASK until you choose.
 - **What's sent:** only the song's title, artist and album, never the audio or a file's name, and only while the Backstory window is open. Nothing goes to Bitamp.
 - **Saved notes:** a song you've looked up keeps its notes, so playing it again is free and instant.
-- **EARLY:** in the setup (click the service under the title), this looks up the next song shortly before it starts, so its notes are ready. A song you then skip still costs.
+- **+ NEXT EARLY:** beside AUTO, this looks up the next song shortly before it starts, so its notes are ready. With Claude or OpenAI, a song you then skip still costs.
 
 ## Download
 

@@ -64,7 +64,6 @@ final class BackstoryView: SkinnedView {
     /// The setup's choices before they're saved.
     private var draftProvider: String?
     private var draftModel: String?
-    private var draftPrefetch: Bool?
     private var draftWikipedia: Bool?
 
     private var scroll: CGFloat = 0 {
@@ -80,7 +79,7 @@ final class BackstoryView: SkinnedView {
     private var buttons: [(CGRect, Button)] = []
 
     private enum Button: Equatable {
-        case lookup(BackstoryPak.Lookup), askAgain, ask, setUp, provider(String), model(String), prefetch(Bool), wikipedia(Bool), save, cancel
+        case lookup(BackstoryPak.Lookup), askAgain, ask, setUp, settings, model(String), service(String), back, early, wikipedia(Bool), save, cancel
     }
 
     private enum Press: Equatable {
@@ -228,6 +227,11 @@ final class BackstoryView: SkinnedView {
             buttons.append((CGRect(x: textX, y: y + 24, width: PixelFont.width(of: service) + 2, height: 8), .setUp))
             c.text(service, textX, y + 25, hot ? colors.current : dim)
         }
+        // The setup, where anyone can see it; the service's name opens it too.
+        let label = "SETTINGS"
+        let width = PixelFont.width(of: label) + 7
+        drawButton(c, label, CGRect(x: parts.right - width, y: y + 21, width: width, height: 12), .settings,
+                   selected: showsSetup, colors)
     }
 
     private func drawBar(_ c: Canvas, _ parts: BackstoryLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor) {
@@ -239,6 +243,14 @@ final class BackstoryView: SkinnedView {
         for (lookup, label) in [(BackstoryPak.Lookup.everyTrack, "AUTO"), (.whenAsked, "ASK"), (.off, "OFF")] {
             let rect = CGRect(x: x, y: Int(bar.minY), width: PixelFont.width(of: label) + 7, height: Int(bar.height))
             drawButton(c, label, rect, .lookup(lookup), selected: lookup == current, colors)
+            x += Int(rect.width) + 2
+        }
+        // Readying the next song early only applies to AUTO, so it sits beside it.
+        if current == .everyTrack {
+            let label = "+ NEXT EARLY"
+            x += 4
+            let rect = CGRect(x: x, y: Int(bar.minY), width: PixelFont.width(of: label) + 7, height: Int(bar.height))
+            drawButton(c, label, rect, .early, selected: pak.prefetch, colors)
             x += Int(rect.width) + 2
         }
         let again = [.done, .looking].contains(session.phase) || { if case .failed = session.phase { return true }; return false }()
@@ -277,7 +289,8 @@ final class BackstoryView: SkinnedView {
             ListFont.draw(text, in: c, x: x + (width - ListFont.width(of: text)) / 2, y: y, color: color)
         }
 
-        if !isInserted {
+        // The setup works while ejected too, as the cartridge's Settings… opens it.
+        if !isInserted, !settingUp {
             paragraph("The Backstory Pak is ejected. Insert it in the Expansion Paks window to look songs up.", dim)
             return y - top
         }
@@ -337,66 +350,136 @@ final class BackstoryView: SkinnedView {
         return y - top
     }
 
+    /// The setup, in two steps: where the notes come from, then that service's options.
     private func drawSetup(_ c: Canvas, _ parts: BackstoryLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor, top: Int) -> Int {
         let x = parts.left, width = Int(parts.body.width)
         var y = top
-        for line in Self.wrap(setupIntro, width: width) {
-            ListFont.draw(line, in: c, x: x, y: y, color: colors.normal)
-            y += ListFont.lineHeight
+        func paragraph(_ text: String, _ color: CGColor, indent: Int = 0) {
+            for line in Self.wrap(text, width: width - indent) {
+                ListFont.draw(line, in: c, x: x + indent, y: y, color: color)
+                y += ListFont.lineHeight
+            }
         }
-        y += 3
+        guard let page = draftProvider else {
+            // Step 1: the services, one card each.
+            paragraph(Self.chooseTitle, colors.normal)
+            y += 4
+            for service in pak.services {
+                y = drawCard(c, service, x: x, y: y, width: width, colors, dim) + 3
+            }
+            if let footer = chooseFooter { paragraph(footer, dim) }
+            if pak.choice() != nil {
+                y += 4
+                drawButton(c, "CANCEL", CGRect(x: x, y: y, width: PixelFont.width(of: "CANCEL") + 9, height: 13), .cancel, selected: false, colors)
+                y += 13
+            }
+            return y - top
+        }
+        // Step 2: one service's options.
+        let back = CGRect(x: x, y: y, width: PixelFont.width(of: "< BACK") + 9, height: 13)
+        drawButton(c, "< BACK", back, .back, selected: false, colors)
+        c.text(Self.pageTitle(page), Int(back.maxX) + 6, y + 4, colors.current)
+        y += 19
+        paragraph(pageText(page), dim)
+        y += 6
         let labelWidth = 44
-        let selected = selectedService
-        if pak.services.count > 1 {
-            c.text("SERVICE", x, y + 4, dim)
+        if page == BackstoryPak.onDeviceName {
+            let on = draftWikipedia ?? pak.usesWikipedia
+            let label = (on ? "[X]" : "[ ]") + " LOOK UP FACTS ON WIKIPEDIA"
+            drawButton(c, label, CGRect(x: x, y: y, width: PixelFont.width(of: label) + 9, height: 13), .wikipedia(!on), selected: on, colors)
+            y += 16
+            paragraph(Self.wikipediaNote, dim)
+            y += 6
+        } else if let provider = pak.providers.first(where: { $0.name == page }) {
+            let model = draftModel.flatMap { provider.models.contains($0) ? $0 : nil } ?? pak.model(of: provider)
+            c.text("MODEL", x, y + 4, dim)
             var bx = x + labelWidth
-            for option in pak.services {
+            for option in provider.models {
                 let label = option.uppercased()
                 let rect = CGRect(x: bx, y: y, width: PixelFont.width(of: label) + 7, height: 13)
-                drawButton(c, label, rect, .provider(option), selected: option == selected, colors)
+                drawButton(c, label, rect, .model(option), selected: option == model, colors)
                 bx += Int(rect.width) + 2
             }
             y += 15
-        }
-        if let note = setupNote {
-            for line in Self.wrap(note, width: width - labelWidth) {
-                ListFont.draw(line, in: c, x: x + labelWidth, y: y, color: dim)
-                y += ListFont.lineHeight
-            }
+            if let cost = provider.costs[model] { paragraph(cost, dim, indent: labelWidth) }
             y += 4
+            c.text("KEY", x, y + 4, dim)
+            keyBox.placeholder = pak.key(for: provider) == nil ? "Paste your \(provider.name) API key" : "Saved (paste to replace)"
+            keyBox.rect = CGRect(x: x + labelWidth, y: y, width: width - labelWidth, height: 13)
+            y += 15
+            paragraph("Kept in your Keychain.", dim, indent: labelWidth)
+            y += 6
         }
-        if selected != BackstoryPak.onDeviceName {
-            y = drawCloudSetup(c, colors, dim, x: x, y: y, width: width, labelWidth: labelWidth)
+        drawButton(c, "SAVE", CGRect(x: x, y: y, width: PixelFont.width(of: "SAVE") + 9, height: 13), .save, selected: false, colors)
+        return y + 13 - top
+    }
+
+    /// A service to choose: its name, and a line on what it gives and costs.
+    private func drawCard(_ c: Canvas, _ service: String, x: Int, y: Int, width: Int, _ colors: PlaylistColors, _ dim: CGColor) -> Int {
+        let rect = CGRect(x: x, y: y, width: width, height: 26)
+        buttons.append((rect, .service(service)))
+        let current = service == savedService
+        let down = current || (pressed == .button(.service(service)) && pressedInside)
+        c.fill(rect, mix(colors.normalBackground, colors.normal, down ? 0.3 : 0.1))
+        let light = mix(colors.normalBackground, colors.normal, 0.5), dark = mix(colors.normalBackground, rgb(0), 0.5)
+        c.bevel(x, y, width, 26, light: down ? dark : light, dark: down ? light : dark)
+        if service == BackstoryPak.onDeviceName {
+            Self.drawChip(c, x + 5, y + 3, current ? colors.current : colors.normal)
+            c.text(service.uppercased(), x + 15, y + 4, current ? colors.current : colors.normal)
         } else {
-            y = drawWikipediaSetup(c, colors, dim, x: x, y: y, width: width, labelWidth: labelWidth)
+            c.text(service.uppercased(), x + 5, y + 4, current ? colors.current : colors.normal)
         }
-        y = drawSetupEnd(c, colors, dim, x: x, y: y, width: width, labelWidth: labelWidth)
-        return y - top
+        ListFont.draw(ListFont.truncate(cardLine(service), toWidth: width - 16), in: c, x: x + 5, y: y + 13, color: current ? colors.normal : dim)
+        c.text(">", x + width - 9, y + 10, current ? colors.current : dim)
+        return y + 26
     }
 
-    /// The setup's first words: what a cloud service is sent.
-    private var setupIntro: String {
-        selectedService == BackstoryPak.onDeviceName
-            ? "Choose where Backstory's notes come from."
-            : "Only the song's title, artist and album are sent, never the audio. Nothing goes to Bitamp."
-    }
+    static let chooseTitle = "Where should notes come from?"
 
-    /// What the setup says about the on-device model: what it is, how to turn it on, or,
-    /// on a Mac without it, that a newer macOS has it.
-    private var setupNote: String? {
-        guard let onDevice = pak.onDevice else {
-            return "On macOS 26 or later with Apple Intelligence, Backstory can also run free on this Mac, without a key."
+    /// Under the cards: who needs a key, and on older macOS, what a newer one adds.
+    private var chooseFooter: String? {
+        guard pak.onDevice != nil else {
+            return "Each uses your own key. On macOS 26 or later with Apple Intelligence, Backstory can also run free on this Mac."
         }
-        guard selectedService == BackstoryPak.onDeviceName else { return nil }
-        return onDevice.isAvailable()
-            ? ((draftWikipedia ?? pak.usesWikipedia) ? "Free. Facts come from Wikipedia; the notes are written on this Mac."
-                : "Free; nothing leaves this Mac. No web search, so it knows less and cites nothing.")
-            : "Not ready yet. Turn on Apple Intelligence in System Settings and it works free once its model downloads. Or pick Claude or OpenAI and paste a key."
+        let names = pak.providers.map(\.name)
+        guard !names.isEmpty else { return nil }
+        return names.count == 1 ? "\(names[0]) uses your own key." : names.dropLast().joined(separator: ", ") + " and \(names.last!) use your own key."
     }
 
-    /// The service the setup shows: the one being chosen, or the one saved.
+    /// The line on a service's card.
+    private func cardLine(_ service: String) -> String {
+        if service == BackstoryPak.onDeviceName {
+            guard pak.onDevice?.isAvailable() == true else { return "Free, on this Mac. Needs Apple Intelligence." }
+            return pak.usesWikipedia ? "Free, on this Mac, with facts from Wikipedia." : "Free, on this Mac. Knows less."
+        }
+        return pak.providers.first { $0.name == service }?.summary ?? "Notes with sources, from the web."
+    }
+
+    static func pageTitle(_ service: String) -> String {
+        service == BackstoryPak.onDeviceName ? "ON-DEVICE MODEL" : service.uppercased()
+    }
+
+    /// What a service's page says first: what it is, and what it sends.
+    private func pageText(_ service: String) -> String {
+        guard service == BackstoryPak.onDeviceName else {
+            return "Looks the song up on the web, with sources. Sends the title, artist and album, never the audio, to \(service). Nothing goes to Bitamp."
+        }
+        guard pak.onDevice?.isAvailable() == true else {
+            return "Not ready yet. Turn on Apple Intelligence in System Settings, and it works free once its model downloads."
+        }
+        return "Free, and written on this Mac. On its own it knows less than a service with web search, and cites nothing."
+    }
+
+    static let wikipediaNote = "Sends the title, artist and album to Wikipedia, and writes from the song's article. With no article, it writes from memory."
+
+    /// The service saved now.
+    private var savedService: String {
+        pak.choosesOnDevice ? BackstoryPak.onDeviceName : pak.provider.name
+    }
+
+    /// The service the setup's second step shows, or else the one saved.
     private var selectedService: String {
-        draftProvider ?? (pak.choosesOnDevice ? BackstoryPak.onDeviceName : pak.provider.name)
+        draftProvider ?? savedService
     }
 
     /// Whether lookups go to the on-device model: these notes came from it, or the next
@@ -404,54 +487,6 @@ final class BackstoryView: SkinnedView {
     private var usesOnDevice: Bool {
         session.phase == .done || session.phase == .looking ? session.notes.isOnDevice : pak.choice().map(\.onDevice) ?? pak.choosesOnDevice
     }
-
-    /// A cloud service's model and key.
-    private func drawCloudSetup(_ c: Canvas, _ colors: PlaylistColors, _ dim: CGColor, x: Int, y: Int, width: Int, labelWidth: Int) -> Int {
-        var y = y
-        let provider = pak.providers.first { $0.name == selectedService } ?? pak.provider
-        let model = draftModel.flatMap { provider.models.contains($0) ? $0 : nil } ?? pak.model(of: provider)
-        c.text("MODEL", x, y + 4, dim)
-        var bx = x + labelWidth
-        for option in provider.models {
-            let label = option.uppercased()
-            let rect = CGRect(x: bx, y: y, width: PixelFont.width(of: label) + 7, height: 13)
-            drawButton(c, label, rect, .model(option), selected: option == model, colors)
-            bx += Int(rect.width) + 2
-        }
-        y += 15
-        if let cost = provider.costs[model] {
-            ListFont.draw(cost, in: c, x: x + labelWidth, y: y, color: dim)
-            y += ListFont.lineHeight
-        }
-        y += 3
-        c.text("API KEY", x, y + 4, dim)
-        keyBox.placeholder = pak.key(for: provider) == nil ? "Paste your \(provider.name) API key" : "Saved (paste to replace)"
-        keyBox.rect = CGRect(x: x + labelWidth, y: y, width: width - labelWidth, height: 13)
-        y += 17
-        return y
-    }
-
-    /// Whether the on-device model looks songs up on Wikipedia, and what that sends.
-    private func drawWikipediaSetup(_ c: Canvas, _ colors: PlaylistColors, _ dim: CGColor, x: Int, y: Int, width: Int, labelWidth: Int) -> Int {
-        var y = y
-        let on = draftWikipedia ?? pak.usesWikipedia
-        c.text("WIKI-", x, y + 1, dim)
-        c.text("PEDIA", x, y + 8, dim)
-        var bx = x + labelWidth
-        for (value, label) in [(false, "OFF"), (true, "ON")] {
-            let rect = CGRect(x: bx, y: y, width: PixelFont.width(of: label) + 7, height: 13)
-            drawButton(c, label, rect, .wikipedia(value), selected: value == on, colors)
-            bx += Int(rect.width) + 2
-        }
-        y += 15
-        for line in Self.wrap(Self.wikipediaNote, width: width - labelWidth) {
-            ListFont.draw(line, in: c, x: x + labelWidth, y: y, color: dim)
-            y += ListFont.lineHeight
-        }
-        return y + 4
-    }
-
-    static let wikipediaNote = "ON sends the title, artist and album to Wikipedia to find the song's article. The notes are still written on this Mac, from memory if there's no article."
 
     /// Under TELL ME ABOUT THIS SONG: what a lookup sends, and where.
     private var readyLine: String {
@@ -466,40 +501,6 @@ final class BackstoryView: SkinnedView {
         return session.notes.sources.isEmpty
             ? "No sources: the on-device model knows less, and can get details wrong."
             : "Written on this Mac by the on-device model from Wikipedia. It can still get details wrong."
-    }
-
-    /// Looking the next song up early, and Save.
-    private func drawSetupEnd(_ c: Canvas, _ colors: PlaylistColors, _ dim: CGColor, x: Int, y: Int, width: Int, labelWidth: Int) -> Int {
-        var y = y
-        // Looking the next song up early, for AUTO.
-        let prefetch = draftPrefetch ?? pak.prefetch
-        c.text("NEXT", x, y + 1, dim)
-        c.text("SONG", x, y + 8, dim)
-        var px = x + labelWidth
-        for (on, label) in [(false, "WHEN IT PLAYS"), (true, "EARLY")] {
-            let rect = CGRect(x: px, y: y, width: PixelFont.width(of: label) + 7, height: 13)
-            drawButton(c, label, rect, .prefetch(on), selected: on == prefetch, colors)
-            px += Int(rect.width) + 2
-        }
-        y += 15
-        let early = selectedService == BackstoryPak.onDeviceName
-            ? "With AUTO, readies the next song's notes." : "With AUTO, readies the next song's notes. Skipping it still costs."
-        for line in Self.wrap(early, width: width - labelWidth) {
-            ListFont.draw(line, in: c, x: x + labelWidth, y: y, color: dim)
-            y += ListFont.lineHeight
-        }
-        y += 4
-        var sx = x + labelWidth
-        drawButton(c, "SAVE", CGRect(x: sx, y: y, width: PixelFont.width(of: "SAVE") + 9, height: 13), .save, selected: false, colors)
-        sx += PixelFont.width(of: "SAVE") + 11
-        if pak.choice() != nil {
-            drawButton(c, "CANCEL", CGRect(x: sx, y: y, width: PixelFont.width(of: "CANCEL") + 9, height: 13), .cancel, selected: false, colors)
-            sx += PixelFont.width(of: "CANCEL") + 11
-        }
-        if selectedService != BackstoryPak.onDeviceName {
-            ListFont.draw(ListFont.truncate("Key kept in Keychain.", toWidth: x + width - sx - 2), in: c, x: sx + 2, y: y + 1, color: dim)
-        }
-        return y + 13
     }
 
     /// A 7×7 chip: the on-device model's mark.
@@ -578,7 +579,6 @@ final class BackstoryView: SkinnedView {
     }
 
     private func buttonControl(_ number: Int, _ rect: CGRect, _ button: Button) -> AccessibleControl {
-        let selectedService = draftProvider ?? (pak.choosesOnDevice ? BackstoryPak.onDeviceName : pak.provider.name)
         let kind: AccessibleControl.Kind, label: String
         switch button {
         case .lookup(let lookup):
@@ -589,13 +589,17 @@ final class BackstoryView: SkinnedView {
         case .setUp where rect.height <= 8:
             (kind, label) = (.button, usesOnDevice ? "Service: on-device model" : "Service: \(pak.provider.name), \(pak.model(of: pak.provider))")
         case .setUp: (kind, label) = (.button, "Set Up")
-        case .provider(let name): (kind, label) = (.checkBox(name == selectedService), "Service: \(name)")
+        case .settings: (kind, label) = (.button, "Backstory Settings")
+        case .service(let name):
+            (kind, label) = (.checkBox(name == savedService), "\(name == BackstoryPak.onDeviceName ? "On-device model" : name): \(cardLine(name))")
+        case .back: (kind, label) = (.button, "Back to the services")
+        case .early:
+            (kind, label) = (.checkBox(pak.prefetch), usesOnDevice ? "Get the next song's notes early" : "Get the next song's notes early. A skipped song still costs.")
         case .model(let name):
             let provider = pak.providers.first { $0.name == selectedService } ?? pak.provider
             (kind, label) = (.checkBox(name == (draftModel ?? pak.model(of: provider))), "Model: \(name)")
-        case .prefetch(let on): (kind, label) = (.checkBox(on == (draftPrefetch ?? pak.prefetch)), on ? "Next song early" : "Next song when it plays")
-        case .wikipedia(let on):
-            (kind, label) = (.checkBox(on == (draftWikipedia ?? pak.usesWikipedia)), on ? "Wikipedia on: " + Self.wikipediaNote : "Wikipedia off")
+        case .wikipedia:
+            (kind, label) = (.checkBox(draftWikipedia ?? pak.usesWikipedia), "Look up facts on Wikipedia. " + Self.wikipediaNote)
         case .save: (kind, label) = (.button, "Save")
         case .cancel: (kind, label) = (.button, "Cancel")
         }
@@ -626,7 +630,7 @@ final class BackstoryView: SkinnedView {
                                               rect: CGRect(x: parts.body.minX, y: parts.body.minY, width: parts.body.width, height: max(height, 8))))
         } else if showsSetup {
             controls.append(AccessibleControl(id: "about", kind: .text,
-                                              label: [setupIntro, setupNote].compactMap { $0 }.joined(separator: " "),
+                                              label: draftProvider.map(pageText) ?? ([Self.chooseTitle, chooseFooter].compactMap { $0 }.joined(separator: " ")),
                                               rect: CGRect(x: parts.body.minX, y: parts.body.minY, width: parts.body.width, height: 20)))
         }
         for (number, (rect, button)) in buttons.enumerated() where rect.intersects(parts.content) {
@@ -741,13 +745,22 @@ final class BackstoryView: SkinnedView {
             session.lookUp()
         case .setUp:
             showSetup()
-        case .provider(let name):
-            draftProvider = name
+        case .settings:
+            if settingUp { endSetup() } else { showSetup() }
+        case .service(let name):
+            openPage(name)
+        case .back:
+            draftProvider = nil
             draftModel = nil
+            draftWikipedia = nil
+            keyBox.text = ""
+            window?.makeFirstResponder(self)
+        case .early:
+            pak.prefetch.toggle()
+            if pak.prefetch, !usesOnDevice { flashMessage?("A SKIPPED SONG STILL COSTS") }
+            settingsChanged()
         case .model(let name):
             draftModel = name
-        case .prefetch(let on):
-            draftPrefetch = on
         case .wikipedia(let on):
             draftWikipedia = on
         case .save:
@@ -757,22 +770,29 @@ final class BackstoryView: SkinnedView {
         }
     }
 
-    /// Shows the setup, to change the service, model or key.
-    func showSetup() {
+    /// Shows the setup: the services to choose from, or with `service`, that one's page.
+    func showSetup(service: String? = nil) {
         settingUp = true
         draftProvider = nil
         draftModel = nil
-        draftPrefetch = nil
         draftWikipedia = nil
         scroll = 0
-        if !pak.choosesOnDevice { keyBox.focus() }
+        if let service { openPage(service) }
         needsDisplay = true
+    }
+
+    /// The setup's second step, for one service.
+    private func openPage(_ service: String) {
+        draftProvider = service
+        draftModel = nil
+        draftWikipedia = nil
+        scroll = 0
+        if service != BackstoryPak.onDeviceName { keyBox.focus() }
     }
 
     private func saveSetup() {
         if selectedService == BackstoryPak.onDeviceName {
             var changes = ["service": BackstoryPak.onDeviceName]
-            if let draftPrefetch { changes["prefetch"] = draftPrefetch ? "On" : "Off" }
             if let draftWikipedia { changes["wikipedia"] = draftWikipedia ? "On" : "Off" }
             pak.save(changes)
             endSetup()
@@ -783,7 +803,6 @@ final class BackstoryView: SkinnedView {
         if let draftModel, provider.models.contains(draftModel) { changes["\(provider.name.lowercased())-model"] = draftModel }
         let key = keyBox.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty { changes["\(provider.name.lowercased())-key"] = key }
-        if let draftPrefetch { changes["prefetch"] = draftPrefetch ? "On" : "Off" }
         // Without a key, the on-device model answers if there is one.
         guard !key.isEmpty || pak.key(for: provider) != nil || pak.onDeviceChoice() != nil else {
             flashMessage?("PASTE AN API KEY FIRST")
@@ -799,7 +818,6 @@ final class BackstoryView: SkinnedView {
         settingUp = false
         draftProvider = nil
         draftModel = nil
-        draftPrefetch = nil
         draftWikipedia = nil
         window?.makeFirstResponder(self)
         settingsChanged()

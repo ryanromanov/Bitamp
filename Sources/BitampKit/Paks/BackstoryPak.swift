@@ -19,13 +19,16 @@ public final class BackstoryPak: Pak, ConfigurablePak {
         public let models: [String]
         /// What each model costs, roughly, for the setup: "about 4¢ a song".
         public let costs: [String: String]
+        /// One line for the setup's list of services: what it gives, and roughly what it costs.
+        public let summary: String?
         public let make: @Sendable (_ model: String, _ key: String) -> BackstoryService
 
-        public init(name: String, models: [String], costs: [String: String] = [:],
+        public init(name: String, models: [String], costs: [String: String] = [:], summary: String? = nil,
                     make: @escaping @Sendable (_ model: String, _ key: String) -> BackstoryService) {
             self.name = name
             self.models = models
             self.costs = costs
+            self.summary = summary
             self.make = make
         }
     }

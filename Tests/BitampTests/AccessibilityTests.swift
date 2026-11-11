@@ -335,6 +335,30 @@ extension AccessibilityTests {
         #expect(all.contains { $0.accessibilityLabel() == "Service: Claude, Sonnet 5.5" })
         #expect(all.firstIndex(of: notes)! < all.firstIndex(of: link)!, "the notes, then their sources")
     }
+
+    @Test func backstorySetupGoesServiceThenOptions() throws {
+        let store = BackstoryMemorySettings(defaults: UserDefaults(suiteName: "BitampA11ySetup-\(UUID().uuidString)")!)
+        let pak = BackstoryPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5", "Opus 5.5"], summary: "Notes with sources.") { _, _ in CannedBackstory() }],
+                               onDevice: .init(isAvailable: { true }, make: { _ in CannedBackstory() }), store: store)
+        let session = BackstorySession(pak: pak, cache: BackstoryCache(folder: nil))
+        let view = BackstoryView(session: session, paks: PakRegistry([pak]), skin: DefaultSkin(), scale: 1)
+        view.showSetup()
+        draw(view)
+        let onDevice = try element(view, "On-device model: Free, on this Mac. Knows less.")
+        #expect(onDevice.accessibilityValue() as? Int == 1, "the service in use")
+        #expect(try element(view, "Claude: Notes with sources.").accessibilityPerformPress())
+        draw(view)
+        #expect(try element(view, "Model: Opus 5.5").accessibilityPerformPress())
+        #expect(try element(view, "Back to the services").accessibilityPerformPress())
+        draw(view)
+        #expect(try element(view, "On-device model: Free, on this Mac. Knows less.").accessibilityPerformPress())
+        draw(view)
+        #expect(try element(view, "Look up facts on Wikipedia. " + BackstoryView.wikipediaNote).accessibilityPerformPress())
+        draw(view)
+        #expect(try element(view, "Save").accessibilityPerformPress())
+        #expect(pak.usesWikipedia)
+        #expect(pak.model(of: pak.providers[0]) == "Sonnet 5.5", "going back drops what wasn't saved")
+    }
 }
 
 /// A Pak with nothing in it, for the Paks window.
