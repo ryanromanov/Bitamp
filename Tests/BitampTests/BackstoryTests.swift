@@ -529,9 +529,12 @@ final class FailingBackstory: BackstoryService, @unchecked Sendable {
 
     @Test func usedWithoutAKeyOrWhenChosen() {
         let pak = pak()
-        #expect(pak.services == ["Claude", "On-device"])
-        #expect(pak.choice()?.onDevice == true, "no key yet")
+        #expect(pak.services == ["On-device", "Claude"])
+        #expect(pak.choosesOnDevice, "the default, so nothing needs setting up")
+        #expect(pak.choice()?.onDevice == true)
         #expect(pak.account == .connected(name: "On-device model"))
+        pak.save(["service": "Claude"])
+        #expect(pak.choice()?.onDevice == true, "no key yet")
         pak.save(["claude-key": "test-key"])
         #expect(pak.choice()?.onDevice == false)
         pak.save(["service": BackstoryPak.onDeviceName])
@@ -545,11 +548,27 @@ final class FailingBackstory: BackstoryService, @unchecked Sendable {
         #expect(pak.choice() == nil)
         #expect(pak.account == .disconnected)
         #expect(self.pak(onDevice: false).services == ["Claude"])
+        #expect(self.pak(onDevice: false).settingValues()["service"] == "Claude")
+    }
+
+    @Test func looksUpEverySongUntilAServiceCosts() {
+        let pak = pak()
+        #expect(pak.lookup == .everyTrack, "free, so AUTO")
+        pak.save(["prefetch": "On"])
+        pak.save(["service": "Claude", "claude-key": "test-key"])
+        #expect(pak.lookup == .whenAsked, "lookups cost now, so ASK")
+        pak.save(["service": BackstoryPak.onDeviceName])
+        #expect(pak.lookup == .everyTrack)
+
+        pak.lookup = .off
+        pak.save(["service": "Claude"])
+        #expect(pak.lookup == .off, "a lookup the user picked stays")
+        #expect(self.pak(onDevice: false).lookup == .whenAsked)
     }
 
     @Test func answersWhenTheServiceCantBeReached() async {
         let pak = pak(cloud: FailingBackstory(.offline("Couldn't reach Claude")))
-        pak.save(["claude-key": "test-key"])
+        pak.save(["service": "Claude", "claude-key": "test-key"])
         let session = BackstorySession(pak: pak, cache: BackstoryCache(folder: nil))
         session.current = { (URL(string: "bitpak-test://track/1"), true) }
         session.describe = { _ in (song, nil) }
@@ -565,7 +584,7 @@ final class FailingBackstory: BackstoryService, @unchecked Sendable {
 
     @Test func otherFailuresDontFallBack() async {
         let pak = pak(cloud: FailingBackstory(.badKey))
-        pak.save(["claude-key": "test-key"])
+        pak.save(["service": "Claude", "claude-key": "test-key"])
         let session = BackstorySession(pak: pak, cache: BackstoryCache(folder: nil))
         session.current = { (URL(string: "bitpak-test://track/1"), true) }
         session.describe = { _ in (song, nil) }
@@ -610,12 +629,12 @@ extension SnapshotTests {
         let onDevice = CannedBackstory()
         onDevice.updates = [.text("Dial-Up Sunrise is a song by The Low Bits from the album Low Tide FM. It mixes chiptune sounds with indie pop.")]
         for (name, skin) in skins {
-            for state in ["setup", "ready", "notes", "on-device", "on-device-setup", "on-device-claude-setup"] {
+            for state in ["setup", "ready", "notes", "on-device", "on-device-setup", "on-device-claude-setup", "on-device-off"] {
                 let store = BackstoryMemorySettings(defaults: UserDefaults(suiteName: "BitampBackstorySnap-\(UUID().uuidString)")!)
                 let pak = BackstoryPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5", "Opus 5.5"],
                                                           costs: ["Sonnet 5.5": "About 4 cents a song"]) { _, _ in service },
                                                    .init(name: "OpenAI", models: ["GPT-5 mini", "GPT-5.5"]) { _, _ in service }],
-                                        onDevice: state.hasPrefix("on-device") ? .init(isAvailable: { true }, make: { onDevice }) : nil,
+                                        onDevice: state.hasPrefix("on-device") ? .init(isAvailable: { state != "on-device-off" }, make: { state == "on-device-off" ? nil : onDevice }) : nil,
                                         store: store)
                 if !state.hasSuffix("setup") && !state.hasPrefix("on-device") { pak.save(["claude-key": "test-key"]) }
                 let session = BackstorySession(pak: pak, cache: BackstoryCache(folder: nil))
@@ -628,7 +647,10 @@ extension SnapshotTests {
                     pak.save(["service": BackstoryPak.onDeviceName])
                     view.showSetup()
                 }
-                if state == "on-device-claude-setup" { view.showSetup() }
+                if state == "on-device-claude-setup" {
+                    pak.save(["service": "Claude"])
+                    view.showSetup()
+                }
                 if state == "notes" || state == "on-device" {
                     session.lookUp()
                     for _ in 0..<50 { await Task.yield() }
