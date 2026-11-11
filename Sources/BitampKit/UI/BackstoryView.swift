@@ -79,7 +79,7 @@ final class BackstoryView: SkinnedView {
     private var buttons: [(CGRect, Button)] = []
 
     private enum Button: Equatable {
-        case lookup(BackstoryPak.Lookup), askAgain, ask, setUp, model(String), service(String), back, early, wikipedia(Bool), save, cancel
+        case lookup(BackstoryPak.Lookup), askAgain, ask, setUp, settings, model(String), service(String), back, early, wikipedia(Bool), save, cancel
     }
 
     private enum Press: Equatable {
@@ -227,6 +227,11 @@ final class BackstoryView: SkinnedView {
             buttons.append((CGRect(x: textX, y: y + 24, width: PixelFont.width(of: service) + 2, height: 8), .setUp))
             c.text(service, textX, y + 25, hot ? colors.current : dim)
         }
+        // The setup, where anyone can see it; the service's name opens it too.
+        let label = "SETTINGS"
+        let width = PixelFont.width(of: label) + 7
+        drawButton(c, label, CGRect(x: parts.right - width, y: y + 21, width: width, height: 12), .settings,
+                   selected: showsSetup, colors)
     }
 
     private func drawBar(_ c: Canvas, _ parts: BackstoryLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor) {
@@ -284,7 +289,8 @@ final class BackstoryView: SkinnedView {
             ListFont.draw(text, in: c, x: x + (width - ListFont.width(of: text)) / 2, y: y, color: color)
         }
 
-        if !isInserted {
+        // The setup works while ejected too, as the cartridge's Settings… opens it.
+        if !isInserted, !settingUp {
             paragraph("The Backstory Pak is ejected. Insert it in the Expansion Paks window to look songs up.", dim)
             return y - top
         }
@@ -583,6 +589,7 @@ final class BackstoryView: SkinnedView {
         case .setUp where rect.height <= 8:
             (kind, label) = (.button, usesOnDevice ? "Service: on-device model" : "Service: \(pak.provider.name), \(pak.model(of: pak.provider))")
         case .setUp: (kind, label) = (.button, "Set Up")
+        case .settings: (kind, label) = (.button, "Backstory Settings")
         case .service(let name):
             (kind, label) = (.checkBox(name == savedService), "\(name == BackstoryPak.onDeviceName ? "On-device model" : name): \(cardLine(name))")
         case .back: (kind, label) = (.button, "Back to the services")
@@ -738,6 +745,8 @@ final class BackstoryView: SkinnedView {
             session.lookUp()
         case .setUp:
             showSetup()
+        case .settings:
+            if settingUp { endSetup() } else { showSetup() }
         case .service(let name):
             openPage(name)
         case .back:

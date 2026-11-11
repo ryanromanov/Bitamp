@@ -274,6 +274,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showSettings(_ pak: ConfigurablePak) {
+        // Backstory's settings are in its window, so there's one place for them.
+        if pak is BackstoryPak, let backstoryView {
+            showBackstory()
+            backstoryView.showSetup()
+            return
+        }
         let panel = settingsPanels[pak.id] ?? PakSettingsPanel(pak: pak)
         settingsPanels[pak.id] = panel
         panel.show()
