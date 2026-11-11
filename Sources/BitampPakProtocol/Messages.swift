@@ -11,6 +11,9 @@ import Foundation
 public enum PakProtocol {
     /// Bumped when a change would break existing Paks.
     public static let version = 1
+    /// The manifest's `capabilities` Bitamp knows.
+    public static let browse = "browse"
+    public static let knownCapabilities: Set<String> = [browse]
     /// The manifest inside every `.bitpak` folder.
     public static let manifestName = "pak.json"
 }
@@ -28,9 +31,14 @@ public struct PakManifest: Codable, Equatable, Sendable {
     public var `protocol`: Int
     public var description: String?
     public var settings: [PakSettingDefinition]?
+    /// What the Pak does beyond search, such as `"browse"`. In the manifest rather than the
+    /// `hello` reply, because Bitamp needs to know before it starts the Pak. Bitamp versions
+    /// that don't know a capability ignore it, so a Pak that browses still searches there.
+    public var capabilities: [String]?
 
     public init(id: String, name: String, version: String, executable: String,
-                protocol: Int = PakProtocol.version, description: String? = nil, settings: [PakSettingDefinition]? = nil) {
+                protocol: Int = PakProtocol.version, description: String? = nil, settings: [PakSettingDefinition]? = nil,
+                capabilities: [String]? = nil) {
         self.id = id
         self.name = name
         self.version = version
@@ -38,6 +46,12 @@ public struct PakManifest: Codable, Equatable, Sendable {
         self.protocol = `protocol`
         self.description = description
         self.settings = settings
+        self.capabilities = capabilities
+    }
+
+    /// Whether the manifest lists `capability`.
+    public func can(_ capability: String) -> Bool {
+        capabilities?.contains(capability) == true
     }
 
     /// Whether `id` is usable: 1–32 lowercase letters, digits and hyphens, starting with a letter.
@@ -85,13 +99,192 @@ public struct PakTrackInfo: Codable, Equatable, Sendable {
     public var album: String?
     /// Seconds.
     public var duration: Double?
+    /// The track's cover, for the Media Library.
+    public var artwork: PakArtworkInfo?
 
-    public init(id: String, title: String, artist: String? = nil, album: String? = nil, duration: Double? = nil) {
+    public init(id: String, title: String, artist: String? = nil, album: String? = nil, duration: Double? = nil,
+                artwork: PakArtworkInfo? = nil) {
         self.id = id
         self.title = title
         self.artist = artist
         self.album = album
         self.duration = duration
+        self.artwork = artwork
+    }
+}
+
+/// A picture: a file the Pak made or downloaded, or a URL Bitamp fetches, with headers
+/// for servers that need them. Shaped like `PakSource`.
+public struct PakArtworkInfo: Codable, Equatable, Hashable, Sendable {
+    public var file: String?
+    public var url: String?
+    public var headers: [String: String]?
+
+    public init(file: String? = nil, url: String? = nil, headers: [String: String]? = nil) {
+        self.file = file
+        self.url = url
+        self.headers = headers
+    }
+
+    public static func file(_ url: URL) -> PakArtworkInfo { PakArtworkInfo(file: url.path) }
+    public static func url(_ url: URL, headers: [String: String]? = nil) -> PakArtworkInfo {
+        PakArtworkInfo(url: url.absoluteString, headers: headers)
+    }
+}
+
+// MARK: - Browsing
+
+/// Where to look, for `browse`:
+///
+///     {"kind":"root"}                      the sidebar
+///     {"kind":"place","id":"albums"}       a place the Pak listed
+///     {"kind":"search","term":"ode"}       the Media Library's search
+public enum PakBrowseLocation: Codable, Equatable, Hashable, Sendable {
+    case root
+    case place(String)
+    case search(String)
+
+    private enum Keys: String, CodingKey { case kind, id, term }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: Keys.self)
+        switch try container.decode(String.self, forKey: .kind) {
+        case "root": self = .root
+        case "place": self = .place(try container.decode(String.self, forKey: .id))
+        case "search": self = .search(try container.decodeIfPresent(String.self, forKey: .term) ?? "")
+        case let kind:
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: container, debugDescription: "Unknown location \(kind)")
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: Keys.self)
+        switch self {
+        case .root:
+            try container.encode("root", forKey: .kind)
+        case .place(let id):
+            try container.encode("place", forKey: .kind)
+            try container.encode(id, forKey: .id)
+        case .search(let term):
+            try container.encode("search", forKey: .kind)
+            try container.encode(term, forKey: .term)
+        }
+    }
+}
+
+/// What's at a location: an optional header (for an album or playlist), shelves of tracks
+/// and places, and a cursor when there's more of the last shelf.
+public struct PakBrowsePage: Codable, Equatable, Sendable {
+    public var header: PakHeaderInfo?
+    public var shelves: [PakShelfInfo]
+    /// Sent back with the same location for the next page.
+    public var cursor: String?
+
+    public init(header: PakHeaderInfo? = nil, shelves: [PakShelfInfo] = [], cursor: String? = nil) {
+        self.header = header
+        self.shelves = shelves
+        self.cursor = cursor
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        header = try container.decodeIfPresent(PakHeaderInfo.self, forKey: .header)
+        shelves = try container.decodeIfPresent([PakShelfInfo].self, forKey: .shelves) ?? []
+        cursor = try container.decodeIfPresent(String.self, forKey: .cursor)
+    }
+}
+
+/// The top of an album or playlist page.
+public struct PakHeaderInfo: Codable, Equatable, Sendable {
+    public var title: String
+    public var subtitle: String?
+    /// "Electronic · 2025 · 10 songs".
+    public var detail: String?
+    public var artwork: PakArtworkInfo?
+
+    public init(title: String, subtitle: String? = nil, detail: String? = nil, artwork: PakArtworkInfo? = nil) {
+        self.title = title
+        self.subtitle = subtitle
+        self.detail = detail
+        self.artwork = artwork
+    }
+}
+
+/// A row of a page, such as "Albums". One shelf without a title is a plain list.
+public struct PakShelfInfo: Codable, Equatable, Sendable {
+    public var title: String?
+    public var items: [PakItemInfo]
+
+    public init(title: String? = nil, items: [PakItemInfo]) {
+        self.title = title
+        self.items = items
+    }
+
+    private enum CodingKeys: String, CodingKey { case title, items }
+
+    /// Items of a type this version doesn't know are left out, rather than failing the page.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        let items = try container.decodeIfPresent([Lenient<PakItemInfo>].self, forKey: .items) ?? []
+        self.items = items.compactMap(\.value)
+    }
+}
+
+/// One thing on a shelf: `{"track":{…}}` or `{"place":{…}}`.
+public enum PakItemInfo: Codable, Equatable, Sendable {
+    case track(PakTrackInfo)
+    case place(PakPlaceInfo)
+
+    private enum Keys: String, CodingKey { case track, place }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: Keys.self)
+        if let track = try container.decodeIfPresent(PakTrackInfo.self, forKey: .track) {
+            self = .track(track)
+        } else if let place = try container.decodeIfPresent(PakPlaceInfo.self, forKey: .place) {
+            self = .place(place)
+        } else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "An item is a track or a place"))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: Keys.self)
+        switch self {
+        case .track(let track): try container.encode(track, forKey: .track)
+        case .place(let place): try container.encode(place, forKey: .place)
+        }
+    }
+}
+
+/// Something to open: a section of the sidebar, an album, an artist or a playlist.
+public struct PakPlaceInfo: Codable, Equatable, Sendable {
+    /// `section`, `album`, `artist` or `playlist`. Bitamp shows a kind it doesn't know as a section.
+    public var kind: String
+    /// The Pak's own, sent back as `{"kind":"place","id":…}`.
+    public var id: String
+    public var title: String
+    /// An album's artist, a playlist's curator.
+    public var subtitle: String?
+    public var artwork: PakArtworkInfo?
+
+    public static let kinds: Set<String> = ["section", "album", "artist", "playlist"]
+
+    public init(kind: String, id: String, title: String, subtitle: String? = nil, artwork: PakArtworkInfo? = nil) {
+        self.kind = kind
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.artwork = artwork
+    }
+}
+
+/// Decodes a value, or nil if it doesn't decode, so one odd item doesn't sink a list.
+struct Lenient<Value: Decodable>: Decodable {
+    let value: Value?
+    init(from decoder: Decoder) throws {
+        value = try? Value(from: decoder)
     }
 }
 
@@ -190,6 +383,22 @@ public enum PakMethod {
         public init(source: PakSource) { self.source = source }
     }
 
+    /// Asks what's at a location (`browse`), or for more of it after `cursor`. Sent only to
+    /// Paks whose manifest lists the `browse` capability.
+    public struct Browse: Codable, Sendable {
+        public var location: PakBrowseLocation
+        public var cursor: String?
+        public init(location: PakBrowseLocation, cursor: String? = nil) {
+            self.location = location
+            self.cursor = cursor
+        }
+    }
+
+    public struct BrowseResult: Codable, Sendable {
+        public var page: PakBrowsePage
+        public init(page: PakBrowsePage) { self.page = page }
+    }
+
     public struct Empty: Codable, Sendable {
         public init() {}
     }
@@ -199,6 +408,7 @@ public enum PakMethod {
     public static let search = "search"
     public static let track = "track"
     public static let resolve = "resolve"
+    public static let browse = "browse"
     /// Bitamp is quitting or removing the Pak; it should exit after answering.
     public static let shutdown = "shutdown"
 }

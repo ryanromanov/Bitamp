@@ -100,6 +100,7 @@ public final class PakCheck {
             await checkTrack(first, connection)
             await checkResolve(first, connection)
         }
+        if manifest.can(PakProtocol.browse) { await checkBrowse(connection) }
         await checkShutdown(connection)
         return finish(manifest)
     }
@@ -131,6 +132,9 @@ public final class PakCheck {
                 }
             }
         }
+        for capability in manifest.capabilities ?? [] where !PakProtocol.knownCapabilities.contains(capability) {
+            warn("\(PakProtocol.manifestName): this Bitamp doesn't know the capability “\(capability)”, so it ignores it.")
+        }
         pass("\(PakProtocol.manifestName): \(manifest.name) Pak \(manifest.version), id “\(manifest.id)”, runs \(manifest.executable)")
         return manifest
     }
@@ -161,6 +165,121 @@ public final class PakCheck {
             if ExternalPak.trackID(ExternalPak.trackURL(track.id, pak: manifest.id), pak: manifest.id) != track.id {
                 fail("search: the id “\(track.id)” can't be saved in a playlist. Use a non-empty id.")
             }
+        }
+    }
+
+    // MARK: - Browsing
+
+    /// Walks the sidebar, each section, one place of each kind, and one cursor.
+    private func checkBrowse(_ connection: PakConnection) async {
+        func browse(_ location: PakBrowseLocation, cursor: String? = nil) async -> PakBrowsePage? {
+            do {
+                return try await connection.request(PakMethod.browse, PakMethod.Browse(location: location, cursor: cursor),
+                                                    as: PakMethod.BrowseResult.self).page
+            } catch {
+                fail("browse \(describe(location)): \(explain(error))")
+                return nil
+            }
+        }
+        guard let root = await browse(.root) else { return }
+        checkPage(root, .root)
+        let sections = root.shelves.flatMap(\.items).compactMap { item -> PakPlaceInfo? in
+            if case .place(let place) = item { return place }
+            return nil
+        }
+        guard !sections.isEmpty else {
+            fail("browse root: no sections. The manifest says the Pak browses, so the Media Library's sidebar would be empty. "
+                + "List \"section\" places, or take \"browse\" out of the capabilities.")
+            return
+        }
+        if sections.contains(where: { $0.kind != "section" }) {
+            warn("browse root: the sidebar lists sections; other places there show as sections.")
+        }
+        pass("browse root: \(sections.count) section\(sections.count == 1 ? "" : "s") (\(sections.map(\.title).joined(separator: ", ")))")
+
+        var opened: Set<String> = []
+        var followedCursor = false
+        func open(_ place: PakPlaceInfo) async -> PakBrowsePage? {
+            guard opened.insert(place.id).inserted, let page = await browse(.place(place.id)) else { return nil }
+            checkPage(page, .place(place.id))
+            let tracks = page.shelves.flatMap(\.items).filter { if case .track = $0 { return true }; return false }.count
+            let places = page.shelves.flatMap(\.items).count - tracks
+            pass("browse \(place.kind) “\(place.title)”: \(tracks) track\(tracks == 1 ? "" : "s"), \(places) place\(places == 1 ? "" : "s")"
+                + (page.header.map { ", header “\($0.title)”" } ?? "") + (page.cursor == nil ? "" : ", more after a cursor"))
+            if let cursor = page.cursor, !followedCursor {
+                followedCursor = true
+                if let next = await browse(.place(place.id), cursor: cursor) {
+                    checkPage(next, .place(place.id))
+                    if next.cursor == cursor {
+                        fail("browse “\(place.title)”: the next page gives the same cursor again, so it would never end.")
+                    } else {
+                        pass("browse “\(place.title)” after its cursor: \(next.shelves.flatMap(\.items).count) more")
+                    }
+                }
+            }
+            return page
+        }
+        // Every section, and the first album, artist and playlist found in them.
+        var kindsSeen: Set<String> = ["section"]
+        var toOpen: [PakPlaceInfo] = []
+        for section in sections.prefix(12) {
+            guard let page = await open(section) else { continue }
+            for case .place(let place) in page.shelves.flatMap(\.items) where kindsSeen.insert(place.kind).inserted {
+                toOpen.append(place)
+            }
+        }
+        for place in toOpen { _ = await open(place) }
+
+        if let search = await browse(.search("")) {
+            checkPage(search, .search(""))
+            pass("browse search \"\": \(search.shelves.flatMap(\.items).count) item\(search.shelves.flatMap(\.items).count == 1 ? "" : "s")")
+        }
+    }
+
+    /// Ids, titles, kinds and covers on one page.
+    private func checkPage(_ page: PakBrowsePage, _ location: PakBrowseLocation) {
+        let at = "browse \(describe(location))"
+        if let header = page.header {
+            if header.title.isEmpty { fail("\(at): the header has no title.") }
+            checkArtwork(header.artwork, "\(at), header")
+        }
+        for item in page.shelves.flatMap(\.items) {
+            switch item {
+            case .track(let track):
+                if track.title.isEmpty { fail("\(at): track “\(track.id)” has no title.") }
+                if track.id.isEmpty { fail("\(at): a track has no id.") }
+                checkArtwork(track.artwork, "\(at), track “\(track.title)”")
+            case .place(let place):
+                if place.id.isEmpty { fail("\(at): “\(place.title)” has no id, so it can't be opened.") }
+                if place.title.isEmpty { fail("\(at): the place “\(place.id)” has no title.") }
+                if !PakPlaceInfo.kinds.contains(place.kind) {
+                    warn("\(at): “\(place.title)” is a “\(place.kind)”, which Bitamp shows as a section. "
+                        + "Kinds are \(PakPlaceInfo.kinds.sorted().joined(separator: ", ")).")
+                }
+                checkArtwork(place.artwork, "\(at), “\(place.title)”")
+            }
+        }
+    }
+
+    private func checkArtwork(_ artwork: PakArtworkInfo?, _ what: String) {
+        guard let artwork else { return }
+        if let path = artwork.file {
+            if !FileManager.default.fileExists(atPath: path) { fail("\(what): the cover file \(path) isn't there.") }
+        } else if let text = artwork.url {
+            guard let url = URL(string: text), ["http", "https"].contains(url.scheme?.lowercased()) else {
+                fail("\(what): the cover's url “\(text)” isn't http or https.")
+                return
+            }
+        } else {
+            fail("\(what): the cover has neither a file nor a url.")
+        }
+    }
+
+    private func describe(_ location: PakBrowseLocation) -> String {
+        switch location {
+        case .root: "root"
+        case .place(let id): "“\(id)”"
+        case .search(let term): "search \"\(term)\""
         }
     }
 

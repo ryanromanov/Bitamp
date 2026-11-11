@@ -19,10 +19,27 @@ public protocol PakProvider: AnyObject {
     func track(id: String) async throws -> PakTrackInfo?
     /// Where the track's audio is: a local file, or a URL Bitamp downloads.
     func resolve(id: String) async throws -> PakSource
+    /// What's at `location` for the Media Library, or more of it after the `cursor` an
+    /// earlier page gave. Asked only if `pak.json` lists the `browse` capability. The root
+    /// is the sidebar: shelves of `section` places. See docs/PAK-SDK.md.
+    func browse(_ location: PakBrowseLocation, cursor: String?) async throws -> PakBrowsePage
 }
 
 extension PakProvider {
     public func configure(_ context: PakContext) async throws -> PakAccountState { .connected }
+
+    /// Search's tracks for a search, an empty sidebar, and nothing to open.
+    public func browse(_ location: PakBrowseLocation, cursor: String?) async throws -> PakBrowsePage {
+        switch location {
+        case .search(let term):
+            guard cursor == nil else { return PakBrowsePage() }
+            return PakBrowsePage(shelves: [PakShelfInfo(items: try await search(term).map(PakItemInfo.track))])
+        case .root:
+            return PakBrowsePage()
+        case .place(let id):
+            throw PakFailure("Nothing called \(id) here.")
+        }
+    }
 }
 
 /// The user's settings and a folder the Pak can keep files in.
@@ -101,6 +118,9 @@ public enum PakRunner {
             case PakMethod.resolve:
                 let id = try params(PakMethod.TrackID.self, data).id
                 return encode(header.id, PakMethod.ResolveResult(source: try await provider.resolve(id: id)))
+            case PakMethod.browse:
+                let browse = try params(PakMethod.Browse.self, data)
+                return encode(header.id, PakMethod.BrowseResult(page: try await provider.browse(browse.location, cursor: browse.cursor)))
             case PakMethod.shutdown:
                 return encode(header.id, PakMethod.Empty())
             default:
