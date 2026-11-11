@@ -14,13 +14,15 @@ OldSettings.copyIfNeeded()
 MainActor.assumeIsolated {
     let claude = BackstoryPak.Provider(
         name: "Claude", models: ["Sonnet 5.5", "Opus 5.5"],
-        costs: ["Sonnet 5.5": "About 4 cents a song", "Opus 5.5": "Richer notes, about 10 to 15 cents a song"]
+        costs: ["Sonnet 5.5": "About 4 cents a song", "Opus 5.5": "Richer notes, about 10 to 15 cents a song"],
+        summary: "Richest notes, with sources. About 4 cents."
     ) { model, key in
         ClaudeBackstory(key: key, model: model == "Opus 5.5" ? .opus : .sonnet)
     }
     let openAI = BackstoryPak.Provider(
         name: "OpenAI", models: ["GPT-5 mini", "GPT-5.5"],
-        costs: ["GPT-5 mini": "About 2 cents a song", "GPT-5.5": "Richer notes, about 7 cents a song"]
+        costs: ["GPT-5 mini": "About 2 cents a song", "GPT-5.5": "Richer notes, about 7 cents a song"],
+        summary: "Notes with sources. About 2 cents."
     ) { model, key in
         OpenAIBackstory(key: key, model: model == "GPT-5.5" ? .full : .mini)
     }

@@ -645,11 +645,13 @@ extension SnapshotTests {
         let onDevice = CannedBackstory()
         onDevice.updates = [.text("Dial-Up Sunrise is a song by The Low Bits from the album Low Tide FM. It mixes chiptune sounds with indie pop.")]
         for (name, skin) in skins {
-            for state in ["setup", "ready", "notes", "on-device", "on-device-setup", "on-device-claude-setup", "on-device-off"] {
+            for state in ["setup", "ready", "notes", "on-device", "on-device-setup", "on-device-claude-setup", "on-device-off", "on-device-choose"] {
                 let store = BackstoryMemorySettings(defaults: UserDefaults(suiteName: "BitampBackstorySnap-\(UUID().uuidString)")!)
                 let pak = BackstoryPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5", "Opus 5.5"],
-                                                          costs: ["Sonnet 5.5": "About 4 cents a song"]) { _, _ in service },
-                                                   .init(name: "OpenAI", models: ["GPT-5 mini", "GPT-5.5"]) { _, _ in service }],
+                                                          costs: ["Sonnet 5.5": "About 4 cents a song"],
+                                                          summary: "Richest notes, with sources. About 4 cents.") { _, _ in service },
+                                                   .init(name: "OpenAI", models: ["GPT-5 mini", "GPT-5.5"],
+                                                         summary: "Notes with sources. About 2 cents.") { _, _ in service }],
                                         onDevice: state.hasPrefix("on-device") ? .init(isAvailable: { state != "on-device-off" }, make: { _ in state == "on-device-off" ? nil : onDevice }) : nil,
                                         store: store)
                 if !state.hasSuffix("setup") && !state.hasPrefix("on-device") { pak.save(["claude-key": "test-key"]) }
@@ -661,11 +663,12 @@ extension SnapshotTests {
                 for _ in 0..<50 { await Task.yield() }
                 if state == "on-device-setup" {
                     pak.save(["service": BackstoryPak.onDeviceName])
-                    view.showSetup()
+                    view.showSetup(service: BackstoryPak.onDeviceName)
                 }
+                if state == "on-device-choose" { view.showSetup() }
                 if state == "on-device-claude-setup" {
                     pak.save(["service": "Claude"])
-                    view.showSetup()
+                    view.showSetup(service: "Claude")
                 }
                 if state == "notes" || state == "on-device" {
                     session.lookUp()
