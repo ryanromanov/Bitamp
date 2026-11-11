@@ -63,6 +63,69 @@ private final class Marker {}
         ])
         #expect(provider.settings == ["token": "abc"])
     }
+
+    @Test func browsesWithASearchOnlyDefault() async {
+        let requests = [
+            #"{"id":1,"method":"browse","params":{"location":{"kind":"search","term":"ode"}}}"#,
+            #"{"id":2,"method":"browse","params":{"location":{"kind":"root"}}}"#,
+            #"{"id":3,"method":"browse","params":{"location":{"kind":"place","id":"albums"},"cursor":"2"}}"#,
+        ]
+        var replies: [String] = []
+        await PakRunner.serve(EchoProvider(), input: AsyncStream { continuation in
+            requests.forEach { continuation.yield($0) }
+            continuation.finish()
+        }) { replies.append($0) }
+        #expect(replies == [
+            #"{"id":1,"result":{"page":{"shelves":[{"items":[{"track":{"id":"1","title":"Found ode"}}]}]}}}"#,
+            #"{"id":2,"result":{"page":{"shelves":[]}}}"#,
+            #"{"error":{"message":"Nothing called albums here."},"id":3}"#,
+        ])
+    }
+}
+
+@Suite struct PakBrowseWireTests {
+    func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
+        try JSONDecoder().decode(type, from: Data(json.utf8))
+    }
+
+    func encode<T: Encodable>(_ value: T) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return String(decoding: try encoder.encode(value), as: UTF8.self)
+    }
+
+    @Test func locationsArePlainObjects() throws {
+        #expect(try encode(PakBrowseLocation.root) == #"{"kind":"root"}"#)
+        #expect(try encode(PakBrowseLocation.place("a b")) == #"{"id":"a b","kind":"place"}"#)
+        #expect(try encode(PakBrowseLocation.search("ode")) == #"{"kind":"search","term":"ode"}"#)
+        #expect(try decode(PakBrowseLocation.self, #"{"kind":"search"}"#) == .search(""))
+        #expect(throws: DecodingError.self) { try decode(PakBrowseLocation.self, #"{"kind":"genre"}"#) }
+    }
+
+    @Test func aPageReadsLeniently() throws {
+        let page = try decode(PakBrowsePage.self, """
+        {"header":{"title":"Low Tide FM","subtitle":"The Low Bits","artwork":{"url":"https://covers.example/1.jpg"}},
+         "shelves":[{"title":"Songs","items":[
+            {"track":{"id":"t1","title":"Dial-Up Sunrise","artwork":{"file":"/tmp/cover.png"}}},
+            {"video":{"id":"v1"}},
+            {"place":{"kind":"genre","id":"g1","title":"Chiptune"}}]}],
+         "cursor":"next","future":"ignored"}
+        """)
+        #expect(page.header?.artwork == .url(URL(string: "https://covers.example/1.jpg")!))
+        #expect(page.shelves[0].items.count == 2, "an item type this version doesn't know is left out")
+        #expect(page.shelves[0].items[1] == .place(PakPlaceInfo(kind: "genre", id: "g1", title: "Chiptune")))
+        #expect(page.cursor == "next")
+        #expect(try decode(PakBrowsePage.self, "{}").shelves.isEmpty)
+    }
+
+    @Test func aManifestListsWhatThePakCan() throws {
+        let manifest = try decode(PakManifest.self, """
+        {"id":"radio","name":"Radio","version":"1","executable":"run","protocol":1,"capabilities":["browse","lyrics"]}
+        """)
+        #expect(manifest.can(PakProtocol.browse))
+        #expect(!manifest.can("companion"))
+        #expect(try decode(PakManifest.self, #"{"id":"radio","name":"Radio","version":"1","executable":"run","protocol":1}"#).capabilities == nil)
+    }
 }
 
 @MainActor @Suite struct PakLibraryTests {
@@ -216,6 +279,38 @@ private final class Marker {}
         #expect(lines.first == "✓ pak.json: Demo Pak 1.0, id “demo”, runs demo-pak")
         #expect(lines.contains("✓ track “ode-to-joy”: “Ode to Joy”"))
         #expect(lines.last == "The Demo Pak looks good. Double-click it to install it.")
+    }
+
+    @Test func browsesTheMediaLibrary() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pak = try demoPak()
+        defer { pak.disconnect() }
+        #expect(pak.canBrowse)
+        let root = try await pak.browse(.root, after: nil)
+        #expect(root.shelves.first?.title == "Demo")
+        #expect(root.shelves.first?.items.compactMap(\.place).map(\.title) == ["All Tunes", "Composers", "Albums", "Playlists"])
+
+        // Four, then the rest after the cursor, as PLAY and ADD take them.
+        let first = try await pak.browse(.place("tunes"), after: nil)
+        #expect(first.tracks.count == 4 && first.cursor == "4")
+        let all = try await pak.allTracks(at: .place("tunes"))
+        #expect(all.count == 6)
+        #expect(all[0].url.absoluteString == "bitpak-demo://track/ode-to-joy")
+
+        let albums = try await pak.browse(.place("albums"), after: nil)
+        let album = try #require(albums.shelves.first?.items.first?.place)
+        #expect(album.kind == .album && album.title == "Beethoven Bits")
+        let page = try await pak.browse(.place(album.id), after: nil)
+        #expect(page.header?.subtitle == "Ludwig van Beethoven")
+        #expect(page.tracks.map(\.title) == ["Ode to Joy", "Für Elise"])
+
+        // Covers are the Pak's files.
+        let artwork = try #require(album.artwork)
+        #expect(URL(string: artwork.id)?.isFileURL == true)
+        let image = try #require(await pak.image(for: artwork, size: 64))
+        #expect(image.width == 64)
+
+        await #expect(throws: (any Error).self) { try await pak.browse(.place("nowhere"), after: nil) }
     }
 
     @Test func searchesLooksUpAndPlays() async throws {

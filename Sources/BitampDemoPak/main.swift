@@ -2,11 +2,11 @@ import BitampPakSDK
 import Foundation
 
 /// Bitamp's demo Expansion Pak: a few public-domain tunes it plays as chiptunes, made on
-/// the spot. It shows everything a Pak does (settings, search, track info, audio) with
-/// no server or account. Package it with `scripts/make-pak.sh`; see docs/PAK-SDK.md.
+/// the spot. It shows everything a Pak does (settings, search, track info, audio, and
+/// browsing in the Media Library, with covers) with no server or account. Package it with `scripts/make-pak.sh`; see docs/PAK-SDK.md.
 final class DemoPak: PakProvider {
     private var waveform = Synth.Waveform.square
-    private var cache = FileManager.default.temporaryDirectory
+    var cache = FileManager.default.temporaryDirectory
 
     func configure(_ context: PakContext) async throws -> PakAccountState {
         waveform = context.settings["waveform"].flatMap(Synth.Waveform.init(rawValue:)) ?? .square
@@ -36,8 +36,10 @@ final class DemoPak: PakProvider {
         return .file(file)
     }
 
-    private func info(_ tune: Tune) -> PakTrackInfo {
-        PakTrackInfo(id: tune.id, title: tune.title, artist: tune.composer, album: "Bitamp Demo Pak", duration: tune.duration)
+    func info(_ tune: Tune) -> PakTrackInfo {
+        let album = DemoAlbum.all.first { $0.composer == tune.composer }
+        return PakTrackInfo(id: tune.id, title: tune.title, artist: tune.composer, album: album?.title ?? "Bitamp Demo Pak",
+                            duration: tune.duration, artwork: album.map { cover($0.id) })
     }
 }
 

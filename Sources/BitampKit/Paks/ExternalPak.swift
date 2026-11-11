@@ -1,6 +1,8 @@
 import BitampPakProtocol
+import CoreGraphics
 import CryptoKit
 import Foundation
+import ImageIO
 
 /// A third-party Pak: a `.bitpak` folder whose program Bitamp runs and talks to (see
 /// `PakConnection`). Its tracks are `bitpak-<id>://track/<the Pak's id>`; they play through
@@ -20,6 +22,9 @@ final class ExternalPak: Pak {
                 cacheDirectory: cacheDirectory.path))
         })
     private var lastAccount: PakAccountState?
+    /// Headers for covers that need them, by the cover's id. Kept out of the id, which the
+    /// cover cache stores, so a changing token doesn't miss the cache or get saved.
+    private var artworkHeaders: [String: [String: String]] = [:]
 
     init(manifest: PakManifest, folder: URL, settings: PakSettingsStore) {
         self.manifest = manifest
@@ -148,6 +153,80 @@ final class ExternalPak: Pak {
     }
 
     private func track(_ info: PakTrackInfo) -> PakTrack {
-        PakTrack(url: trackURL(info.id), title: info.title, artist: info.artist, album: info.album, duration: info.duration)
+        PakTrack(url: trackURL(info.id), title: info.title, artist: info.artist, album: info.album, duration: info.duration,
+                 artwork: info.artwork.flatMap(artwork))
+    }
+
+    // MARK: - Browsing
+
+    /// Whether its manifest says it browses. Read before the Pak has run, so it can't come
+    /// from the Pak itself.
+    var canBrowse: Bool { manifest.can(PakProtocol.browse) }
+
+    func browse(_ location: PakLocation, after cursor: String?) async throws -> PakPage {
+        guard canBrowse else {
+            // As any Pak that only searches.
+            if case .search(let term) = location {
+                return cursor == nil ? PakPage(shelves: [PakShelf(items: try await search(term).map(PakItem.track))]) : PakPage()
+            }
+            if case .place(let id) = location { throw PakBrowseError.notFound(id) }
+            return PakPage()
+        }
+        let wire: PakBrowseLocation = switch location {
+        case .root: .root
+        case .place(let id): .place(id)
+        case .search(let term): .search(term)
+        }
+        let page = try await connection.request(PakMethod.browse, PakMethod.Browse(location: wire, cursor: cursor),
+                                                as: PakMethod.BrowseResult.self).page
+        return self.page(page)
+    }
+
+    func page(_ page: PakBrowsePage) -> PakPage {
+        PakPage(
+            header: page.header.map { PakHeader(title: $0.title, subtitle: $0.subtitle, detail: $0.detail, artwork: $0.artwork.flatMap(artwork)) },
+            shelves: page.shelves.map { shelf in
+                PakShelf(title: shelf.title, items: shelf.items.map { item in
+                    switch item {
+                    case .track(let info): .track(track(info))
+                    case .place(let info):
+                        // A kind this version doesn't know shows as a section.
+                        .place(PakPlace(id: info.id, kind: PakPlace.Kind(rawValue: info.kind) ?? .section, title: info.title,
+                                        subtitle: info.subtitle, artwork: info.artwork.flatMap(artwork)))
+                    }
+                })
+            },
+            cursor: page.cursor)
+    }
+
+    /// The cover's id: its URL, or its file as a `file://` URL. Nil if it has neither.
+    func artwork(_ info: PakArtworkInfo) -> PakArtwork? {
+        if let text = info.url, let url = URL(string: text), ["http", "https"].contains(url.scheme?.lowercased()) {
+            if let headers = info.headers, !headers.isEmpty { artworkHeaders[url.absoluteString] = headers }
+            return PakArtwork(url: url)
+        }
+        if let path = info.file, !path.isEmpty { return PakArtwork(url: URL(fileURLWithPath: path)) }
+        return nil
+    }
+
+    func image(for artwork: PakArtwork, size: Int) async -> CGImage? {
+        guard let url = URL(string: artwork.id) else { return nil }
+        let data: Data
+        if url.isFileURL {
+            guard let file = try? Data(contentsOf: url) else { return nil }
+            data = file
+        } else {
+            guard ["http", "https"].contains(url.scheme?.lowercased()) else { return nil }
+            var request = URLRequest(url: url)
+            for (field, value) in artworkHeaders[artwork.id] ?? [:] { request.setValue(value, forHTTPHeaderField: field) }
+            guard let (body, response) = try? await URLSession.shared.data(for: request) else { return nil }
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return nil }
+            data = body
+        }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                        kCGImageSourceThumbnailMaxPixelSize: max(size, 1),
+                                        kCGImageSourceCreateThumbnailWithTransform: true]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 }
