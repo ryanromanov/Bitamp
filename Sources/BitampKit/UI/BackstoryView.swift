@@ -295,7 +295,7 @@ final class BackstoryView: SkinnedView {
             paragraph("Looking up is off. Choose AUTO to look up every song as it plays, or ASK to look songs up when you want.", dim)
         case .waiting:
             centered("Looking this song up in \(session.secondsUntilLookup) s...", middle - 6, colors.normal)
-            centered("(skip now and nothing is sent)", middle + 6, dim)
+            if !usesOnDevice { centered("(skip now and nothing is sent)", middle + 6, dim) }
         case .ready:
             let label = "TELL ME ABOUT THIS SONG"
             let w = PixelFont.width(of: label) + 9
@@ -342,7 +342,7 @@ final class BackstoryView: SkinnedView {
     private func drawSetup(_ c: Canvas, _ parts: BackstoryLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor, top: Int) -> Int {
         let x = parts.left, width = Int(parts.body.width)
         var y = top
-        for line in Self.wrap("Only the song's title, artist and album are sent, never the audio. Nothing goes to Bitamp.", width: width) {
+        for line in Self.wrap(setupIntro, width: width) {
             ListFont.draw(line, in: c, x: x, y: y, color: colors.normal)
             y += ListFont.lineHeight
         }
@@ -360,20 +360,37 @@ final class BackstoryView: SkinnedView {
             }
             y += 15
         }
-        if selected == BackstoryPak.onDeviceName {
-            let ready = pak.onDevice?.isAvailable() == true
-            let about = ready ? "Free; nothing leaves this Mac. No web search, so it knows less and cites nothing."
-                : "Not ready on this Mac: it needs Apple Intelligence turned on, and the model downloaded."
-            for line in Self.wrap(about, width: width - labelWidth) {
+        if let note = setupNote {
+            for line in Self.wrap(note, width: width - labelWidth) {
                 ListFont.draw(line, in: c, x: x + labelWidth, y: y, color: dim)
                 y += ListFont.lineHeight
             }
             y += 4
-        } else {
+        }
+        if selected != BackstoryPak.onDeviceName {
             y = drawCloudSetup(c, colors, dim, x: x, y: y, width: width, labelWidth: labelWidth)
         }
         y = drawSetupEnd(c, colors, dim, x: x, y: y, width: width, labelWidth: labelWidth)
         return y - top
+    }
+
+    /// The setup's first words: what a cloud service is sent.
+    private var setupIntro: String {
+        selectedService == BackstoryPak.onDeviceName
+            ? "Choose where Backstory's notes come from."
+            : "Only the song's title, artist and album are sent, never the audio. Nothing goes to Bitamp."
+    }
+
+    /// What the setup says about the on-device model: what it is, how to turn it on, or,
+    /// on a Mac without it, that a newer macOS has it.
+    private var setupNote: String? {
+        guard let onDevice = pak.onDevice else {
+            return "On macOS 26 or later with Apple Intelligence, Backstory can also run free on this Mac, without a key."
+        }
+        guard selectedService == BackstoryPak.onDeviceName else { return nil }
+        return onDevice.isAvailable()
+            ? "Free; nothing leaves this Mac. No web search, so it knows less and cites nothing."
+            : "Not ready yet. Turn on Apple Intelligence in System Settings and it works free once its model downloads. Or pick Claude or OpenAI and paste a key."
     }
 
     /// The service the setup shows: the one being chosen, or the one saved.
@@ -384,7 +401,7 @@ final class BackstoryView: SkinnedView {
     /// Whether lookups go to the on-device model: these notes came from it, or the next
     /// lookup will.
     private var usesOnDevice: Bool {
-        session.phase == .done || session.phase == .looking ? session.notes.isOnDevice : pak.choice()?.onDevice == true
+        session.phase == .done || session.phase == .looking ? session.notes.isOnDevice : pak.choice().map(\.onDevice) ?? pak.choosesOnDevice
     }
 
     /// A cloud service's model and key.
@@ -569,7 +586,7 @@ final class BackstoryView: SkinnedView {
                                               rect: CGRect(x: parts.body.minX, y: parts.body.minY, width: parts.body.width, height: max(height, 8))))
         } else if showsSetup {
             controls.append(AccessibleControl(id: "about", kind: .text,
-                                              label: "Only the song's title, artist and album are sent, never the audio. Nothing goes to Bitamp.",
+                                              label: [setupIntro, setupNote].compactMap { $0 }.joined(separator: " "),
                                               rect: CGRect(x: parts.body.minX, y: parts.body.minY, width: parts.body.width, height: 20)))
         }
         for (number, (rect, button)) in buttons.enumerated() where rect.intersects(parts.content) {

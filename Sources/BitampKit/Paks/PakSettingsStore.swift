@@ -25,6 +25,11 @@ class PakSettingsStore {
         return values
     }
 
+    /// A plain setting as saved, without its default.
+    func savedValue(_ key: String, for id: String) -> String? {
+        (defaults.dictionary(forKey: Self.key(id)) as? [String: String])?[key]
+    }
+
     func save(_ values: [String: String], for manifest: PakManifest) {
         var plain: [String: String] = [:]
         for setting in manifest.settings ?? [] {

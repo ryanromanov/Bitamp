@@ -2,9 +2,10 @@ import BitampPakProtocol
 import CoreGraphics
 import Foundation
 
-/// The Backstory Pak: tells you about the song that's playing, from a service the user
-/// picks with their own key, or from Apple's on-device model: when chosen, when there's no
-/// key, and when the service can't be reached. A companion Pak: it has no music of its own, and its cartridge
+/// The Backstory Pak: tells you about the song that's playing, from Apple's on-device model
+/// (the default where the Mac has it, so nothing needs setting up), or from a service the
+/// user picks with their own key. The on-device model also answers when the service has no
+/// key, and when it can't be reached. A companion Pak: it has no music of its own, and its cartridge
 /// opens the Backstory window instead of the Media Library.
 ///
 /// Settings live where a third-party Pak's do (UserDefaults, the key in the Keychain), so
@@ -87,33 +88,54 @@ public final class BackstoryPak: Pak, ConfigurablePak {
 
     var settingDefinitions: [PakSettingDefinition] {
         var settings = [PakSettingDefinition(key: "service", label: "Service", kind: .choice,
-                                             options: services, defaultValue: providers[0].name)]
+                                             options: services, defaultValue: defaultService)]
         for provider in providers {
             let prefix = provider.name.lowercased()
             settings.append(PakSettingDefinition(key: "\(prefix)-model", label: "\(provider.name) model", kind: .choice,
                                                  options: provider.models, defaultValue: provider.models.first))
             settings.append(PakSettingDefinition(key: "\(prefix)-key", label: "\(provider.name) API key", kind: .password))
         }
-        // Lookups cost money, so nothing is looked up by itself until the user says so.
+        // Its default depends on the service, so settingValues() fills it in.
         settings.append(PakSettingDefinition(key: "lookup", label: "Look up", kind: .choice,
-                                             options: Lookup.allCases.map(\.rawValue), defaultValue: Lookup.whenAsked.rawValue))
+                                             options: Lookup.allCases.map(\.rawValue)))
         // A song looked up early and then skipped still costs, so it's off until asked for.
         settings.append(PakSettingDefinition(key: "prefetch", label: "Next song early", kind: .choice,
                                              options: ["Off", "On"], defaultValue: "Off"))
         return settings
     }
 
-    /// The services offered: the cloud ones, then the on-device model where there is one.
+    /// The services offered: the on-device model where there is one, then the cloud ones.
     var services: [String] {
-        providers.map(\.name) + (onDevice == nil ? [] : [Self.onDeviceName])
+        (onDevice == nil ? [] : [Self.onDeviceName]) + providers.map(\.name)
+    }
+
+    /// The on-device model where there is one, since it needs no key; otherwise the first
+    /// cloud service.
+    var defaultService: String {
+        onDevice == nil ? providers[0].name : Self.onDeviceName
     }
 
     var settingsDescription: String? {
-        "Sends the song's title, artist and album, never the audio, to the service you pick, with your own key. Nothing goes to Bitamp. The on-device model keeps everything on this Mac."
+        onDevice == nil
+            ? "Sends the song's title, artist and album, never the audio, to the service you pick, with your own key. Nothing goes to Bitamp."
+            : "The on-device model is free and keeps everything on this Mac. For richer notes with sources, pick Claude or OpenAI and add your own key: only the song's title, artist and album are sent, never the audio, and nothing goes to Bitamp."
     }
 
     func settingValues() -> [String: String] {
-        store.values(for: manifest)
+        var values = store.values(for: manifest)
+        if values["lookup"] == nil { values["lookup"] = defaultLookup(values).rawValue }
+        return values
+    }
+
+    /// AUTO when the on-device model answers, since it's free; ASK for a cloud service,
+    /// since lookups cost money and nothing should be looked up by itself until the user says so.
+    private func defaultLookup(_ values: [String: String]) -> Lookup {
+        guard onDevice != nil else { return .whenAsked }
+        let service = values["service"]
+        if service == Self.onDeviceName { return .everyTrack }
+        let provider = providers.first { $0.name == service } ?? providers[0]
+        let key = values["\(provider.name.lowercased())-key"] ?? ""
+        return key.isEmpty ? .everyTrack : .whenAsked
     }
 
     func configure(_ values: [String: String]) async throws {
@@ -122,7 +144,13 @@ public final class BackstoryPak: Pak, ConfigurablePak {
 
     /// Changes some settings, keeping the rest.
     func save(_ changes: [String: String]) {
-        store.save(settingValues().merging(changes) { $1 }, for: manifest)
+        var values = settingValues().merging(changes) { $1 }
+        // The lookup is kept only once the user picks one. Until then it follows the service,
+        // so moving from the free on-device model to a paid one goes back to ASK.
+        if store.savedValue("lookup", for: id) == nil, values["lookup"] == settingValues()["lookup"] {
+            values["lookup"] = nil
+        }
+        store.save(values, for: manifest)
         onChange?()
     }
 
@@ -141,7 +169,7 @@ public final class BackstoryPak: Pak, ConfigurablePak {
     }
 
     var lookup: Lookup {
-        get { settingValues()["lookup"].flatMap(Lookup.init) ?? .whenAsked }
+        get { settingValues()["lookup"].flatMap(Lookup.init) ?? defaultLookup(settingValues()) }
         set { save(["lookup": newValue.rawValue]) }
     }
 
