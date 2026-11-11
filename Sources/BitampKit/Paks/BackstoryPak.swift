@@ -34,9 +34,10 @@ public final class BackstoryPak: Pak, ConfigurablePak {
     public struct OnDevice: Sendable {
         /// Whether it can answer now; it may still be downloading.
         public let isAvailable: @Sendable () -> Bool
-        public let make: @Sendable () -> BackstoryService?
+        /// The service; with `wikipedia`, it writes from the song's Wikipedia article.
+        public let make: @Sendable (_ wikipedia: Bool) -> BackstoryService?
 
-        public init(isAvailable: @escaping @Sendable () -> Bool, make: @escaping @Sendable () -> BackstoryService?) {
+        public init(isAvailable: @escaping @Sendable () -> Bool, make: @escaping @Sendable (_ wikipedia: Bool) -> BackstoryService?) {
             self.isAvailable = isAvailable
             self.make = make
         }
@@ -50,6 +51,9 @@ public final class BackstoryPak: Pak, ConfigurablePak {
     }
 
     static let onDeviceName = "On-device"
+    /// What notes the on-device model wrote from Wikipedia are saved under, apart from the
+    /// ones it wrote from memory.
+    static let onDeviceWikipediaName = "On-device/Wikipedia"
 
     /// When notes are looked up.
     enum Lookup: String, CaseIterable {
@@ -98,6 +102,11 @@ public final class BackstoryPak: Pak, ConfigurablePak {
         // Its default depends on the service, so settingValues() fills it in.
         settings.append(PakSettingDefinition(key: "lookup", label: "Look up", kind: .choice,
                                              options: Lookup.allCases.map(\.rawValue)))
+        // Sends the title, artist and album to Wikipedia, so it's off until asked for.
+        if onDevice != nil {
+            settings.append(PakSettingDefinition(key: "wikipedia", label: "On-device: look up Wikipedia", kind: .choice,
+                                                 options: ["Off", "On"], defaultValue: "Off"))
+        }
         // A song looked up early and then skipped still costs, so it's off until asked for.
         settings.append(PakSettingDefinition(key: "prefetch", label: "Next song early", kind: .choice,
                                              options: ["Off", "On"], defaultValue: "Off"))
@@ -118,7 +127,7 @@ public final class BackstoryPak: Pak, ConfigurablePak {
     var settingsDescription: String? {
         onDevice == nil
             ? "Sends the song's title, artist and album, never the audio, to the service you pick, with your own key. Nothing goes to Bitamp."
-            : "The on-device model is free and keeps everything on this Mac. For richer notes with sources, pick Claude or OpenAI and add your own key: only the song's title, artist and album are sent, never the audio, and nothing goes to Bitamp."
+            : "The on-device model is free and keeps everything on this Mac. With Wikipedia on, it writes from the song's Wikipedia article, which sends the title, artist and album to Wikipedia. For richer notes with sources, pick Claude or OpenAI and add your own key: only the title, artist and album are sent, never the audio, and nothing goes to Bitamp."
     }
 
     func settingValues() -> [String: String] {
@@ -187,6 +196,12 @@ public final class BackstoryPak: Pak, ConfigurablePak {
         set { save(["prefetch": newValue ? "On" : "Off"]) }
     }
 
+    /// Whether the on-device model looks the song up on Wikipedia and writes from the article.
+    var usesWikipedia: Bool {
+        get { onDevice != nil && settingValues()["wikipedia"] == "On" }
+        set { save(["wikipedia": newValue ? "On" : "Off"]) }
+    }
+
     /// Whether the on-device model is the service chosen.
     var choosesOnDevice: Bool {
         onDevice != nil && settingValues()["service"] == Self.onDeviceName
@@ -206,8 +221,9 @@ public final class BackstoryPak: Pak, ConfigurablePak {
 
     /// The on-device model, if this Mac can run it now.
     func onDeviceChoice() -> Choice? {
-        guard let onDevice, onDevice.isAvailable(), let service = onDevice.make() else { return nil }
-        return Choice(service: service, identity: Self.onDeviceName, onDevice: true)
+        let wikipedia = usesWikipedia
+        guard let onDevice, onDevice.isAvailable(), let service = onDevice.make(wikipedia) else { return nil }
+        return Choice(service: service, identity: wikipedia ? Self.onDeviceWikipediaName : Self.onDeviceName, onDevice: true)
     }
 
     // MARK: - Pak

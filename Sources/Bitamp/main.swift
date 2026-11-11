@@ -26,7 +26,9 @@ MainActor.assumeIsolated {
     }
     // Apple's on-device model, offered where macOS has it, and marked wherever it's used.
     let onDevice = AppleOnDevice.isSupported
-        ? BackstoryPak.OnDevice(isAvailable: { AppleOnDevice.isAvailable }, make: { AppleOnDevice.service() }) : nil
+        ? BackstoryPak.OnDevice(isAvailable: { AppleOnDevice.isAvailable }, make: { wikipedia in
+            AppleOnDevice.service(wikipedia: wikipedia ? WikipediaFacts() : nil)
+        }) : nil
     let delegate = AppDelegate(paks: [AppleMusicPak()], backstory: [claude, openAI], backstoryOnDevice: onDevice)
     NSApplication.shared.delegate = delegate
     NSApplication.shared.setActivationPolicy(.regular)

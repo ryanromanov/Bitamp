@@ -65,6 +65,7 @@ final class BackstoryView: SkinnedView {
     private var draftProvider: String?
     private var draftModel: String?
     private var draftPrefetch: Bool?
+    private var draftWikipedia: Bool?
 
     private var scroll: CGFloat = 0 {
         didSet {
@@ -79,7 +80,7 @@ final class BackstoryView: SkinnedView {
     private var buttons: [(CGRect, Button)] = []
 
     private enum Button: Equatable {
-        case lookup(BackstoryPak.Lookup), askAgain, ask, setUp, provider(String), model(String), prefetch(Bool), save, cancel
+        case lookup(BackstoryPak.Lookup), askAgain, ask, setUp, provider(String), model(String), prefetch(Bool), wikipedia(Bool), save, cancel
     }
 
     private enum Press: Equatable {
@@ -295,13 +296,12 @@ final class BackstoryView: SkinnedView {
             paragraph("Looking up is off. Choose AUTO to look up every song as it plays, or ASK to look songs up when you want.", dim)
         case .waiting:
             centered("Looking this song up in \(session.secondsUntilLookup) s...", middle - 6, colors.normal)
-            if !usesOnDevice { centered("(skip now and nothing is sent)", middle + 6, dim) }
+            if !usesOnDevice || pak.usesWikipedia { centered("(skip now and nothing is sent)", middle + 6, dim) }
         case .ready:
             let label = "TELL ME ABOUT THIS SONG"
             let w = PixelFont.width(of: label) + 9
             drawButton(c, label, CGRect(x: x + (width - w) / 2, y: middle - 12, width: w, height: 15), .ask, selected: false, colors)
-            centered(usesOnDevice ? "Stays on this Mac, with Apple's on-device model." : "Sends the title, artist and album to \(service).",
-                     middle + 8, dim)
+            centered(readyLine, middle + 8, dim)
         case .looking where session.notes.isEmpty:
             centered("Asking \(service)...", middle, colors.normal)
         case .looking, .done:
@@ -316,9 +316,7 @@ final class BackstoryView: SkinnedView {
             if session.phase == .looking, (frameCount / 15) % 2 == 0 {
                 c.fill(x, y - 4 - 2, 4, 1, colors.current)
             }
-            if session.notes.isOnDevice {
-                paragraph("No sources: the on-device model knows less, and can get details wrong.", dim)
-            }
+            if let caveat = onDeviceCaveat { paragraph(caveat, dim) }
             for (index, source) in session.notes.sources.enumerated() {
                 let label = "[\(index + 1)] " + Self.sourceLabel(source)
                 let text = ListFont.truncate(label, toWidth: width)
@@ -369,6 +367,8 @@ final class BackstoryView: SkinnedView {
         }
         if selected != BackstoryPak.onDeviceName {
             y = drawCloudSetup(c, colors, dim, x: x, y: y, width: width, labelWidth: labelWidth)
+        } else {
+            y = drawWikipediaSetup(c, colors, dim, x: x, y: y, width: width, labelWidth: labelWidth)
         }
         y = drawSetupEnd(c, colors, dim, x: x, y: y, width: width, labelWidth: labelWidth)
         return y - top
@@ -389,7 +389,8 @@ final class BackstoryView: SkinnedView {
         }
         guard selectedService == BackstoryPak.onDeviceName else { return nil }
         return onDevice.isAvailable()
-            ? "Free; nothing leaves this Mac. No web search, so it knows less and cites nothing."
+            ? ((draftWikipedia ?? pak.usesWikipedia) ? "Free. Facts come from Wikipedia; the notes are written on this Mac."
+                : "Free; nothing leaves this Mac. No web search, so it knows less and cites nothing.")
             : "Not ready yet. Turn on Apple Intelligence in System Settings and it works free once its model downloads. Or pick Claude or OpenAI and paste a key."
     }
 
@@ -428,6 +429,43 @@ final class BackstoryView: SkinnedView {
         keyBox.rect = CGRect(x: x + labelWidth, y: y, width: width - labelWidth, height: 13)
         y += 17
         return y
+    }
+
+    /// Whether the on-device model looks songs up on Wikipedia, and what that sends.
+    private func drawWikipediaSetup(_ c: Canvas, _ colors: PlaylistColors, _ dim: CGColor, x: Int, y: Int, width: Int, labelWidth: Int) -> Int {
+        var y = y
+        let on = draftWikipedia ?? pak.usesWikipedia
+        c.text("WIKI-", x, y + 1, dim)
+        c.text("PEDIA", x, y + 8, dim)
+        var bx = x + labelWidth
+        for (value, label) in [(false, "OFF"), (true, "ON")] {
+            let rect = CGRect(x: bx, y: y, width: PixelFont.width(of: label) + 7, height: 13)
+            drawButton(c, label, rect, .wikipedia(value), selected: value == on, colors)
+            bx += Int(rect.width) + 2
+        }
+        y += 15
+        for line in Self.wrap(Self.wikipediaNote, width: width - labelWidth) {
+            ListFont.draw(line, in: c, x: x + labelWidth, y: y, color: dim)
+            y += ListFont.lineHeight
+        }
+        return y + 4
+    }
+
+    static let wikipediaNote = "ON sends the title, artist and album to Wikipedia to find the song's article. The notes are still written on this Mac, from memory if there's no article."
+
+    /// Under TELL ME ABOUT THIS SONG: what a lookup sends, and where.
+    private var readyLine: String {
+        guard usesOnDevice else { return "Sends the title, artist and album to \(pak.provider.name)." }
+        return pak.usesWikipedia ? "Looks the song up on Wikipedia, and writes the notes on this Mac."
+            : "Stays on this Mac, with Apple's on-device model."
+    }
+
+    /// Under notes the on-device model wrote, which can be wrong.
+    private var onDeviceCaveat: String? {
+        guard session.notes.isOnDevice else { return nil }
+        return session.notes.sources.isEmpty
+            ? "No sources: the on-device model knows less, and can get details wrong."
+            : "Written on this Mac by the on-device model from Wikipedia. It can still get details wrong."
     }
 
     /// Looking the next song up early, and Save.
@@ -529,11 +567,11 @@ final class BackstoryView: SkinnedView {
         case .untagged: return "Nothing to look up: this song has no title or artist tags."
         case .off: return "Looking up is off."
         case .waiting: return "Looking this song up in \(session.secondsUntilLookup) seconds."
-        case .ready: return usesOnDevice ? "Stays on this Mac, with Apple's on-device model." : "Sends the title, artist and album to \(service)."
+        case .ready: return readyLine
         case .looking where session.notes.isEmpty: return "Asking \(service)."
         case .looking, .done:
             var text = session.notes.text.replacingOccurrences(of: "\n\n", with: "\n")
-            if session.notes.isOnDevice { text += "\nNo sources: the on-device model knows less, and can get details wrong." }
+            if let caveat = onDeviceCaveat { text += "\n" + caveat }
             return text
         case .failed(let message, _): return message
         }
@@ -556,6 +594,8 @@ final class BackstoryView: SkinnedView {
             let provider = pak.providers.first { $0.name == selectedService } ?? pak.provider
             (kind, label) = (.checkBox(name == (draftModel ?? pak.model(of: provider))), "Model: \(name)")
         case .prefetch(let on): (kind, label) = (.checkBox(on == (draftPrefetch ?? pak.prefetch)), on ? "Next song early" : "Next song when it plays")
+        case .wikipedia(let on):
+            (kind, label) = (.checkBox(on == (draftWikipedia ?? pak.usesWikipedia)), on ? "Wikipedia on: " + Self.wikipediaNote : "Wikipedia off")
         case .save: (kind, label) = (.button, "Save")
         case .cancel: (kind, label) = (.button, "Cancel")
         }
@@ -708,6 +748,8 @@ final class BackstoryView: SkinnedView {
             draftModel = name
         case .prefetch(let on):
             draftPrefetch = on
+        case .wikipedia(let on):
+            draftWikipedia = on
         case .save:
             saveSetup()
         case .cancel:
@@ -721,6 +763,7 @@ final class BackstoryView: SkinnedView {
         draftProvider = nil
         draftModel = nil
         draftPrefetch = nil
+        draftWikipedia = nil
         scroll = 0
         if !pak.choosesOnDevice { keyBox.focus() }
         needsDisplay = true
@@ -730,6 +773,7 @@ final class BackstoryView: SkinnedView {
         if selectedService == BackstoryPak.onDeviceName {
             var changes = ["service": BackstoryPak.onDeviceName]
             if let draftPrefetch { changes["prefetch"] = draftPrefetch ? "On" : "Off" }
+            if let draftWikipedia { changes["wikipedia"] = draftWikipedia ? "On" : "Off" }
             pak.save(changes)
             endSetup()
             return
@@ -756,6 +800,7 @@ final class BackstoryView: SkinnedView {
         draftProvider = nil
         draftModel = nil
         draftPrefetch = nil
+        draftWikipedia = nil
         window?.makeFirstResponder(self)
         settingsChanged()
     }
