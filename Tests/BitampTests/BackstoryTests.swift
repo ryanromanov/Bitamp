@@ -514,6 +514,8 @@ final class FailingBackstory: BackstoryService, @unchecked Sendable {
 @Suite struct BackstoryOnDeviceTests {
     final class Model: @unchecked Sendable {
         var available = true
+        /// Whether the last service made was asked to use Wikipedia.
+        var wikipedia: Bool?
         let service = CannedBackstory()
     }
     let model = Model()
@@ -523,7 +525,10 @@ final class FailingBackstory: BackstoryService, @unchecked Sendable {
         let model = self.model
         model.service.updates = [.text("On-device notes.")]
         return BackstoryPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5"]) { _, _ in cloud }],
-                            onDevice: onDevice ? .init(isAvailable: { model.available }, make: { model.available ? model.service : nil }) : nil,
+                            onDevice: onDevice ? .init(isAvailable: { model.available }, make: { wikipedia in
+                                model.wikipedia = wikipedia
+                                return model.available ? model.service : nil
+                            }) : nil,
                             store: store)
     }
 
@@ -540,6 +545,17 @@ final class FailingBackstory: BackstoryService, @unchecked Sendable {
         pak.save(["service": BackstoryPak.onDeviceName])
         #expect(pak.choice()?.onDevice == true, "chosen")
         #expect(pak.choice()?.identity == "On-device")
+    }
+
+    @Test func wikipediaIsOffUntilTurnedOnAndKeepsItsOwnNotes() {
+        let pak = pak()
+        #expect(!pak.usesWikipedia)
+        #expect(pak.choice()?.identity == "On-device")
+        #expect(model.wikipedia == false)
+        pak.usesWikipedia = true
+        #expect(pak.choice()?.identity == "On-device/Wikipedia", "saved apart from notes written from memory")
+        #expect(model.wikipedia == true)
+        #expect(!self.pak(onDevice: false).settingDefinitions.contains { $0.key == "wikipedia" })
     }
 
     @Test func notOfferedWhereItCantRun() {
@@ -634,7 +650,7 @@ extension SnapshotTests {
                 let pak = BackstoryPak(providers: [.init(name: "Claude", models: ["Sonnet 5.5", "Opus 5.5"],
                                                           costs: ["Sonnet 5.5": "About 4 cents a song"]) { _, _ in service },
                                                    .init(name: "OpenAI", models: ["GPT-5 mini", "GPT-5.5"]) { _, _ in service }],
-                                        onDevice: state.hasPrefix("on-device") ? .init(isAvailable: { state != "on-device-off" }, make: { state == "on-device-off" ? nil : onDevice }) : nil,
+                                        onDevice: state.hasPrefix("on-device") ? .init(isAvailable: { state != "on-device-off" }, make: { _ in state == "on-device-off" ? nil : onDevice }) : nil,
                                         store: store)
                 if !state.hasSuffix("setup") && !state.hasPrefix("on-device") { pak.save(["claude-key": "test-key"]) }
                 let session = BackstorySession(pak: pak, cache: BackstoryCache(folder: nil))
