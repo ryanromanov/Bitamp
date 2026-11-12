@@ -7,12 +7,17 @@ import ImageIO
 /// A third-party Pak: a `.bitpak` folder whose program Bitamp runs and talks to (see
 /// `PakConnection`). Its tracks are `bitpak-<id>://track/<the Pak's id>`; they play through
 /// Bitamp's engine, so the equalizer, visualizer and Retro Sound all work.
+///
+/// A Pak whose manifest lists `notes` is a companion instead: it has no music, and writes
+/// about the song that's playing in a window of its own.
 @MainActor
-final class ExternalPak: Pak {
+final class ExternalPak: NotesPak {
     let manifest: PakManifest
     /// The installed `.bitpak` folder.
     let folder: URL
     private let settings: PakSettingsStore
+    /// Bitamp's own settings for a notes Pak (when to look up), kept apart from the Pak's.
+    private let defaults: UserDefaults
     private lazy var connection = PakConnection(
         executable: folder.appendingPathComponent(manifest.executable), name: manifest.name,
         hello: { [unowned self] in
@@ -21,15 +26,20 @@ final class ExternalPak: Pak {
                 protocol: PakProtocol.version, settings: settings.values(for: manifest),
                 cacheDirectory: cacheDirectory.path))
         })
-    private var lastAccount: PakAccountState?
+    private var lastAccount: PakAccountState? {
+        didSet { if lastAccount != oldValue { onChange?() } }
+    }
+    /// Called when what the Pak says about itself changes, as after its settings are saved.
+    var onChange: (() -> Void)?
     /// Headers for covers that need them, by the cover's id. Kept out of the id, which the
     /// cover cache stores, so a changing token doesn't miss the cache or get saved.
     private var artworkHeaders: [String: [String: String]] = [:]
 
-    init(manifest: PakManifest, folder: URL, settings: PakSettingsStore) {
+    init(manifest: PakManifest, folder: URL, settings: PakSettingsStore, defaults: UserDefaults = .standard) {
         self.manifest = manifest
         self.folder = folder
         self.settings = settings
+        self.defaults = defaults
         connection.onHello = { [weak self] result in self?.lastAccount = result.account }
     }
 
@@ -72,6 +82,8 @@ final class ExternalPak: Pak {
         let result = try await connection.request(
             PakMethod.configure, PakMethod.Configure(settings: settings.values(for: manifest)), as: PakMethod.AccountResult.self)
         lastAccount = result.account
+        // A notes Pak's saved notes follow its settings, even when its account doesn't change.
+        onChange?()
     }
 
     func settingValues() -> [String: String] {
@@ -161,7 +173,7 @@ final class ExternalPak: Pak {
 
     /// Whether its manifest says it browses. Read before the Pak has run, so it can't come
     /// from the Pak itself.
-    var canBrowse: Bool { manifest.can(PakProtocol.browse) }
+    var canBrowse: Bool { manifest.can(PakProtocol.browse) && !writesNotes }
 
     func browse(_ location: PakLocation, after cursor: String?) async throws -> PakPage {
         guard canBrowse else {
@@ -228,5 +240,100 @@ final class ExternalPak: Pak {
                                         kCGImageSourceThumbnailMaxPixelSize: max(size, 1),
                                         kCGImageSourceCreateThumbnailWithTransform: true]
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
+    // MARK: - Notes
+
+    /// A companion that writes notes, with no music of its own. It must declare protocol 2,
+    /// so older Bitamps don't take it for a music Pak.
+    var writesNotes: Bool { manifest.can(PakProtocol.notes) && manifest.protocol >= PakProtocol.notesVersion }
+
+    var isMusicSource: Bool { !writesNotes }
+
+    /// How long a notes Pak may go quiet before Bitamp gives up: longer than other requests,
+    /// since a lookup on the web can take a while before its first words.
+    static let notesTimeout: TimeInterval = 60
+
+    private var lookupKey: String { "pak.\(manifest.id).lookup" }
+    private var prefetchKey: String { "pak.\(manifest.id).prefetch" }
+
+    /// "When I ask" until the user picks: Bitamp can't know what a lookup costs, or where it goes.
+    var lookup: NotesLookup {
+        get { defaults.string(forKey: lookupKey).flatMap(NotesLookup.init) ?? .whenAsked }
+        set { defaults.set(newValue.rawValue, forKey: lookupKey) }
+    }
+
+    var prefetch: Bool {
+        get { defaults.bool(forKey: prefetchKey) }
+        set { defaults.set(newValue, forKey: prefetchKey) }
+    }
+
+    /// What its notes are saved under: its id, apart from Backstory's and other Paks', plus
+    /// its version and settings, so changing them (a model, a level of detail) doesn't show
+    /// notes written before. Passwords are left out.
+    var identity: String {
+        let values = settings.values(for: manifest)
+        let shown = (manifest.settings ?? []).filter { $0.kind != .password }
+            .compactMap { setting in values[setting.key].map { "\(setting.key)=\($0)" } }
+        return (["pak:\(manifest.id)", manifest.version] + shown).joined(separator: "/")
+    }
+
+    /// Forgets Bitamp's own settings for the Pak, when it's removed.
+    func forgetNotesSettings() {
+        defaults.removeObject(forKey: lookupKey)
+        defaults.removeObject(forKey: prefetchKey)
+    }
+
+    /// The Pak itself, unless it needs settings filled in first.
+    func choice() -> NotesChoice? {
+        guard writesNotes, account != .disconnected else { return nil }
+        return NotesChoice(service: PakNotesService(pak: self), identity: identity, onDevice: false)
+    }
+
+    func onDeviceChoice() -> NotesChoice? { nil }
+
+    /// Asks the Pak for notes on `track`, handing each piece to `yield` as it comes.
+    func writeNotes(_ track: PakNowPlaying, _ yield: @escaping (BackstoryUpdate) -> Void) async throws {
+        let song = PakSongInfo(title: track.title, artist: track.artist, album: track.album)
+        let decoder = JSONDecoder()
+        let result = try await connection.request(PakMethod.notes, PakMethod.Notes(song: song), as: PakMethod.NotesResult.self,
+                                                  timeout: Self.notesTimeout) { line in
+            guard let update = try? decoder.decode(PakUpdate<PakNotesUpdate>.self, from: line).update else { return }
+            Self.updates(text: update.text, cite: update.cite).forEach(yield)
+        }
+        Self.updates(text: result.text, cite: result.sources).forEach(yield)
+    }
+
+    /// What the window adds for a piece of the Pak's notes. Sources that aren't web pages are left out.
+    nonisolated static func updates(text: String?, cite: [PakCitation]?) -> [BackstoryUpdate] {
+        var updates: [BackstoryUpdate] = []
+        if let text, !text.isEmpty { updates.append(.text(text)) }
+        let sources = (cite ?? []).compactMap { citation -> BackstorySource? in
+            guard let url = URL(string: citation.url), ["http", "https"].contains(url.scheme?.lowercased()), url.host != nil else { return nil }
+            let title = citation.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            return BackstorySource(title: title.isEmpty ? url.host! : title, url: url, quote: citation.quote)
+        }
+        if !sources.isEmpty { updates.append(.cite(sources)) }
+        return updates
+    }
+}
+
+/// A notes Pak as the window's service. Stopping the stream, as when the song changes,
+/// cancels the request, and Bitamp tells the Pak to stop.
+struct PakNotesService: BackstoryService {
+    let pak: ExternalPak
+
+    func notes(for track: PakNowPlaying) -> AsyncThrowingStream<BackstoryUpdate, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task { @MainActor in
+                do {
+                    try await pak.writeNotes(track) { continuation.yield($0) }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 }

@@ -8,7 +8,9 @@ An Expansion Pak adds a music source to Bitamp: a server, a radio directory, an 
 
 A Pak is a program. Bitamp starts it, asks it questions over standard input and output, and plays the audio it points to. You can write one in Swift with the small SDK in this repository, or in any language that can read and write lines of JSON.
 
-The demo Pak in `Sources/BitampDemoPak` is a complete example. It plays a few public-domain tunes as chiptunes and needs no server. Build it with `scripts/make-pak.sh`, then double-click `Demo.bitpak` to install it.
+A Pak can also be a **companion** with no music of its own, which writes about the song that's playing in a window of its own, the way Bitamp's Backstory does. See [Notes](#notes).
+
+The demo Pak in `Sources/BitampDemoPak` is a complete example. It plays a few public-domain tunes as chiptunes and needs no server. `Sources/BitampDemoNotesPak` is a companion that writes a few lines about those tunes. Build both with `scripts/make-pak.sh`, then double-click `Demo.bitpak` and `Demo Notes.bitpak` to install them.
 
 ## What a Pak is
 
@@ -41,8 +43,8 @@ Radio.bitpak/
 - **id** is 1 to 32 lowercase letters, digits and hyphens, starting with a letter. It names the Pak's settings, and its tracks' URLs in playlists (`bitpak-radio://track/<your id>`). Keep it the same between versions.
 - **name** is shown on the cartridge and in menus ("Radio Pak").
 - **executable** is the program, relative to the folder. It must be inside the folder and executable.
-- **protocol** is the version of the messages below. This is version 1.
-- **capabilities** are optional. `["browse"]` says the Pak can be browsed in the Media Library, with a sidebar, albums, artists, playlists and covers (see [Browsing](#browsing)). Bitamp 0.10 and earlier ignore it and show the Pak's search instead, so one Pak works in both.
+- **protocol** is the version of the messages below that the Pak needs. Use 1, which every Bitamp with Paks understands, unless the Pak writes notes: those need 2 (Bitamp 0.12.0 and later). Bitamp won't install a Pak that needs a newer version than it has, and says it needs a newer Bitamp.
+- **capabilities** are optional. `["browse"]` says the Pak can be browsed in the Media Library, with a sidebar, albums, artists, playlists and covers (see [Browsing](#browsing)). Bitamp 0.10 and earlier ignore it and show the Pak's search instead, so one Pak works in both. `["notes"]` makes it a companion that writes notes instead of supplying music (see [Notes](#notes)); it needs `"protocol": 2`, so Bitamp 0.11 and earlier decline to install it rather than showing an empty music cartridge.
 - **settings** are optional. Bitamp shows a form for them (right-click the cartridge ▸ Settings…) and passes their values to the Pak. `text` is one line, `password` is kept in the macOS Keychain, `choice` is a pop-up of `options`.
 
 ## Messages
@@ -59,12 +61,14 @@ An `error` message is shown to the listener, so write it for them.
 
 | Method | Params | Result |
 |---|---|---|
-| `hello` | `protocol`, `settings` (key → value), `cacheDirectory` | `{"account": Account}` |
+| `hello` | `protocol` (the newest Bitamp speaks), `settings` (key → value), `cacheDirectory` | `{"account": Account}` |
 | `configure` | `settings` | `{"account": Account}` |
 | `search` | `term` (may be empty: list what you'd show first; see below) | `{"tracks": [Track]}` |
 | `track` | `id` | `{"track": Track or null}` |
 | `resolve` | `id` | `{"source": Source}` |
 | `browse` | `location`, `cursor` (optional); only with the `browse` capability | `{"page": Page}` |
+| `notes` | `song`; only with the `notes` capability | `update` lines, then `{"text", "sources"}` (both optional) |
+| `cancel` | `id` of a request Bitamp no longer wants | none: don't answer it |
 | `shutdown` | none | `{}`, then exit |
 
 - **search** with an empty `term` is what the Media Library shows when your Pak opens in it, before the user has typed anything, so it's the first list people see: answer it with something worth playing, such as your newest, most played or favourite tracks. Bitamp sends one search per Return, never one per keystroke.
@@ -104,6 +108,27 @@ With `"capabilities": ["browse"]` in `pak.json`, Bitamp 0.11.0 and later browse 
 - An unknown place, or one that's gone, is an `error`, written for the listener ("That album isn't on the server any more.").
 
 Bitamp asks for one page at a time and shows what it has, so answer each quickly; 50 to 100 items a page is plenty. The Demo Pak browses (four sections, one of each kind of place, a cursor and drawn covers): [Sources/BitampDemoPak/Browse.swift](../Sources/BitampDemoPak/Browse.swift).
+
+## Notes
+
+With `"capabilities": ["notes"]` and `"protocol": 2` in `pak.json`, a Pak is a companion: it has no music, and Bitamp 0.12.0 and later give it a window of its own, like Backstory's. The window shows the song that's playing and the Pak's notes about it, with numbered sources, and along the bottom the listener chooses when songs are looked up: AUTO (each song after it has played two seconds), ASK (when they press a button; the first setting, since Bitamp can't know what a lookup costs) or OFF. Bitamp keeps that choice and the notes it's been sent, so a song played again costs nothing. Clicking the cartridge opens the window, and it's in the Window menu. Search, `track`, `resolve` and `browse` are never asked.
+
+Bitamp asks for notes with the song's tags, never its audio or its file's name. A song with no title or artist isn't looked up.
+
+```
+→ {"id":7,"method":"notes","params":{"song":{"title":"Take Five","artist":"Dave Brubeck","album":"Time Out"}}}
+← {"id":7,"update":{"text":"Paul Desmond wrote it"}}
+← {"id":7,"update":{"text":" in 5/4 time."}}
+← {"id":7,"update":{"cite":[{"title":"Take Five","url":"https://en.wikipedia.org/wiki/Take_Five"}]}}
+← {"id":7,"result":{}}
+```
+
+- **update** lines come before the answer, with the same `id`, and the window shows each as it arrives: `{"text": "…"}` adds words, and `{"cite": [Citation]}` marks the words just sent with the sources' numbers ("in 5/4 time. [1]"). Send words as you get them, so the listener isn't left waiting.
+- **The answer** ends the notes. `text` and `sources` in it are added after any updates, so a Pak that doesn't stream can send everything there: `{"id":7,"result":{"text":"…","sources":[Citation]}}`.
+- **Citation** is `{"title", "url", "quote"}`. `url` must be http or https; others are left out. `quote` is optional.
+- **Text** is plain, as Bitamp's pixel font draws it; a blank line starts a paragraph. Markdown isn't drawn.
+- **cancel** comes when the song changes before the notes are done. Stop working on them, and don't answer. Anything you still send for that `id` is ignored. The 30-second limit counts from the last line you sent, and is 60 seconds for notes, so a long answer is fine as long as words keep coming.
+- **An error** shows in the window, so word it for the listener. A Pak with settings to fill in should answer `hello` with `disconnected`: the window asks the listener to set it up.
 
 ## In Swift
 
@@ -192,7 +217,20 @@ func browse(_ location: PakBrowseLocation, cursor: String?) async throws -> PakB
 }
 ```
 
-To package it, copy [`scripts/make-pak.sh`](../scripts/make-pak.sh) into your package and run it there. It builds the program in release mode, puts it and `pak.json` in `Radio.bitpak` (named after the manifest's `name`), and ad-hoc signs it, which Apple Silicon requires. Add `--universal` for a program that also runs on Intel Macs. When a package has more than one Pak, name the target: `./make-pak.sh RadioPak`.
+A companion implements `notes` instead of `search`, `track` and `resolve`, which have empty defaults. Write with `writer` as the words come. When the song changes the task is cancelled, so use awaits that throw on cancellation, such as `URLSession` and `Task.sleep`, or check `Task.isCancelled`. Requests are answered one at a time, as before; a cancel reaches a request that's running.
+
+```swift
+final class LinerPak: PakProvider {
+    func notes(for song: PakSongInfo, writer: PakNotesWriter) async throws {
+        for try await piece in service.write(about: song.title, by: song.artist) {
+            writer.write(piece.text)
+            writer.cite(piece.sources.map { PakCitation(title: $0.title, url: $0.url) })
+        }
+    }
+}
+```
+
+To package it, copy [`scripts/make-pak.sh`](../scripts/make-pak.sh) into your package and run it there. It builds the program in release mode, puts it and `pak.json` in `Radio.bitpak` (named after the manifest's `name`), and ad-hoc signs it, which Apple Silicon requires. Add `--universal` for a program that also runs on Intel Macs. When a package has more than one Pak, it packages each; name a target to package one: `./make-pak.sh RadioPak`.
 
 ## In another language
 
@@ -252,10 +290,10 @@ Save it as `hello.py` in `Hello.bitpak`, `chmod +x` it, and point `pak.json`'s `
   The Radio Pak looks good. Double-click it to install it.
   ```
 
-  It reads `pak.json` as installing does, then starts the program and has the same conversation Bitamp has, using the first track it finds. With the `browse` capability, it also opens the sidebar, every section, one album, artist and playlist, and one page after a cursor, and checks that each cover's file is there. It catches what usually goes wrong: answers that aren't flushed, other output on standard output, a `track` that forgets an id `search` gave, a file that isn't there, and a program that doesn't exit. Settings take their defaults unless you give `--setting key=value`, once per setting. What the program writes to standard error is shown as it runs. It exits with status 0 when there's nothing to fix.
+  It reads `pak.json` as installing does, then starts the program and has the same conversation Bitamp has, using the first track it finds. With the `browse` capability, it also opens the sidebar, every section, one album, artist and playlist, and one page after a cursor, and checks that each cover's file is there. A companion with `notes` is asked for notes on Ode to Joy instead, then asked again and cancelled, to check it stops and answers the next request promptly. It catches what usually goes wrong: answers that aren't flushed, other output on standard output, a `track` that forgets an id `search` gave, a file that isn't there, and a program that doesn't exit. Settings take their defaults unless you give `--setting key=value`, once per setting. What the program writes to standard error is shown as it runs. It exits with status 0 when there's nothing to fix.
 - Install by double-clicking the `.bitpak`, dropping it on Bitamp, or File ▸ Install Expansion Pak…. Installing a Pak with the same id replaces the old one.
 - Installed Paks live in `~/Library/Application Support/Bitamp/Paks`; their caches in `~/Library/Caches/com.ryanromanov.Bitamp/Paks`.
-- Click the cartridge to open the Pak in the Media Library, where it shows what `search ""` gives and searches when the user presses Return. Right-click it to browse, change settings, eject or remove it.
+- Click the cartridge to open the Pak in the Media Library, where it shows what `search ""` gives and searches when the user presses Return; a companion's opens its window. Right-click it to browse, change settings, eject or remove it.
 
 ## Trust
 
@@ -265,4 +303,4 @@ A Pak runs with the same permissions as the person who installed it, so Bitamp a
 
 - **Streaming.** Bitamp downloads the whole file before it starts playing. Fine for songs on a home server, not for endless radio streams.
 - **Paks that play audio themselves**, as a streaming service's own player would, can't be third-party yet; a third-party Pak always hands Bitamp audio to play.
-- **Companion Paks**, like Backstory, that add to what's playing instead of supplying music. See [PAKS.md](PAKS.md).
+- **Companions beyond notes**, such as lyrics that follow the song or a visualizer. A companion gets the song's tags and writes text.

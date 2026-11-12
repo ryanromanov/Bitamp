@@ -1228,6 +1228,40 @@ import Testing
         #expect(main2.frame == main.frame && equalizer2.frame == equalizer.frame && playlist2.frame == playlist.frame)
     }
 
+    /// A notes Pak installed while Bitamp runs gets a window that waits to be opened, and
+    /// one removed takes its window away, remembering where it was for next time.
+    @MainActor @Test func paksAddAndRemoveWindows() {
+        _ = NSApplication.shared
+        let defaults = UserDefaults(suiteName: "BitampPakWindows-\(UUID().uuidString)")!
+        let preferences = Preferences(defaults: defaults)
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: preferences)
+        let main = SkinnedWindow(view: MainView(controller: controller, preferences: preferences, skin: DefaultSkin()),
+                                 layoutName: "MainWindow", isMain: true)
+        let playlist = SkinnedWindow(view: PlaylistView(controller: controller, preferences: preferences, skin: DefaultSkin()),
+                                     layoutName: "PlaylistWindow", isMain: false)
+        let group = WindowGroup(main: main, panels: [.playlist: playlist], defaults: defaults)
+        group.restore()
+        let notes = SkinnedWindow(view: EqualizerView(controller: controller, skin: DefaultSkin(), scale: preferences.scale),
+                                  layoutName: "Pak-demo-notesWindow", isMain: false)
+        defer { for window in [main, playlist, notes] { window.orderOut(nil) } }
+
+        group.add(.pak("demo-notes"), notes)
+        #expect(!group.isVisible(.pak("demo-notes")))
+        group.setVisible(.pak("demo-notes"), true)
+        #expect(group.isVisible(.pak("demo-notes")) && notes.isVisible)
+        notes.setFrameOrigin(NSPoint(x: 40, y: 60))
+        let frame = notes.frame
+
+        group.remove(.pak("demo-notes"))
+        #expect(!notes.isVisible && !group.isVisible(.pak("demo-notes")))
+        group.regroup()
+        #expect(!notes.isVisible)
+
+        // Installed again: back where it was, and showing, as it was.
+        group.add(.pak("demo-notes"), notes)
+        #expect(notes.frame == frame && notes.isVisible)
+    }
+
     /// The main window hides and shows like Winamp's (Alt+W), something always stays on
     /// screen, the choice survives a relaunch, and commands still reach the main view.
     @MainActor @Test func mainWindowCanHide() {

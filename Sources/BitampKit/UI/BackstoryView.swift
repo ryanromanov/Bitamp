@@ -48,13 +48,22 @@ enum BackstoryLayout {
 /// sources, from the Backstory Pak. Along the bottom, when to look songs up (AUTO, ASK,
 /// OFF); the setup (service, model, key) shows in the window when there's no key yet, or
 /// when the service line under the title is clicked.
+///
+/// A third-party notes Pak gets a window of its own just like it, named after the Pak.
+/// Its SETTINGS button opens the Pak's settings form instead.
 final class BackstoryView: SkinnedView {
     /// What VoiceOver calls the window.
-    override var accessibilityName: String { "Backstory" }
+    override var accessibilityName: String { session.pak.name }
 
     let session: BackstorySession
     let paks: PakRegistry
-    private var pak: BackstoryPak { session.pak }
+    /// The window this view is in, for its close button.
+    let panel: WindowGroup.Panel
+    /// Opens a third-party Pak's settings form.
+    var onSettings: (() -> Void)?
+    private var pak: NotesPak { session.pak }
+    /// Backstory itself, whose setup is in the window; nil for a third-party notes Pak.
+    private var backstory: BackstoryPak? { session.pak as? BackstoryPak }
     /// Gets keys the window doesn't use, such as the transport letters.
     weak var keyFallback: NSResponder?
 
@@ -79,7 +88,7 @@ final class BackstoryView: SkinnedView {
     private var buttons: [(CGRect, Button)] = []
 
     private enum Button: Equatable {
-        case lookup(BackstoryPak.Lookup), askAgain, ask, setUp, settings, model(String), service(String), back, early, wikipedia(Bool), save, cancel
+        case lookup(NotesLookup), askAgain, ask, setUp, settings, model(String), service(String), back, early, wikipedia(Bool), save, cancel
     }
 
     private enum Press: Equatable {
@@ -88,9 +97,10 @@ final class BackstoryView: SkinnedView {
     private var pressed: Press?
     private var pressedInside = false
 
-    init(session: BackstorySession, paks: PakRegistry, skin: Skin, scale: CGFloat) {
+    init(session: BackstorySession, paks: PakRegistry, skin: Skin, scale: CGFloat, panel: WindowGroup.Panel = .backstory) {
         self.session = session
         self.paks = paks
+        self.panel = panel
         super.init(pixelSize: BackstoryLayout.defaultSize, skin: skin, scale: scale)
         keyBox = PixelTextBox(in: self, rect: .zero, placeholder: "Paste your API key", secure: true)
         keyBox.onSubmit = { [weak self] _ in self?.saveSetup() }
@@ -139,7 +149,30 @@ final class BackstoryView: SkinnedView {
         needsDisplay = true
     }
 
-    private var showsSetup: Bool { settingUp || session.phase == .needsSetup }
+    private var showsSetup: Bool { settingUp || (backstory != nil && session.phase == .needsSetup) }
+
+    private var title: String { pak.name.uppercased() }
+
+    /// Whether the Pak has a settings form to open (Backstory's setup is in the window).
+    private var hasSettings: Bool {
+        backstory != nil || (pak as? ConfigurablePak)?.hasSettings == true
+    }
+
+    /// Who a lookup asks, for the window's words: "Claude", or "the Demo Notes Pak".
+    private var serviceName: String {
+        if usesOnDevice { return "the on-device model" }
+        return backstory?.provider.name ?? "the \(pak.name) Pak"
+    }
+
+    /// A third-party Pak's line under the title: what it said it's connected to, or its name.
+    private var pakLine: String {
+        if case .connected(let name?) = pak.account, !name.isEmpty { return name }
+        return "\(pak.name) Pak"
+    }
+
+    private var ejectedText: String {
+        "The \(pak.name) Pak is ejected. Insert it in the Expansion Paks window to look songs up."
+    }
 
     // MARK: - Drawing
 
@@ -150,7 +183,7 @@ final class BackstoryView: SkinnedView {
         let rule = mix(colors.normalBackground, colors.normal, 0.25)
         buttons = []
         sourceRects = []
-        PanelFrame(skin: skin, size: pixelSize, title: "BACKSTORY", active: isActive)
+        PanelFrame(skin: skin, size: pixelSize, title: title, active: isActive)
             .draw(c, closePressed: pressed == .close && pressedInside)
         c.fill(skin.gen == nil ? CGRect(x: parts.content.minX, y: parts.content.minY,
                                         width: parts.scrollTrack.minX - parts.content.minX, height: parts.content.height)
@@ -222,12 +255,15 @@ final class BackstoryView: SkinnedView {
             c.text(label, textX + 10, y + 25, colors.current)
             buttons.append((CGRect(x: textX, y: y + 24, width: PixelFont.width(of: label) + 12, height: 8), .setUp))
         } else {
-            let provider = pak.provider
-            let service = "\(provider.name) / \(pak.model(of: provider))".uppercased()
-            buttons.append((CGRect(x: textX, y: y + 24, width: PixelFont.width(of: service) + 2, height: 8), .setUp))
-            c.text(service, textX, y + 25, hot ? colors.current : dim)
+            let service = backstory.map { "\($0.provider.name) / \($0.model(of: $0.provider))" } ?? pakLine
+            let label = ListFont.truncate(service.uppercased(), toWidth: room - 50)
+            if hasSettings {
+                buttons.append((CGRect(x: textX, y: y + 24, width: PixelFont.width(of: label) + 2, height: 8), .setUp))
+            }
+            c.text(label, textX, y + 25, hot ? colors.current : dim)
         }
         // The setup, where anyone can see it; the service's name opens it too.
+        guard hasSettings else { return }
         let label = "SETTINGS"
         let width = PixelFont.width(of: label) + 7
         drawButton(c, label, CGRect(x: parts.right - width, y: y + 21, width: width, height: 12), .settings,
@@ -240,7 +276,7 @@ final class BackstoryView: SkinnedView {
         c.text("LOOK UP", x, Int(bar.minY) + 4, dim)
         x += PixelFont.width(of: "LOOK UP") + 5
         let current = pak.lookup
-        for (lookup, label) in [(BackstoryPak.Lookup.everyTrack, "AUTO"), (.whenAsked, "ASK"), (.off, "OFF")] {
+        for (lookup, label) in [(NotesLookup.everyTrack, "AUTO"), (.whenAsked, "ASK"), (.off, "OFF")] {
             let rect = CGRect(x: x, y: Int(bar.minY), width: PixelFont.width(of: label) + 7, height: Int(bar.height))
             drawButton(c, label, rect, .lookup(lookup), selected: lookup == current, colors)
             x += Int(rect.width) + 2
@@ -291,25 +327,31 @@ final class BackstoryView: SkinnedView {
 
         // The setup works while ejected too, as the cartridge's Settings… opens it.
         if !isInserted, !settingUp {
-            paragraph("The Backstory Pak is ejected. Insert it in the Expansion Paks window to look songs up.", dim)
+            paragraph(ejectedText, dim)
             return y - top
         }
         if showsSetup {
             return drawSetup(c, parts, colors, dim, top: top)
         }
-        let service = usesOnDevice ? "the on-device model" : pak.provider.name
+        let service = serviceName
         switch session.phase {
         case .idle, .reading:
             break
         case .untagged:
             paragraph("Nothing to look up: this song has no title or artist tags.", dim)
         case .needsSetup:
-            break
+            // Backstory shows its setup instead.
+            paragraph(needsSetupText, colors.normal)
+            if hasSettings {
+                y += 4
+                drawButton(c, "SET UP", CGRect(x: x, y: y, width: PixelFont.width(of: "SET UP") + 9, height: 13), .setUp, selected: false, colors)
+                y += 13
+            }
         case .off:
             paragraph("Looking up is off. Choose AUTO to look up every song as it plays, or ASK to look songs up when you want.", dim)
         case .waiting:
             centered("Looking this song up in \(session.secondsUntilLookup) s...", middle - 6, colors.normal)
-            if !usesOnDevice || pak.usesWikipedia { centered("(skip now and nothing is sent)", middle + 6, dim) }
+            if !usesOnDevice || backstory?.usesWikipedia == true { centered("(skip now and nothing is sent)", middle + 6, dim) }
         case .ready:
             let label = "TELL ME ABOUT THIS SONG"
             let w = PixelFont.width(of: label) + 9
@@ -352,6 +394,7 @@ final class BackstoryView: SkinnedView {
 
     /// The setup, in two steps: where the notes come from, then that service's options.
     private func drawSetup(_ c: Canvas, _ parts: BackstoryLayout.Parts, _ colors: PlaylistColors, _ dim: CGColor, top: Int) -> Int {
+        guard let pak = backstory else { return 0 }
         let x = parts.left, width = Int(parts.body.width)
         var y = top
         func paragraph(_ text: String, _ color: CGColor, indent: Int = 0) {
@@ -438,6 +481,7 @@ final class BackstoryView: SkinnedView {
 
     /// Under the cards: who needs a key, and on older macOS, what a newer one adds.
     private var chooseFooter: String? {
+        guard let pak = backstory else { return nil }
         guard pak.onDevice != nil else {
             return "Each uses your own key. On macOS 26 or later with Apple Intelligence, Backstory can also run free on this Mac."
         }
@@ -448,6 +492,7 @@ final class BackstoryView: SkinnedView {
 
     /// The line on a service's card.
     private func cardLine(_ service: String) -> String {
+        guard let pak = backstory else { return "" }
         if service == BackstoryPak.onDeviceName {
             guard pak.onDevice?.isAvailable() == true else { return "Free, on this Mac. Needs Apple Intelligence." }
             return pak.usesWikipedia ? "Free, on this Mac, with facts from Wikipedia." : "Free, on this Mac. Knows less."
@@ -461,6 +506,7 @@ final class BackstoryView: SkinnedView {
 
     /// What a service's page says first: what it is, and what it sends.
     private func pageText(_ service: String) -> String {
+        guard let pak = backstory else { return "" }
         guard service == BackstoryPak.onDeviceName else {
             return "Looks the song up on the web, with sources. Sends the title, artist and album, never the audio, to \(service). Nothing goes to Bitamp."
         }
@@ -474,7 +520,8 @@ final class BackstoryView: SkinnedView {
 
     /// The service saved now.
     private var savedService: String {
-        pak.choosesOnDevice ? BackstoryPak.onDeviceName : pak.provider.name
+        guard let pak = backstory else { return "" }
+        return pak.choosesOnDevice ? BackstoryPak.onDeviceName : pak.provider.name
     }
 
     /// The service the setup's second step shows, or else the one saved.
@@ -485,14 +532,19 @@ final class BackstoryView: SkinnedView {
     /// Whether lookups go to the on-device model: these notes came from it, or the next
     /// lookup will.
     private var usesOnDevice: Bool {
-        session.phase == .done || session.phase == .looking ? session.notes.isOnDevice : pak.choice().map(\.onDevice) ?? pak.choosesOnDevice
+        session.phase == .done || session.phase == .looking ? session.notes.isOnDevice : pak.choice().map(\.onDevice) ?? (backstory?.choosesOnDevice == true)
     }
 
     /// Under TELL ME ABOUT THIS SONG: what a lookup sends, and where.
     private var readyLine: String {
-        guard usesOnDevice else { return "Sends the title, artist and album to \(pak.provider.name)." }
-        return pak.usesWikipedia ? "Looks the song up on Wikipedia, and writes the notes on this Mac."
+        guard usesOnDevice else { return "Sends the title, artist and album to \(serviceName)." }
+        return backstory?.usesWikipedia == true ? "Looks the song up on Wikipedia, and writes the notes on this Mac."
             : "Stays on this Mac, with Apple's on-device model."
+    }
+
+    /// What a third-party Pak's window says while it needs setting up.
+    private var needsSetupText: String {
+        hasSettings ? "The \(pak.name) Pak needs setting up first." : "The \(pak.name) Pak can't look songs up right now."
     }
 
     /// Under notes the on-device model wrote, which can be wrong.
@@ -560,11 +612,12 @@ final class BackstoryView: SkinnedView {
 
     /// What the notes area says now, for VoiceOver.
     private var bodyText: String? {
-        if !isInserted { return "The Backstory Pak is ejected. Insert it in the Expansion Paks window to look songs up." }
-        let service = usesOnDevice ? "the on-device model" : pak.provider.name
+        if !isInserted { return ejectedText }
+        let service = serviceName
         switch session.phase {
         case .idle: return "Nothing playing."
-        case .reading, .needsSetup: return nil
+        case .reading: return nil
+        case .needsSetup: return backstory == nil ? needsSetupText : nil
         case .untagged: return "Nothing to look up: this song has no title or artist tags."
         case .off: return "Looking up is off."
         case .waiting: return "Looking this song up in \(session.secondsUntilLookup) seconds."
@@ -587,19 +640,21 @@ final class BackstoryView: SkinnedView {
         case .askAgain: (kind, label) = (.button, "Ask Again")
         case .ask: (kind, label) = (.button, "Tell Me About This Song")
         case .setUp where rect.height <= 8:
-            (kind, label) = (.button, usesOnDevice ? "Service: on-device model" : "Service: \(pak.provider.name), \(pak.model(of: pak.provider))")
+            (kind, label) = (.button, usesOnDevice ? "Service: on-device model"
+                : backstory.map { "Service: \($0.provider.name), \($0.model(of: $0.provider))" } ?? "Settings: \(pakLine)")
         case .setUp: (kind, label) = (.button, "Set Up")
-        case .settings: (kind, label) = (.button, "Backstory Settings")
+        case .settings: (kind, label) = (.button, "\(pak.name) Settings")
         case .service(let name):
             (kind, label) = (.checkBox(name == savedService), "\(name == BackstoryPak.onDeviceName ? "On-device model" : name): \(cardLine(name))")
         case .back: (kind, label) = (.button, "Back to the services")
         case .early:
-            (kind, label) = (.checkBox(pak.prefetch), usesOnDevice ? "Get the next song's notes early" : "Get the next song's notes early. A skipped song still costs.")
+            (kind, label) = (.checkBox(pak.prefetch), usesOnDevice || backstory == nil ? "Get the next song's notes early" : "Get the next song's notes early. A skipped song still costs.")
         case .model(let name):
-            let provider = pak.providers.first { $0.name == selectedService } ?? pak.provider
-            (kind, label) = (.checkBox(name == (draftModel ?? pak.model(of: provider))), "Model: \(name)")
+            let selected = selectedService
+            let current = backstory.map { pak in draftModel ?? pak.model(of: pak.providers.first { $0.name == selected } ?? pak.provider) }
+            (kind, label) = (.checkBox(name == current), "Model: \(name)")
         case .wikipedia:
-            (kind, label) = (.checkBox(draftWikipedia ?? pak.usesWikipedia), "Look up facts on Wikipedia. " + Self.wikipediaNote)
+            (kind, label) = (.checkBox(draftWikipedia ?? (backstory?.usesWikipedia == true)), "Look up facts on Wikipedia. " + Self.wikipediaNote)
         case .save: (kind, label) = (.button, "Save")
         case .cancel: (kind, label) = (.button, "Cancel")
         }
@@ -614,8 +669,8 @@ final class BackstoryView: SkinnedView {
     override func accessibleControls() -> [AccessibleControl] {
         let parts = self.parts
         var controls = [AccessibleControl(id: "close", kind: .button, label: "Close",
-                                          rect: PanelFrame(skin: skin, size: pixelSize, title: "BACKSTORY", active: isActive).close,
-                                          press: { [weak self] in self?.windowGroup?.setVisible(.backstory, false) })]
+                                          rect: PanelFrame(skin: skin, size: pixelSize, title: title, active: isActive).close,
+                                          press: { [weak self] in self.map { $0.windowGroup?.setVisible($0.panel, false) } })]
         if let track = session.track {
             controls.append(AccessibleControl(id: "song", kind: .text,
                                               label: [track.title, track.artist, track.album].compactMap { $0 }.joined(separator: ", "),
@@ -648,7 +703,7 @@ final class BackstoryView: SkinnedView {
 
     private func press(at point: CGPoint) -> Press? {
         let parts = self.parts
-        if PanelFrame(skin: skin, size: pixelSize, title: "BACKSTORY", active: isActive).close.contains(point) { return .close }
+        if PanelFrame(skin: skin, size: pixelSize, title: title, active: isActive).close.contains(point) { return .close }
         if parts.grip.contains(point) { return .grip(startSize: .zero, startMouse: .zero) }
         if CGFloat(contentHeight) > parts.body.height, parts.scrollTrack.contains(point) { return .thumb(grab: 0) }
         if keyBox.rect != .zero, keyBox.rect.contains(point) { return .key }
@@ -725,7 +780,7 @@ final class BackstoryView: SkinnedView {
         case .key?:
             keyBox.mouseUp()
         case .close? where pressedInside:
-            windowGroup?.setVisible(.backstory, false)
+            windowGroup?.setVisible(panel, false)
         case .source(let url)? where pressedInside:
             NSWorkspace.shared.open(url)
         case .button(let button)? where pressedInside:
@@ -743,6 +798,8 @@ final class BackstoryView: SkinnedView {
         case .askAgain, .ask:
             scroll = 0
             session.lookUp()
+        case .setUp where backstory == nil, .settings where backstory == nil:
+            onSettings?()
         case .setUp:
             showSetup()
         case .settings:
@@ -757,7 +814,7 @@ final class BackstoryView: SkinnedView {
             window?.makeFirstResponder(self)
         case .early:
             pak.prefetch.toggle()
-            if pak.prefetch, !usesOnDevice { flashMessage?("A SKIPPED SONG STILL COSTS") }
+            if pak.prefetch, backstory != nil, !usesOnDevice { flashMessage?("A SKIPPED SONG STILL COSTS") }
             settingsChanged()
         case .model(let name):
             draftModel = name
@@ -772,6 +829,7 @@ final class BackstoryView: SkinnedView {
 
     /// Shows the setup: the services to choose from, or with `service`, that one's page.
     func showSetup(service: String? = nil) {
+        guard backstory != nil else { return }
         settingUp = true
         draftProvider = nil
         draftModel = nil
@@ -791,6 +849,7 @@ final class BackstoryView: SkinnedView {
     }
 
     private func saveSetup() {
+        guard let pak = backstory else { return }
         if selectedService == BackstoryPak.onDeviceName {
             var changes = ["service": BackstoryPak.onDeviceName]
             if let draftWikipedia { changes["wikipedia"] = draftWikipedia ? "On" : "Off" }

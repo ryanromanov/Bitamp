@@ -5,13 +5,18 @@ import Foundation
 /// `Bitamp --check-pak <folder.bitpak> [--setting key=value …]`: tries a Pak the way Bitamp
 /// would, without installing it, and says what's wrong in words its author can act on.
 /// It reads the manifest as installing does, starts the program as `PakConnection` does,
-/// and asks it `hello`, `search ""`, then `track` and `resolve` for the first track. Its
-/// settings are the manifest's defaults plus any given; its cache is a temporary folder.
+/// and asks it `hello`, `search ""`, then `track` and `resolve` for the first track. A notes
+/// Pak is asked for notes on a song instead, and to stop a second time. Its settings are
+/// the manifest's defaults plus any given; its cache is a temporary folder.
 @MainActor
 public final class PakCheck {
     /// Shorter than Bitamp's 30 seconds: a Pak that hasn't answered by now has most likely
     /// not flushed its output.
     static let timeout: TimeInterval = 10
+    /// How long a notes Pak may go quiet, as in Bitamp: a lookup on the web takes a while.
+    static let notesTimeout: TimeInterval = ExternalPak.notesTimeout
+    /// What a notes Pak is asked about: a song any service should know something about.
+    static let song = PakSongInfo(title: "Ode to Joy", artist: "Ludwig van Beethoven", album: "Symphony No. 9")
 
     private let folder: URL
     private let extraSettings: [String: String]
@@ -77,6 +82,23 @@ public final class PakCheck {
         connection.onUnexpectedOutput = { [weak self] line in
             self?.fail("It printed a line that isn't an answer: \(line)\n"
                 + "      Only answers go to standard output. Print anything else to standard error.")
+        }
+
+        if manifest.can(PakProtocol.notes), manifest.protocol < PakProtocol.notesVersion {
+            fail("\(PakProtocol.manifestName): a Pak with the “notes” capability needs \"protocol\": \(PakProtocol.notesVersion), "
+                + "so Bitamp 0.11 and earlier don't install it as a music Pak with nothing in it.")
+            connection.shutdown()
+            return finish(manifest)
+        }
+        if manifest.can(PakProtocol.notes) {
+            if manifest.can(PakProtocol.browse) {
+                warn("\(PakProtocol.manifestName): a Pak that writes notes has no music, so Bitamp doesn't browse it.")
+            }
+            if await checkNotes(connection, account: { account }) {
+                await checkCancel(connection, settings: settings)
+            }
+            await checkShutdown(connection)
+            return finish(manifest)
         }
 
         // hello is sent on the first request, before search.
@@ -323,6 +345,95 @@ public final class PakCheck {
             pass("resolve “\(first.id)”: \(url.absoluteString) (not downloaded)")
         } else {
             fail("resolve “\(first.id)”: the source has neither a file nor a url.")
+        }
+    }
+
+    // MARK: - Notes
+
+    /// Asks for notes on `song` and looks at what comes back. False if nothing did.
+    private func checkNotes(_ connection: PakConnection, account: () -> PakAccountState?) async -> Bool {
+        let started = ProcessInfo.processInfo.systemUptime
+        var firstWords: TimeInterval?
+        var updates = 0
+        var text = ""
+        var citations: [PakCitation] = []
+        let decoder = JSONDecoder()
+        let what = "notes “\(Self.song.title)”"
+        do {
+            let result = try await connection.request(PakMethod.notes, PakMethod.Notes(song: Self.song), as: PakMethod.NotesResult.self,
+                                                      timeout: Self.notesTimeout) { [weak self] line in
+                guard let update = try? decoder.decode(PakUpdate<PakNotesUpdate>.self, from: line).update else {
+                    self?.fail("\(what): an update isn't what Bitamp expects: \(String(decoding: line, as: UTF8.self))")
+                    return
+                }
+                updates += 1
+                if let words = update.text, !words.isEmpty {
+                    text += words
+                    if firstWords == nil { firstWords = ProcessInfo.processInfo.systemUptime - started }
+                }
+                citations += update.cite ?? []
+            }
+            report(account())
+            text += result.text ?? ""
+            citations += result.sources ?? []
+        } catch {
+            if account() == nil {
+                fail("hello: \(explain(error))")
+            } else {
+                report(account())
+                fail("\(what): \(explain(error))")
+            }
+            return false
+        }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            fail("\(what): no words came back, so the window would say “No notes came back.”")
+            return false
+        }
+        let words = text.split(whereSeparator: \.isWhitespace).count
+        let total = ProcessInfo.processInfo.systemUptime - started
+        var line = "\(what): \(words) word\(words == 1 ? "" : "s"), \(citations.count) source\(citations.count == 1 ? "" : "s"), "
+            + String(format: "%.1f s", total)
+        if updates == 0 {
+            line += ", all in the answer. Send updates and the words appear as they're written."
+        } else if let firstWords {
+            line += String(format: " (first words after %.1f s, in %d update%@)", firstWords, updates, updates == 1 ? "" : "s")
+        }
+        pass(line)
+        for citation in citations {
+            guard let url = URL(string: citation.url), ["http", "https"].contains(url.scheme?.lowercased()), url.host != nil else {
+                warn("\(what): the source “\(citation.url)” isn't an http or https address, so Bitamp leaves it out.")
+                continue
+            }
+            if citation.title.trimmingCharacters(in: .whitespaces).isEmpty {
+                warn("\(what): the source \(citation.url) has no title, so Bitamp shows its address.")
+            }
+        }
+        return true
+    }
+
+    /// Asks for notes again and cancels them, as Bitamp does when the song changes, then
+    /// checks the Pak answers the next request promptly rather than finishing the notes first.
+    private func checkCancel(_ connection: PakConnection, settings: [String: String]) async {
+        let lookup = Task {
+            try await connection.request(PakMethod.notes, PakMethod.Notes(song: Self.song), as: PakMethod.NotesResult.self,
+                                         timeout: Self.notesTimeout) { _ in }
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+        lookup.cancel()
+        let started = ProcessInfo.processInfo.systemUptime
+        do {
+            _ = try await connection.request(PakMethod.configure, PakMethod.Configure(settings: settings), as: PakMethod.AccountResult.self)
+        } catch {
+            return fail("cancel: the next request after a cancel got no answer: \(explain(error))")
+        }
+        let waited = ProcessInfo.processInfo.systemUptime - started
+        if (try? await lookup.value) != nil {
+            pass("cancel: the notes came back before the cancel, so it wasn't needed")
+        } else if waited > 2 {
+            warn(String(format: "cancel: the next request waited %.1f s, so the Pak kept on with notes nobody wanted. ", waited)
+                + "Stop when the request is cancelled (in Swift, when the task is).")
+        } else {
+            pass(String(format: "cancel: stopped, and answered the next request in %.1f s", waited))
         }
     }
 

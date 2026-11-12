@@ -9,11 +9,19 @@ import Foundation
 ///     ← {"id":1,"result":{"tracks":[{"id":"ode-to-joy","title":"Ode to Joy","artist":"Beethoven"}]}}
 ///     ← {"id":2,"error":{"message":"No such track"}}
 public enum PakProtocol {
-    /// Bumped when a change would break existing Paks.
-    public static let version = 1
-    /// The manifest's `capabilities` Bitamp knows.
+    /// The newest version Bitamp speaks. A Pak declares the one it needs; Bitamp runs any
+    /// up to this, and an older Bitamp won't install a Pak that needs a newer one.
+    /// 1: music Paks (search, track, resolve, browse). 2: also `notes` companions, which
+    /// an older Bitamp would otherwise show as an empty music cartridge.
+    public static let version = 2
+    /// The version a Pak with the `notes` capability declares.
+    public static let notesVersion = 2
+    /// The manifest's `capabilities` Bitamp knows. `browse`: the Media Library asks the Pak
+    /// what's in it. `notes`: a companion Pak, with no music of its own, that writes about
+    /// the song that's playing, in a window of its own.
     public static let browse = "browse"
-    public static let knownCapabilities: Set<String> = [browse]
+    public static let notes = "notes"
+    public static let knownCapabilities: Set<String> = [browse, notes]
     /// The manifest inside every `.bitpak` folder.
     public static let manifestName = "pak.json"
 }
@@ -288,6 +296,63 @@ struct Lenient<Value: Decodable>: Decodable {
     }
 }
 
+// MARK: - Notes
+
+/// The song that's playing, for `notes`: its tags, never its audio or its file's name.
+/// More fields may come; ignore any you don't know.
+public struct PakSongInfo: Codable, Equatable, Hashable, Sendable {
+    public var title: String
+    public var artist: String?
+    public var album: String?
+
+    public init(title: String, artist: String? = nil, album: String? = nil) {
+        self.title = title
+        self.artist = artist
+        self.album = album
+    }
+}
+
+/// A web page the notes rest on. Bitamp numbers them, and marks the words before each
+/// citation with its number.
+public struct PakCitation: Codable, Equatable, Hashable, Sendable {
+    public var title: String
+    /// An http or https address; Bitamp drops a citation with any other.
+    public var url: String
+    /// The words on the page the notes rest on.
+    public var quote: String?
+
+    public init(title: String, url: String, quote: String? = nil) {
+        self.title = title
+        self.url = url
+        self.quote = quote
+    }
+}
+
+/// Part of the notes, sent before the answer to `notes` as `{"id":7,"update":{…}}`:
+/// more words (`text`), or the sources of the words just sent (`cite`).
+public struct PakNotesUpdate: Codable, Equatable, Sendable {
+    public var text: String?
+    public var cite: [PakCitation]?
+
+    public init(text: String? = nil, cite: [PakCitation]? = nil) {
+        self.text = text
+        self.cite = cite
+    }
+
+    public static func text(_ text: String) -> PakNotesUpdate { PakNotesUpdate(text: text) }
+    public static func cite(_ citations: [PakCitation]) -> PakNotesUpdate { PakNotesUpdate(cite: citations) }
+}
+
+/// A line from the Pak that's part of an answer still to come.
+public struct PakUpdate<Update: Codable>: Codable {
+    public var id: Int
+    public var update: Update
+    public init(id: Int, update: Update) {
+        self.id = id
+        self.update = update
+    }
+}
+
 /// Whether the Pak can play right now.
 public struct PakAccountState: Codable, Equatable, Sendable {
     public enum State: String, Codable, Sendable {
@@ -399,6 +464,32 @@ public enum PakMethod {
         public init(page: PakBrowsePage) { self.page = page }
     }
 
+    /// Asks for notes about the song that's playing. Sent only to Paks whose manifest lists
+    /// the `notes` capability. The Pak may send `update` lines first, then answers; whatever
+    /// the answer holds is added after them.
+    public struct Notes: Codable, Sendable {
+        public var song: PakSongInfo
+        public init(song: PakSongInfo) { self.song = song }
+    }
+
+    public struct NotesResult: Codable, Sendable {
+        /// More words, after any sent as updates. A Pak that doesn't stream puts all of them here.
+        public var text: String?
+        /// The sources of `text`.
+        public var sources: [PakCitation]?
+        public init(text: String? = nil, sources: [PakCitation]? = nil) {
+            self.text = text
+            self.sources = sources
+        }
+    }
+
+    /// Bitamp no longer wants the answer to request `id`, such as notes for a song that was
+    /// skipped. Not answered. The Pak should stop working on it; any later lines for it are ignored.
+    public struct Cancel: Codable, Sendable {
+        public var id: Int
+        public init(id: Int) { self.id = id }
+    }
+
     public struct Empty: Codable, Sendable {
         public init() {}
     }
@@ -409,6 +500,8 @@ public enum PakMethod {
     public static let track = "track"
     public static let resolve = "resolve"
     public static let browse = "browse"
+    public static let notes = "notes"
+    public static let cancel = "cancel"
     /// Bitamp is quitting or removing the Pak; it should exit after answering.
     public static let shutdown = "shutdown"
 }
