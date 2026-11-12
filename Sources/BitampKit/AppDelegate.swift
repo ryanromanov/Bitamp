@@ -9,6 +9,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The Backstory Pak, when this copy of Bitamp has a service for it.
     private let backstoryPak: BackstoryPak?
     private var backstoryView: BackstoryView?
+    /// Third-party notes Paks' windows, by Pak id.
+    private var notesViews: [String: BackstoryView] = [:]
     private lazy var pakLibrary = PakLibrary()
     /// The built-in Paks, then the installed ones by name.
     private lazy var paks = PakRegistry(builtInPaks + [backstoryPak].compactMap { $0 } + pakLibrary.installed(),
@@ -23,6 +25,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let skinsMenu = NSMenu(title: "Skins")
     /// Rebuilt as it opens, since its "Browse…" items follow the installed Paks.
     private let fileMenu = NSMenu(title: "File")
+    /// Gets an item per notes Pak as it opens, after Backstory.
+    private var windowMenu: NSMenu?
+    private static let notesItemTag = 7301
 
     /// `paks` are the Expansion Paks built into this copy of Bitamp; `backstory`, the
     /// services the Backstory Pak can ask (none leaves it out), and `backstoryOnDevice`
@@ -67,24 +72,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         mainView.onShowPaks = { [weak self] in self?.windowGroup?.setVisible(.paks, true) }
         var extraViews: [SkinnedView] = [libraryView]
         if let backstoryPak {
-            let session = BackstorySession(pak: backstoryPak, cache: .standard())
-            let controller = self.controller
-            session.current = { [weak controller] in
-                (controller?.queue.current, controller?.player.state == .playing)
-            }
-            let paks = self.paks
-            session.upcoming = { [weak controller] in
-                guard let controller, let duration = controller.player.nowPlaying?.duration, duration > 0 else { return (nil, nil) }
-                return (controller.queue.upNext, duration - controller.player.currentTime)
-            }
-            session.describe = { url in await BackstorySession.describe(url, paks: paks) }
-            let view = BackstoryView(session: session, paks: paks, skin: skin, scale: preferences.scale)
+            let view = makeNotesView(backstoryPak, panel: .backstory, skin: skin)
             view.keyFallback = mainView
             backstoryPak.onChange = { [weak view, weak pakView] in
                 view?.settingsChanged()
                 pakView?.needsDisplay = true
             }
             backstoryView = view
+            extraViews.append(view)
+        }
+        let notesPaks = paks.paks.compactMap { $0 as? ExternalPak }.filter(\.writesNotes)
+        for pak in notesPaks {
+            let view = makeNotesView(pak, panel: .pak(pak.id), skin: skin)
+            view.keyFallback = mainView
+            notesViews[pak.id] = view
             extraViews.append(view)
         }
         for view in [equalizerView, playlistView, pakView] + extraViews {
@@ -102,6 +103,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if let backstoryView {
             panels[.backstory] = SkinnedWindow(view: backstoryView, layoutName: "BackstoryWindow", isMain: false)
         }
+        for (id, view) in notesViews {
+            panels[.pak(id)] = SkinnedWindow(view: view, layoutName: Self.notesLayoutName(id), isMain: false)
+        }
         for window in panels.values { window.actionFallback = mainView }
         let group = WindowGroup(main: main, panels: panels)
         views = [mainView, equalizerView, playlistView, pakView] + extraViews
@@ -113,6 +117,63 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowGroup = group
 
         controller.restoreSession()
+    }
+
+    /// A notes window for `pak`: Backstory's, or a third-party notes Pak's. It follows
+    /// what's playing.
+    private func makeNotesView(_ pak: NotesPak, panel: WindowGroup.Panel, skin: Skin) -> BackstoryView {
+        let session = BackstorySession(pak: pak, cache: .standard())
+        let controller = self.controller
+        session.current = { [weak controller] in
+            (controller?.queue.current, controller?.player.state == .playing)
+        }
+        let paks = self.paks
+        session.upcoming = { [weak controller] in
+            guard let controller, let duration = controller.player.nowPlaying?.duration, duration > 0 else { return (nil, nil) }
+            return (controller.queue.upNext, duration - controller.player.currentTime)
+        }
+        session.describe = { url in await BackstorySession.describe(url, paks: paks) }
+        let view = BackstoryView(session: session, paks: paks, skin: skin, scale: preferences.scale, panel: panel)
+        if let pak = pak as? ExternalPak {
+            view.onSettings = { [weak self, weak pak] in
+                if let pak { self?.showSettings(pak) }
+            }
+            pak.onChange = { [weak view, weak self] in
+                view?.settingsChanged()
+                self?.pakView?.needsDisplay = true
+            }
+        }
+        return view
+    }
+
+    /// Where a notes Pak's window is saved, such as "Pak-setlistsWindowFrame".
+    private static func notesLayoutName(_ id: String) -> String { "Pak-\(id)Window" }
+
+    /// Gives a notes Pak installed while Bitamp runs its window.
+    private func addNotesWindow(_ pak: ExternalPak) {
+        guard pak.writesNotes, let windowGroup, let mainView, let skin = views.first?.skin else { return }
+        let view = makeNotesView(pak, panel: .pak(pak.id), skin: skin)
+        view.keyFallback = mainView
+        view.announce = mainView.announce
+        view.flashMessage = { [weak mainView] message in mainView?.flash(message, for: 2) }
+        view.windowGroup = windowGroup
+        let window = SkinnedWindow(view: view, layoutName: Self.notesLayoutName(pak.id), isMain: false)
+        window.actionFallback = mainView
+        notesViews[pak.id] = view
+        views.append(view)
+        windowGroup.add(.pak(pak.id), window)
+    }
+
+    private func removeNotesWindow(_ pak: ExternalPak) {
+        guard let view = notesViews.removeValue(forKey: pak.id) else { return }
+        windowGroup?.remove(.pak(pak.id))
+        views.removeAll { $0 === view }
+    }
+
+    private func showNotes(_ pak: ExternalPak) {
+        guard let view = notesViews[pak.id] else { return }
+        windowGroup?.setVisible(.pak(pak.id), true)
+        view.window?.makeKeyAndOrderFront(nil)
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
@@ -241,6 +302,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             pakView?.paksChanged(revealing: installed)
             windowGroup?.setVisible(.paks, true)
             mainView?.flash("\(installed.name) PAK INSTALLED", for: 2)
+            // A notes Pak's window opens, so it's clear where its notes go.
+            if installed.writesNotes {
+                addNotesWindow(installed)
+                showNotes(installed)
+            }
             if installed.hasSettings && installed.account == .disconnected { showSettings(installed) }
         } catch {
             showPakError("The “\(manifest.name)” Pak couldn't be installed.", error)
@@ -269,6 +335,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if controller.playingPak === pak { controller.stop() }
         pak.disconnect()
         closeLibrary(showing: pak)
+        removeNotesWindow(pak)
         settingsPanels.removeValue(forKey: pak.id)?.close()
         paks.unregister(pak)
     }
@@ -489,6 +556,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             showBackstory()
             return
         }
+        if let pak = pak as? ExternalPak, pak.writesNotes {
+            showNotes(pak)
+            return
+        }
         guard pak.isAvailable, paks.isInserted(pak), let libraryView else { return }
         libraryView.show(pak)
         windowGroup?.setVisible(.library, true)
@@ -525,6 +596,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleBackstory(_ sender: Any?) {
         windowGroup?.toggle(.backstory)
+    }
+
+    @objc private func toggleNotesWindow(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        windowGroup?.toggle(.pak(id))
+    }
+
+    /// The Window menu's items for third-party notes Paks, after the Media Library and Backstory.
+    private func rebuildNotesItems(_ menu: NSMenu) {
+        for item in menu.items where item.tag == Self.notesItemTag { menu.removeItem(item) }
+        let anchors = [#selector(toggleLibrary(_:)), #selector(toggleBackstory(_:))]
+        guard var index = menu.items.lastIndex(where: { $0.action.map(anchors.contains) == true }) else { return }
+        for pak in paks.paks.compactMap({ $0 as? ExternalPak }).filter({ notesViews[$0.id] != nil }) {
+            let item = Menus.item(pak.name, #selector(toggleNotesWindow(_:)))
+            item.representedObject = pak.id
+            item.tag = Self.notesItemTag
+            item.target = self
+            index += 1
+            menu.insertItem(item, at: index)
+        }
     }
 
     private func makeMainMenu() -> NSMenu {
@@ -578,6 +669,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         cycle.target = self
         cycleBack.target = self
         NSApp.windowsMenu = windowMenu
+        windowMenu.delegate = self
+        self.windowMenu = windowMenu
+        rebuildNotesItems(windowMenu)
 
         skinsMenu.delegate = self
 
@@ -590,6 +684,7 @@ extension AppDelegate: NSMenuDelegate {
     public func menuNeedsUpdate(_ menu: NSMenu) {
         if menu === skinsMenu { rebuildSkinsMenu() }
         if menu === fileMenu { rebuildFileMenu() }
+        if menu === windowMenu { rebuildNotesItems(menu) }
     }
 }
 
@@ -604,6 +699,8 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(togglePaks(_:)): item.state = windowGroup?.isVisible(.paks) == true ? .on : .off
         case #selector(toggleLibrary(_:)): item.state = windowGroup?.isVisible(.library) == true ? .on : .off
         case #selector(toggleBackstory(_:)): item.state = windowGroup?.isVisible(.backstory) == true ? .on : .off
+        case #selector(toggleNotesWindow(_:)):
+            item.state = (item.representedObject as? String).map { windowGroup?.isVisible(.pak($0)) == true } == true ? .on : .off
         case #selector(setScale(_:)): item.state = item.representedObject as? CGFloat == preferences.scale ? .on : .off
         case #selector(toggleShadows(_:)): item.state = preferences.windowShadows ? .on : .off
         case #selector(toggleRaiseAllWindows(_:)): item.state = preferences.raiseAllWindows ? .on : .off

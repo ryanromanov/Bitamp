@@ -91,8 +91,9 @@ final class BackstoryCache {
     }
 }
 
-/// Follows what's playing for the Backstory window, and looks songs up when the Pak's
-/// setting says: after a song has played two seconds ("Every track"), or when asked.
+/// Follows what's playing for the Backstory window, or a third-party notes Pak's, and looks
+/// songs up when the Pak's setting says: after a song has played two seconds ("Every
+/// track"), or when asked.
 /// Lookups start only while the window is open and the Pak inserted, since each one costs.
 /// With "Next song early" on, the next song is looked up shortly before this one ends.
 @MainActor
@@ -124,7 +125,7 @@ final class BackstorySession {
     /// enough for a lookup, which took about 5 s in the spike.
     static let prefetchLead: TimeInterval = 20
 
-    let pak: BackstoryPak
+    let pak: NotesPak
     private let cache: BackstoryCache
     private let clock: () -> TimeInterval
     /// What's playing: the queue item, and whether it's playing now.
@@ -156,7 +157,7 @@ final class BackstorySession {
     /// The queue item being looked up early, if any.
     var lookingUpEarly: URL? { early?.finished == false ? early?.url : nil }
 
-    init(pak: BackstoryPak, cache: BackstoryCache, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+    init(pak: NotesPak, cache: BackstoryCache, clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.pak = pak
         self.cache = cache
         self.clock = clock
@@ -236,7 +237,7 @@ final class BackstorySession {
     /// Notes for `track` from `choice`, or from the on-device model if the cloud service
     /// can't be reached; `progress` sees them as they come. Returns them with the name
     /// they're saved under.
-    private func fetch(_ track: PakNowPlaying, _ choice: BackstoryPak.Choice,
+    private func fetch(_ track: PakNowPlaying, _ choice: NotesChoice,
                        progress: (BackstoryNotes) -> Void) async throws -> (BackstoryNotes, String) {
         do {
             return (try await stream(track, choice, progress: progress), choice.identity)
@@ -246,7 +247,7 @@ final class BackstorySession {
         }
     }
 
-    private func stream(_ track: PakNowPlaying, _ choice: BackstoryPak.Choice,
+    private func stream(_ track: PakNowPlaying, _ choice: NotesChoice,
                         progress: (BackstoryNotes) -> Void) async throws -> BackstoryNotes {
         var notes = BackstoryNotes()
         notes.onDevice = choice.onDevice ? true : nil

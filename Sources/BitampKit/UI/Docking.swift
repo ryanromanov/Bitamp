@@ -71,12 +71,29 @@ enum Docking {
 /// little transport buttons) or the equalizer; something always stays on screen.
 @MainActor
 final class WindowGroup {
-    enum Panel: String, CaseIterable {
-        case equalizer, playlist, paks, library, backstory
+    /// A window besides the main one. Third-party notes Paks each add one while installed.
+    struct Panel: Hashable {
+        let rawValue: String
+
+        static let equalizer = Panel(rawValue: "equalizer")
+        static let playlist = Panel(rawValue: "playlist")
+        static let paks = Panel(rawValue: "paks")
+        static let library = Panel(rawValue: "library")
+        static let backstory = Panel(rawValue: "backstory")
+
+        /// A third-party notes Pak's window.
+        static func pak(_ id: String) -> Panel { Panel(rawValue: "pak-\(id)") }
+
+        /// The classic three windows show on first launch; the rest wait to be opened.
+        var showsAtFirst: Bool { self == .equalizer || self == .playlist }
+        /// Opens beside the main window if it would open off screen.
+        var opensBeside: Bool { !showsAtFirst && self != .paks }
     }
 
     let main: NSWindow
-    private let panels: [Panel: NSWindow]
+    private var panels: [Panel: NSWindow]
+    /// The panels in stacking order: the built-in ones, then Paks' in the order they came.
+    private var order: [Panel]
     private let defaults: UserDefaults
     /// The windows being dragged and their top-left corners at the start. Tops, since the
     /// Expansion Paks window can change height as it moves, and it grows down from its top.
@@ -89,16 +106,44 @@ final class WindowGroup {
         self.main = main
         self.panels = panels
         self.defaults = defaults
+        let builtIn: [Panel] = [.equalizer, .playlist, .paks, .library, .backstory]
+        order = builtIn.filter { panels[$0] != nil } + panels.keys.filter { !builtIn.contains($0) }.sorted { $0.rawValue < $1.rawValue }
         // The classic three windows show on first launch; Expansion Paks, the Media Library
-        // and Backstory wait to be opened.
-        defaults.register(defaults: Dictionary(uniqueKeysWithValues: Panel.allCases.map {
-            (Self.visibilityKey($0), ![.paks, .library, .backstory].contains($0))
-        }))
+        // and companion windows wait to be opened.
+        defaults.register(defaults: Dictionary(uniqueKeysWithValues: order.map { (Self.visibilityKey($0), $0.showsAtFirst) }))
         defaults.register(defaults: [Self.mainVisibilityKey: true])
     }
 
+    /// Adds a window after launch, for a Pak just installed: where it was saved last, and
+    /// showing if it was. Its first time, it waits to be opened.
+    func add(_ panel: Panel, _ window: NSWindow) {
+        remove(panel)
+        panels[panel] = window
+        order.append(panel)
+        defaults.register(defaults: [Self.visibilityKey(panel): panel.showsAtFirst])
+        restoreShade(of: window)
+        if let saved = savedFrame(window) {
+            place(window, topLeft: NSPoint(x: saved.minX, y: saved.maxY),
+                  pixelSize: (window.contentView as? SkinnedView).map { CGSize(width: saved.width / $0.scale, height: saved.height / $0.scale) })
+        } else {
+            place(window, topLeft: NSPoint(x: main.frame.maxX, y: main.frame.maxY), pixelSize: nil)
+        }
+        window.hasShadow = main.hasShadow
+        if defaults.bool(forKey: Self.visibilityKey(panel)) { window.orderFront(nil) }
+    }
+
+    /// Takes a Pak's window away, keeping where it was and whether it showed for next time.
+    func remove(_ panel: Panel) {
+        guard let window = panels.removeValue(forKey: panel) else { return }
+        order.removeAll { $0 == panel }
+        hiddenMainOffsets[panel] = nil
+        defaults.set(NSStringFromRect(window.frame), forKey: Self.key(window, "Frame"))
+        window.orderOut(nil)
+        if !main.isVisible && !anyPanelVisible { setMainVisible(true) }
+    }
+
     private var windows: [NSWindow] {
-        [main] + Panel.allCases.compactMap { panels[$0] }
+        [main] + order.compactMap { panels[$0] }
     }
 
     func setShadows(_ shadows: Bool) {
@@ -125,7 +170,7 @@ final class WindowGroup {
         guard let window = panels[panel] else { return }
         defaults.set(visible, forKey: Self.visibilityKey(panel))
         if visible {
-            if panel == .library || panel == .backstory { bringOnScreen(window) }
+            if panel.opensBeside { bringOnScreen(window) }
             window.orderFront(nil)
         } else {
             window.orderOut(nil)
@@ -152,7 +197,7 @@ final class WindowGroup {
     }
 
     private var anyPanelVisible: Bool {
-        Panel.allCases.contains(where: isVisible)
+        order.contains(where: isVisible)
     }
 
     var isMainVisible: Bool { main.isVisible }
@@ -169,7 +214,7 @@ final class WindowGroup {
             main.makeKeyAndOrderFront(nil)
             keepOnScreen()
         } else {
-            let others = Panel.allCases.filter(isVisible)
+            let others = order.filter(isVisible)
             let docked = Docking.docked(to: main.frame, among: others.compactMap { panels[$0]?.frame })
             hiddenMainOffsets = Dictionary(uniqueKeysWithValues: docked.compactMap { index in
                 panels[others[index]].map { (others[index], CGVector(dx: main.frame.minX - $0.frame.minX,
@@ -191,7 +236,7 @@ final class WindowGroup {
     /// window hidden, the others stack from where the top one is, and the main window
     /// takes its place above them. Sizes and shade stay as they are.
     func regroup() {
-        let order = Panel.allCases.filter(isVisible) + Panel.allCases.filter { !isVisible($0) }
+        let order = self.order.filter(isVisible) + self.order.filter { !isVisible($0) }
         let stack = order.compactMap { panels[$0] }
         var top: NSPoint
         if main.isVisible {
@@ -255,7 +300,7 @@ final class WindowGroup {
         place(main, topLeft: anchor, pixelSize: nil)
 
         var below = main.frame.minY
-        for panel in Panel.allCases {
+        for panel in order {
             guard let window = panels[panel] else { continue }
             if let saved = savedFrame(window) {
                 place(window, topLeft: NSPoint(
@@ -376,12 +421,14 @@ final class WindowGroup {
 
     /// Puts windows back in shade mode before their frames are placed.
     private func restoreShade() {
-        for window in windows where defaults.bool(forKey: Self.shadeKey(window)) {
-            guard let view = window.contentView as? SkinnedView else { continue }
-            let height = defaults.double(forKey: Self.unshadedHeightKey(window))
-            view.setShaded(true)
-            view.unshadedPixelHeight = height > 0 ? height : nil
-        }
+        windows.forEach(restoreShade(of:))
+    }
+
+    private func restoreShade(of window: NSWindow) {
+        guard defaults.bool(forKey: Self.shadeKey(window)), let view = window.contentView as? SkinnedView else { return }
+        let height = defaults.double(forKey: Self.unshadedHeightKey(window))
+        view.setShaded(true)
+        view.unshadedPixelHeight = height > 0 ? height : nil
     }
 
     /// Resizes every window to `scale`, keeping the main window's top-left corner fixed

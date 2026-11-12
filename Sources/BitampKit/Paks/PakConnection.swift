@@ -46,7 +46,19 @@ final class PakConnection {
     private var process: Process?
     private var input: FileHandle?
     private var nextID = 1
-    private var pending: [Int: (method: String, continuation: CheckedContinuation<Data, Error>)] = [:]
+    private struct Pending {
+        let method: String
+        let continuation: CheckedContinuation<Data, Error>
+        /// Gets the request's `update` lines, for an answer that comes in pieces.
+        let onUpdate: ((Data) -> Void)?
+        /// When the Pak last said something about it. A request times out when the Pak has
+        /// been quiet this long, so a long answer that keeps sending updates doesn't.
+        var lastHeard: TimeInterval
+        let timeout: TimeInterval
+    }
+    private var pending: [Int: Pending] = [:]
+    /// Requests Bitamp cancelled, whose late lines are dropped. The oldest are forgotten.
+    private var cancelled: [Int] = []
     private var crashes: [Date] = []
     /// The shutdown request, whose answer nothing waits for.
     private var shutdownID: Int?
@@ -69,6 +81,35 @@ final class PakConnection {
     ) async throws -> Result {
         try await ensureStarted()
         return try await send(method, params, as: result)
+    }
+
+    /// A request whose answer may come in pieces first: `update` lines, handed to
+    /// `onUpdate`, then the result. It times out only after `timeout` seconds without a
+    /// line. Cancelling the task tells the Pak to stop (`cancel`) and throws `CancellationError`.
+    func request<Params: Codable, Result: Codable>(
+        _ method: String, _ params: Params, as result: Result.Type, timeout: TimeInterval? = nil,
+        onUpdate: @escaping (Data) -> Void
+    ) async throws -> Result {
+        try await ensureStarted()
+        let id = nextID
+        nextID += 1
+        return try await withTaskCancellationHandler {
+            try await send(method, params, as: result, id: id, timeout: timeout, onUpdate: onUpdate)
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.cancel(id) }
+        }
+    }
+
+    /// Stops waiting for request `id` and tells the Pak to stop working on it.
+    private func cancel(_ id: Int) {
+        guard let request = pending.removeValue(forKey: id) else { return }
+        request.continuation.resume(throwing: CancellationError())
+        let cancelID = nextID
+        nextID += 1
+        // The cancel itself gets no answer, but one is dropped quietly too.
+        cancelled += [id, cancelID]
+        if cancelled.count > 64 { cancelled.removeFirst(cancelled.count - 64) }
+        write(PakRequest(id: cancelID, method: PakMethod.cancel, params: PakMethod.Cancel(id: id)))
     }
 
     /// Asks the program to finish, and makes sure it does.
@@ -166,20 +207,21 @@ final class PakConnection {
     // MARK: - Messages
 
     private func send<Params: Codable, Result: Codable>(
-        _ method: String, _ params: Params, as result: Result.Type
+        _ method: String, _ params: Params, as result: Result.Type, id: Int? = nil, timeout: TimeInterval? = nil,
+        onUpdate: ((Data) -> Void)? = nil
     ) async throws -> Result {
         guard isRunning else { throw Failure.exited }
-        let id = nextID
-        nextID += 1
+        try Task.checkCancellation()
+        let id = id ?? {
+            defer { nextID += 1 }
+            return nextID
+        }()
+        let timeout = timeout ?? self.timeout
         let data: Data = try await withCheckedThrowingContinuation { continuation in
-            pending[id] = (method, continuation)
+            pending[id] = Pending(method: method, continuation: continuation, onUpdate: onUpdate,
+                                  lastHeard: ProcessInfo.processInfo.systemUptime, timeout: timeout)
             write(PakRequest(id: id, method: method, params: params))
-            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
-                MainActor.assumeIsolated {
-                    guard let request = self?.pending.removeValue(forKey: id) else { return }
-                    request.continuation.resume(throwing: Failure.timedOut(method))
-                }
-            }
+            expire(id, after: timeout)
         }
         guard let response = try? JSONDecoder().decode(PakResponse<Result>.self, from: data) else {
             throw Failure.unreadable(method)
@@ -187,6 +229,22 @@ final class PakConnection {
         if let error = response.error { throw Failure.pak(error.message) }
         guard let value = response.result else { throw Failure.unreadable(method) }
         return value
+    }
+
+    /// Times request `id` out once the Pak has been quiet about it for its timeout.
+    private func expire(_ id: Int, after delay: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let request = self.pending[id] else { return }
+                let quiet = ProcessInfo.processInfo.systemUptime - request.lastHeard
+                if quiet < request.timeout {
+                    self.expire(id, after: request.timeout - quiet)
+                    return
+                }
+                self.pending.removeValue(forKey: id)
+                request.continuation.resume(throwing: Failure.timedOut(request.method))
+            }
+        }
     }
 
     private func write<Params: Codable>(_ request: PakRequest<Params>) {
@@ -201,8 +259,13 @@ final class PakConnection {
 
     private func received(_ line: Data) {
         let header = try? JSONDecoder().decode(ResponseID.self, from: line)
-        if let header, header.id == shutdownID { return }
-        guard let header, let request = pending.removeValue(forKey: header.id) else {
+        if let header, header.id == shutdownID || cancelled.contains(header.id) { return }
+        if let header, header.isUpdate, let onUpdate = pending[header.id]?.onUpdate {
+            pending[header.id]?.lastHeard = ProcessInfo.processInfo.systemUptime
+            onUpdate(line)
+            return
+        }
+        guard let header, !header.isUpdate, let request = pending.removeValue(forKey: header.id) else {
             let text = String(decoding: line, as: UTF8.self)
             if let onUnexpectedOutput { onUnexpectedOutput(text) } else { NSLog("Bitamp: %@ Pak said something unexpected: %@", name, text) }
             return
@@ -216,6 +279,16 @@ final class PakConnection {
 
     private struct ResponseID: Decodable {
         let id: Int
+        /// A piece of an answer still to come, rather than the answer.
+        let isUpdate: Bool
+
+        private enum Keys: String, CodingKey { case id, update }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: Keys.self)
+            id = try container.decode(Int.self, forKey: .id)
+            isUpdate = container.contains(.update)
+        }
     }
 }
 

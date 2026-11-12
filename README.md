@@ -45,7 +45,7 @@ An Expansion Pak adds a music source to Bitamp: a music server, a radio director
 
 To install a Pak, double-click its `.bitpak`, drop it on Bitamp, or use File ▸ Install Expansion Pak…. A Pak is a program, so Bitamp asks first; only install Paks from people you trust.
 
-**Try the demo Pak.** It plays a few public-domain tunes (Ode to Joy, Für Elise, Greensleeves…) as chiptunes, made on your Mac, with a choice of waveform. Build it with `scripts/make-pak.sh` and double-click the `Demo.bitpak` it makes.
+**Try the demo Pak.** It plays a few public-domain tunes (Ode to Joy, Für Elise, Greensleeves…) as chiptunes, made on your Mac, with a choice of waveform. Build it with `scripts/make-pak.sh` and double-click the `Demo.bitpak` it makes. The `Demo Notes.bitpak` made beside it is a companion Pak: a window of notes about those tunes as they play, showing how a third-party Pak can write about the song that's playing.
 
 **Write your own.** A Pak is a folder with a small manifest and a program that answers a few questions in JSON: search, describe a track, and say where its audio is. Its songs show in the Media Library's search. Write it in Swift with the `BitampPakSDK` library in this package, or in any language. [Writing an Expansion Pak](docs/PAK-SDK.md) has everything, including a complete Pak in a few dozen lines of Python, and `Bitamp --check-pak` tries a Pak and tells you what to fix.
 
@@ -84,7 +84,7 @@ swift build            # debug build
 scripts/test.sh        # run tests (wraps swift test; see below)
 scripts/bundle.sh      # release build → Bitamp.app (--universal, --version X.Y.Z)
 open Bitamp.app
-scripts/make-pak.sh    # the demo Expansion Pak → Demo.bitpak (--universal; works in your own Pak's package too)
+scripts/make-pak.sh    # the demo Expansion Paks → Demo.bitpak, Demo Notes.bitpak (--universal; works in your own Pak's package too)
 .build/debug/Bitamp --check-pak Demo.bitpak   # try a Pak without installing it
 ```
 

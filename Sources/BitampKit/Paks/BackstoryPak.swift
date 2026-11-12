@@ -11,7 +11,7 @@ import Foundation
 /// Settings live where a third-party Pak's do (UserDefaults, the key in the Keychain), so
 /// the cartridge's Settings… form and the window's setup change the same values.
 @MainActor
-public final class BackstoryPak: Pak, ConfigurablePak {
+public final class BackstoryPak: NotesPak, ConfigurablePak {
     /// A service the notes can come from, such as Claude.
     public struct Provider: Sendable {
         public let name: String
@@ -46,22 +46,14 @@ public final class BackstoryPak: Pak, ConfigurablePak {
         }
     }
 
-    /// The service a lookup goes to, and the name its notes are saved under.
-    struct Choice {
-        let service: BackstoryService
-        let identity: String
-        let onDevice: Bool
-    }
+    typealias Choice = NotesChoice
 
     static let onDeviceName = "On-device"
     /// What notes the on-device model wrote from Wikipedia are saved under, apart from the
     /// ones it wrote from memory.
     static let onDeviceWikipediaName = "On-device/Wikipedia"
 
-    /// When notes are looked up.
-    enum Lookup: String, CaseIterable {
-        case everyTrack = "Every track", whenAsked = "When I ask", off = "Off"
-    }
+    typealias Lookup = NotesLookup
 
     static let pakID = "backstory"
     public let id = BackstoryPak.pakID

@@ -351,3 +351,126 @@ private final class Marker {}
         #expect(FileManager.default.fileExists(atPath: pak.cacheDirectory.appendingPathComponent("ode-to-joy-square.wav").path))
     }
 }
+
+// MARK: - Notes
+
+/// Writes a word, then waits until cancelled; a second song gets its notes at once.
+private final class SlowNotesProvider: PakProvider {
+    func notes(for song: PakSongInfo, writer: PakNotesWriter) async throws {
+        writer.write("Once")
+        writer.cite([PakCitation(title: "A page", url: "https://notes.example/a")])
+        if song.title == "Slow" { try await Task.sleep(for: .seconds(60)) }
+    }
+}
+
+@Suite struct PakNotesWireTests {
+    @Test func notesStreamThenAnswer() async {
+        var replies: [String] = []
+        await PakRunner.serve(SlowNotesProvider(), input: AsyncStream { continuation in
+            continuation.yield(#"{"id":1,"method":"notes","params":{"song":{"title":"Quick","artist":"The Low Bits"}}}"#)
+            continuation.finish()
+        }) { replies.append($0) }
+        #expect(replies == [
+            #"{"id":1,"update":{"text":"Once"}}"#,
+            #"{"id":1,"update":{"cite":[{"title":"A page","url":"https://notes.example/a"}]}}"#,
+            #"{"id":1,"result":{}}"#,
+        ])
+    }
+
+    /// A cancel stops the notes running, unanswered, and the next request goes on at once.
+    @Test func aCancelStopsTheNotesRunning() async {
+        let (input, lines) = AsyncStream<String>.makeStream()
+        lines.yield(#"{"id":1,"method":"notes","params":{"song":{"title":"Slow"}}}"#)
+        let replies = Replies()
+        let started = ContinuousClock.now
+        await PakRunner.serve(SlowNotesProvider(), input: input) { reply in
+            replies.append(reply)
+            if reply.contains(#""cite""#) {
+                lines.yield(#"{"id":2,"method":"cancel","params":{"id":1}}"#)
+                lines.yield(#"{"id":3,"method":"notes","params":{"song":{"title":"Quick"}}}"#)
+            }
+            if reply.contains(#"{"id":3,"result""#) { lines.finish() }
+        }
+        #expect(ContinuousClock.now - started < .seconds(5))
+        #expect(replies.lines.filter { $0.hasPrefix(#"{"id":1,"result""#) || $0.contains(#""id":1}"#) }.isEmpty)
+        #expect(replies.lines.last == #"{"id":3,"result":{}}"#)
+        #expect(!replies.lines.contains { $0.contains(#""id":2"#) })
+    }
+
+    @Test func aPakWithoutNotesSaysSo() async {
+        var replies: [String] = []
+        await PakRunner.serve(EchoProvider(), input: AsyncStream { continuation in
+            continuation.yield(#"{"id":1,"method":"notes","params":{"song":{"title":"Ode"}}}"#)
+            continuation.finish()
+        }) { replies.append($0) }
+        #expect(replies == [#"{"error":{"message":"This Pak doesn't write notes."},"id":1}"#])
+    }
+
+    @Test func onlyWebSourcesAreKept() {
+        let updates = ExternalPak.updates(text: "Words", cite: [
+            PakCitation(title: "Kept", url: "https://notes.example/kept"),
+            PakCitation(title: "", url: "http://notes.example/untitled"),
+            PakCitation(title: "Local", url: "file:///etc/hosts"),
+            PakCitation(title: "Nonsense", url: "not a url"),
+        ])
+        #expect(updates == [.text("Words"), .cite([
+            BackstorySource(title: "Kept", url: URL(string: "https://notes.example/kept")!),
+            BackstorySource(title: "notes.example", url: URL(string: "http://notes.example/untitled")!),
+        ])])
+        #expect(ExternalPak.updates(text: "", cite: nil).isEmpty)
+    }
+}
+
+private final class Replies: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [String] = []
+    func append(_ line: String) { lock.withLock { stored.append(line) } }
+    var lines: [String] { lock.withLock { stored } }
+}
+
+@MainActor @Suite struct DemoNotesPakTests {
+    private let root = FileManager.default.temporaryDirectory.appendingPathComponent("BitampDemoNotesPak-\(UUID().uuidString)")
+
+    /// Demo Notes.bitpak, from the test build's program and the manifest.
+    private func folder() throws -> URL {
+        let program = Bundle(for: Marker.self).bundleURL.deletingLastPathComponent().appendingPathComponent("BitampDemoNotesPak")
+        let manifest = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../Sources/BitampDemoNotesPak/pak.json").standardizedFileURL
+        let folder = root.appendingPathComponent("Demo Notes.bitpak")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: manifest, to: folder.appendingPathComponent("pak.json"))
+        try FileManager.default.copyItem(at: program, to: folder.appendingPathComponent("demo-notes-pak"))
+        return folder
+    }
+
+    @Test func passesTheCheck() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        var lines: [String] = []
+        let check = PakCheck(folder: try folder()) { lines.append($0) }
+        #expect(await check.run(), "\(lines.joined(separator: "\n"))")
+        #expect(lines.contains { $0.hasPrefix("✓ notes “Ode to Joy”:") })
+        #expect(lines.contains { $0.hasPrefix("✓ cancel: stopped") })
+        #expect(lines.last == "The Demo Notes Pak looks good. Double-click it to install it.")
+    }
+
+    @Test func writesNotesInAWindowOfItsOwn() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = PakLibrary(folder: root.appendingPathComponent("installed"), settings: MemorySettingsStore(
+            defaults: UserDefaults(suiteName: "BitampDemoNotesPak-\(UUID().uuidString)")!))
+        try library.install(try folder(), reservedIDs: [])
+        let pak = try #require(library.installed().first)
+        defer { pak.disconnect() }
+        #expect(pak.writesNotes && !pak.isMusicSource && !pak.canBrowse)
+        #expect(pak.identity == "pak:demo-notes")
+        let choice = try #require(pak.choice())
+        #expect(!choice.onDevice)
+
+        var notes = BackstoryNotes()
+        for try await update in choice.service.notes(for: PakNowPlaying(title: "Fur Elise", artist: "Ludwig van Beethoven")) {
+            notes.apply(update)
+        }
+        #expect(notes.text.hasPrefix("A short piano piece in A minor"))
+        #expect(notes.text.contains("1867, forty years after he died. [1]"))
+        #expect(notes.sources.map(\.url.absoluteString) == ["https://en.wikipedia.org/wiki/F%C3%BCr_Elise"])
+    }
+}

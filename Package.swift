@@ -11,6 +11,7 @@ let package = Package(
         // For third-party Paks written in Swift. See docs/PAK-SDK.md.
         .library(name: "BitampPakSDK", targets: ["BitampPakSDK"]),
         .executable(name: "BitampDemoPak", targets: ["BitampDemoPak"]),
+        .executable(name: "BitampDemoNotesPak", targets: ["BitampDemoNotesPak"]),
     ],
     targets: [
         // Everything but the entry point lives in BitampKit so tests can import it.
@@ -23,17 +24,19 @@ let package = Package(
         // What an Expansion Pak sees of Bitamp: protocols and value types only. See docs/PAKS.md.
         .target(name: "BitampPakKit"),
         // Third-party Paks: the messages Bitamp and a Pak's program exchange, the Swift
-        // library for writing one, and the demo Pak (packaged by scripts/make-pak.sh).
+        // library for writing one, and the demo Paks (packaged by scripts/make-pak.sh): one
+        // with music, and a companion that writes notes.
         .target(name: "BitampPakProtocol"),
         .target(name: "BitampPakSDK", dependencies: ["BitampPakProtocol"]),
         .executableTarget(name: "BitampDemoPak", dependencies: ["BitampPakSDK"], exclude: ["pak.json"]),
+        .executableTarget(name: "BitampDemoNotesPak", dependencies: ["BitampPakSDK"], exclude: ["pak.json"]),
         // Expansion Paks built into Bitamp. Each depends on BitampPakKit only.
         .target(name: "BitampAppleMusicPak", dependencies: ["BitampPakKit"]),
         // The services the Backstory Pak can ask about a song (Claude so far).
         .target(name: "BitampBackstory", dependencies: ["BitampPakKit"]),
         .executableTarget(name: "Bitamp", dependencies: ["BitampKit", "BitampAppleMusicPak", "BitampBackstory"]),
         .testTarget(name: "BitampTests", dependencies: [
-            "BitampKit", "BitampPakKit", "BitampAppleMusicPak", "BitampPakSDK", "BitampDemoPak", "BitampBackstory",
+            "BitampKit", "BitampPakKit", "BitampAppleMusicPak", "BitampPakSDK", "BitampDemoPak", "BitampDemoNotesPak", "BitampBackstory",
         ]),
     ]
 )
