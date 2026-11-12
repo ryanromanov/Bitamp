@@ -461,7 +461,9 @@ private final class Replies: @unchecked Sendable {
         let pak = try #require(library.installed().first)
         defer { pak.disconnect() }
         #expect(pak.writesNotes && !pak.isMusicSource && !pak.canBrowse)
-        #expect(pak.identity == "pak:demo-notes")
+        #expect(pak.identity == "pak:demo-notes/1.0/detail=Full")
+        try await pak.configure(["detail": "Short"])
+        #expect(pak.identity == "pak:demo-notes/1.0/detail=Short")
         let choice = try #require(pak.choice())
         #expect(!choice.onDevice)
 
@@ -469,8 +471,7 @@ private final class Replies: @unchecked Sendable {
         for try await update in choice.service.notes(for: PakNowPlaying(title: "Fur Elise", artist: "Ludwig van Beethoven")) {
             notes.apply(update)
         }
-        #expect(notes.text.hasPrefix("A short piano piece in A minor"))
-        #expect(notes.text.contains("1867, forty years after he died. [1]"))
+        #expect(notes.text == "A short piano piece in A minor that Beethoven wrote around 1810. It was only published in 1867, forty years after he died. [1]")
         #expect(notes.sources.map(\.url.absoluteString) == ["https://en.wikipedia.org/wiki/F%C3%BCr_Elise"])
     }
 }

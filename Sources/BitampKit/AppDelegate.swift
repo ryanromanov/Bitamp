@@ -321,6 +321,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         unloadPak(pak)
+        pak.forgetNotesSettings()
         do {
             try pakLibrary.remove(pak)
         } catch {

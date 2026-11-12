@@ -82,6 +82,8 @@ final class ExternalPak: NotesPak {
         let result = try await connection.request(
             PakMethod.configure, PakMethod.Configure(settings: settings.values(for: manifest)), as: PakMethod.AccountResult.self)
         lastAccount = result.account
+        // A notes Pak's saved notes follow its settings, even when its account doesn't change.
+        onChange?()
     }
 
     func settingValues() -> [String: String] {
@@ -265,8 +267,21 @@ final class ExternalPak: NotesPak {
         set { defaults.set(newValue, forKey: prefetchKey) }
     }
 
-    /// Its notes are saved under its id, apart from Backstory's and other Paks'.
-    var identity: String { "pak:\(manifest.id)" }
+    /// What its notes are saved under: its id, apart from Backstory's and other Paks', plus
+    /// its version and settings, so changing them (a model, a level of detail) doesn't show
+    /// notes written before. Passwords are left out.
+    var identity: String {
+        let values = settings.values(for: manifest)
+        let shown = (manifest.settings ?? []).filter { $0.kind != .password }
+            .compactMap { setting in values[setting.key].map { "\(setting.key)=\($0)" } }
+        return (["pak:\(manifest.id)", manifest.version] + shown).joined(separator: "/")
+    }
+
+    /// Forgets Bitamp's own settings for the Pak, when it's removed.
+    func forgetNotesSettings() {
+        defaults.removeObject(forKey: lookupKey)
+        defaults.removeObject(forKey: prefetchKey)
+    }
 
     /// The Pak itself, unless it needs settings filled in first.
     func choice() -> NotesChoice? {

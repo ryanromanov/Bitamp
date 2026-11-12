@@ -44,7 +44,7 @@ Radio.bitpak/
 - **name** is shown on the cartridge and in menus ("Radio Pak").
 - **executable** is the program, relative to the folder. It must be inside the folder and executable.
 - **protocol** is the version of the messages below. This is version 1.
-- **capabilities** are optional. `["browse"]` says the Pak can be browsed in the Media Library, with a sidebar, albums, artists, playlists and covers (see [Browsing](#browsing)). Bitamp 0.10 and earlier ignore it and show the Pak's search instead, so one Pak works in both. `["notes"]` makes it a companion that writes notes instead of supplying music (see [Notes](#notes)); it needs Bitamp 0.12.0 or later.
+- **capabilities** are optional. `["browse"]` says the Pak can be browsed in the Media Library, with a sidebar, albums, artists, playlists and covers (see [Browsing](#browsing)). Bitamp 0.10 and earlier ignore it and show the Pak's search instead, so one Pak works in both. `["notes"]` makes it a companion that writes notes instead of supplying music (see [Notes](#notes)); it needs Bitamp 0.12.0 or later. Bitamp 0.11 and earlier don't know it, and show the Pak as a music cartridge with nothing in it.
 - **settings** are optional. Bitamp shows a form for them (right-click the cartridge ▸ Settings…) and passes their values to the Pak. `text` is one line, `password` is kept in the macOS Keychain, `choice` is a pop-up of `options`.
 
 ## Messages
