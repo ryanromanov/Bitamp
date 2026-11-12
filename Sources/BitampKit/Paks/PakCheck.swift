@@ -84,6 +84,12 @@ public final class PakCheck {
                 + "      Only answers go to standard output. Print anything else to standard error.")
         }
 
+        if manifest.can(PakProtocol.notes), manifest.protocol < PakProtocol.notesVersion {
+            fail("\(PakProtocol.manifestName): a Pak with the “notes” capability needs \"protocol\": \(PakProtocol.notesVersion), "
+                + "so Bitamp 0.11 and earlier don't install it as a music Pak with nothing in it.")
+            connection.shutdown()
+            return finish(manifest)
+        }
         if manifest.can(PakProtocol.notes) {
             if manifest.can(PakProtocol.browse) {
                 warn("\(PakProtocol.manifestName): a Pak that writes notes has no music, so Bitamp doesn't browse it.")

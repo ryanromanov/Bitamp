@@ -3,7 +3,7 @@
   "name": "Demo Notes",
   "version": "1.0",
   "executable": "demo-notes-pak",
-  "protocol": 1,
+  "protocol": 2,
   "description": "A companion Pak: a few lines about the Demo Pak's tunes, in a window of its own, written on your Mac. Shows how a Pak can write about the song that's playing.",
   "capabilities": ["notes"],
   "settings": [

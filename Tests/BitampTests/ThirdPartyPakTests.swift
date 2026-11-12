@@ -453,6 +453,34 @@ private final class Replies: @unchecked Sendable {
         #expect(lines.last == "The Demo Notes Pak looks good. Double-click it to install it.")
     }
 
+    /// Notes need protocol 2, so older Bitamps won't install a notes Pak as an empty music
+    /// Pak. One declaring 1 is a music Pak here, and the check says what to change.
+    @Test func notesNeedProtocolTwo() async throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let folder = try folder()
+        let file = folder.appendingPathComponent("pak.json")
+        var manifest = try JSONDecoder().decode(PakManifest.self, from: Data(contentsOf: file))
+        #expect(manifest.protocol == 2)
+        manifest.protocol = 1
+        try JSONEncoder().encode(manifest).write(to: file)
+
+        var lines: [String] = []
+        let check = PakCheck(folder: folder) { lines.append($0) }
+        #expect(await !check.run())
+        #expect(lines.contains { $0.hasPrefix("✗ pak.json: a Pak with the “notes” capability needs \"protocol\": 2") })
+
+        let library = PakLibrary(folder: root.appendingPathComponent("installed"), settings: MemorySettingsStore(
+            defaults: UserDefaults(suiteName: "BitampDemoNotesPak-\(UUID().uuidString)")!))
+        try library.install(folder, reservedIDs: [])
+        let pak = try #require(library.installed().first)
+        #expect(!pak.writesNotes && pak.isMusicSource)
+
+        // A Pak needing a protocol newer than Bitamp's isn't installed.
+        manifest.protocol = PakProtocol.version + 1
+        try JSONEncoder().encode(manifest).write(to: file)
+        #expect(throws: PakLibrary.InstallError.self) { try library.install(folder, reservedIDs: []) }
+    }
+
     @Test func writesNotesInAWindowOfItsOwn() async throws {
         defer { try? FileManager.default.removeItem(at: root) }
         let library = PakLibrary(folder: root.appendingPathComponent("installed"), settings: MemorySettingsStore(

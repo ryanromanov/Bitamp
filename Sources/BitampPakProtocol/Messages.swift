@@ -9,8 +9,13 @@ import Foundation
 ///     ← {"id":1,"result":{"tracks":[{"id":"ode-to-joy","title":"Ode to Joy","artist":"Beethoven"}]}}
 ///     ← {"id":2,"error":{"message":"No such track"}}
 public enum PakProtocol {
-    /// Bumped when a change would break existing Paks.
-    public static let version = 1
+    /// The newest version Bitamp speaks. A Pak declares the one it needs; Bitamp runs any
+    /// up to this, and an older Bitamp won't install a Pak that needs a newer one.
+    /// 1: music Paks (search, track, resolve, browse). 2: also `notes` companions, which
+    /// an older Bitamp would otherwise show as an empty music cartridge.
+    public static let version = 2
+    /// The version a Pak with the `notes` capability declares.
+    public static let notesVersion = 2
     /// The manifest's `capabilities` Bitamp knows. `browse`: the Media Library asks the Pak
     /// what's in it. `notes`: a companion Pak, with no music of its own, that writes about
     /// the song that's playing, in a window of its own.

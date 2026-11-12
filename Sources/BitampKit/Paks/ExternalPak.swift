@@ -244,8 +244,9 @@ final class ExternalPak: NotesPak {
 
     // MARK: - Notes
 
-    /// A companion that writes notes, with no music of its own.
-    var writesNotes: Bool { manifest.can(PakProtocol.notes) }
+    /// A companion that writes notes, with no music of its own. It must declare protocol 2,
+    /// so older Bitamps don't take it for a music Pak.
+    var writesNotes: Bool { manifest.can(PakProtocol.notes) && manifest.protocol >= PakProtocol.notesVersion }
 
     var isMusicSource: Bool { !writesNotes }
 

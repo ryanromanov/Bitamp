@@ -43,8 +43,8 @@ Radio.bitpak/
 - **id** is 1 to 32 lowercase letters, digits and hyphens, starting with a letter. It names the Pak's settings, and its tracks' URLs in playlists (`bitpak-radio://track/<your id>`). Keep it the same between versions.
 - **name** is shown on the cartridge and in menus ("Radio Pak").
 - **executable** is the program, relative to the folder. It must be inside the folder and executable.
-- **protocol** is the version of the messages below. This is version 1.
-- **capabilities** are optional. `["browse"]` says the Pak can be browsed in the Media Library, with a sidebar, albums, artists, playlists and covers (see [Browsing](#browsing)). Bitamp 0.10 and earlier ignore it and show the Pak's search instead, so one Pak works in both. `["notes"]` makes it a companion that writes notes instead of supplying music (see [Notes](#notes)); it needs Bitamp 0.12.0 or later. Bitamp 0.11 and earlier don't know it, and show the Pak as a music cartridge with nothing in it.
+- **protocol** is the version of the messages below that the Pak needs. Use 1, which every Bitamp with Paks understands, unless the Pak writes notes: those need 2 (Bitamp 0.12.0 and later). Bitamp won't install a Pak that needs a newer version than it has, and says it needs a newer Bitamp.
+- **capabilities** are optional. `["browse"]` says the Pak can be browsed in the Media Library, with a sidebar, albums, artists, playlists and covers (see [Browsing](#browsing)). Bitamp 0.10 and earlier ignore it and show the Pak's search instead, so one Pak works in both. `["notes"]` makes it a companion that writes notes instead of supplying music (see [Notes](#notes)); it needs `"protocol": 2`, so Bitamp 0.11 and earlier decline to install it rather than showing an empty music cartridge.
 - **settings** are optional. Bitamp shows a form for them (right-click the cartridge ▸ Settings…) and passes their values to the Pak. `text` is one line, `password` is kept in the macOS Keychain, `choice` is a pop-up of `options`.
 
 ## Messages
@@ -61,7 +61,7 @@ An `error` message is shown to the listener, so write it for them.
 
 | Method | Params | Result |
 |---|---|---|
-| `hello` | `protocol`, `settings` (key → value), `cacheDirectory` | `{"account": Account}` |
+| `hello` | `protocol` (the newest Bitamp speaks), `settings` (key → value), `cacheDirectory` | `{"account": Account}` |
 | `configure` | `settings` | `{"account": Account}` |
 | `search` | `term` (may be empty: list what you'd show first; see below) | `{"tracks": [Track]}` |
 | `track` | `id` | `{"track": Track or null}` |
@@ -111,7 +111,7 @@ Bitamp asks for one page at a time and shows what it has, so answer each quickly
 
 ## Notes
 
-With `"capabilities": ["notes"]` in `pak.json`, a Pak is a companion: it has no music, and Bitamp 0.12.0 and later give it a window of its own, like Backstory's. The window shows the song that's playing and the Pak's notes about it, with numbered sources, and along the bottom the listener chooses when songs are looked up: AUTO (each song after it has played two seconds), ASK (when they press a button; the first setting, since Bitamp can't know what a lookup costs) or OFF. Bitamp keeps that choice and the notes it's been sent, so a song played again costs nothing. Clicking the cartridge opens the window, and it's in the Window menu. Search, `track`, `resolve` and `browse` are never asked.
+With `"capabilities": ["notes"]` and `"protocol": 2` in `pak.json`, a Pak is a companion: it has no music, and Bitamp 0.12.0 and later give it a window of its own, like Backstory's. The window shows the song that's playing and the Pak's notes about it, with numbered sources, and along the bottom the listener chooses when songs are looked up: AUTO (each song after it has played two seconds), ASK (when they press a button; the first setting, since Bitamp can't know what a lookup costs) or OFF. Bitamp keeps that choice and the notes it's been sent, so a song played again costs nothing. Clicking the cartridge opens the window, and it's in the Window menu. Search, `track`, `resolve` and `browse` are never asked.
 
 Bitamp asks for notes with the song's tags, never its audio or its file's name. A song with no title or artist isn't looked up.
 
