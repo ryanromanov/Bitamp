@@ -24,7 +24,7 @@ Bitamp isn't affiliated with or endorsed by Winamp or Nullsoft. Its default skin
 - Shade mode for each window (double-click a title bar), and three window sizes: 1×, 1.5× and 2× (the default)
 - Spectrum and oscilloscope visualizer, shuffle and repeat, `.m3u` playlists
 - Retro Sound (Playback ▸ Retro Sound, or T): an 8-bit crush that plays the song as 8-bit samples, or an experimental chiptune cover that transcribes the song, follows the sung melody for the lead, and plays it on pulse, triangle and noise voices, with some of the original mixed in if you like
-- [Expansion Paks](#expansion-paks): other music sources in Bitamp's playlist, browsed in a skinned Media Library with album art. Apple Music comes built in, and anyone can write more
+- [Expansion Paks](#expansion-paks): other music sources in Bitamp's playlist, browsed in a skinned Media Library with album art, or notes about the song that's playing, like Backstory. Apple Music comes built in, and anyone can write more
 - [Backstory](#backstory): short notes about the song that's playing, free from Apple's on-device model with nothing to set up, or with sources from Claude or OpenAI with your own key
 
 ## Expansion Paks
@@ -47,7 +47,7 @@ To install a Pak, double-click its `.bitpak`, drop it on Bitamp, or use File ▸
 
 **Try the demo Pak.** It plays a few public-domain tunes (Ode to Joy, Für Elise, Greensleeves…) as chiptunes, made on your Mac, with a choice of waveform. Build it with `scripts/make-pak.sh` and double-click the `Demo.bitpak` it makes. The `Demo Notes.bitpak` made beside it is a companion Pak: a window of notes about those tunes as they play, showing how a third-party Pak can write about the song that's playing.
 
-**Write your own.** A Pak is a folder with a small manifest and a program that answers a few questions in JSON: search, describe a track, and say where its audio is. Its songs show in the Media Library's search. Write it in Swift with the `BitampPakSDK` library in this package, or in any language. [Writing an Expansion Pak](docs/PAK-SDK.md) has everything, including a complete Pak in a few dozen lines of Python, and `Bitamp --check-pak` tries a Pak and tells you what to fix.
+**Write your own.** A Pak is a folder with a small manifest and a program that answers a few questions in JSON: search, describe a track, and say where its audio is. Its songs show in the Media Library's search, or, if it can be browsed, in a sidebar of sections, albums and playlists. A Pak can also play no music and write notes about the song that's playing instead, in a window of its own, like Backstory ([Notes](docs/PAK-SDK.md#notes)). Write it in Swift with the `BitampPakSDK` library in this package, or in any language. [Writing an Expansion Pak](docs/PAK-SDK.md) has everything, including a complete Pak in a few dozen lines of Python, and `Bitamp --check-pak` tries a Pak and tells you what to fix.
 
 ## Backstory
 

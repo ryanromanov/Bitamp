@@ -1,6 +1,6 @@
 # Expansion Paks
 
-Optional add-ons that bring other music sources into Bitamp: Apple Music first, then servers such as Navidrome or Jellyfin, and maybe Spotify. The name comes from the N64's add-on slots. Together they are **Expansion Paks**; each one is a **Pak** ("Apple Music Pak"). In code they are `Pak`.
+Optional add-ons that bring other music sources into Bitamp: Apple Music first, then servers such as Navidrome or Jellyfin, and maybe Spotify. Companion Paks bring no music and tell you about the song that's playing instead: Backstory comes built in, and third-party Paks can write notes too (see Backstory below). The name comes from the N64's add-on slots. Together they are **Expansion Paks**; each one is a **Pak** ("Apple Music Pak"). In code they are `Pak`.
 
 ## Two kinds of source
 1. **Stream Paks** turn a track into a URL or cached file that `PlayerEngine` plays as usual. The EQ, visualizer and Retro Sound all work. Fits Subsonic/Navidrome, Jellyfin, Plex and internet radio.
@@ -19,7 +19,7 @@ Optional add-ons that bring other music sources into Bitamp: Apple Music first, 
 
 ## Packaging
 - **Built-in Paks** are separate SwiftPM targets that depend only on `BitampPakKit` (`BitampAppleMusicPak`). The app registers them at launch, inserted. Apple Music has to be built in: MusicKit access is tied to the signed app's bundle ID (`com.ryanromanov.Bitamp`) and team.
-- **Third-party Paks** (later) run as separate processes: a `.bitpak` bundle containing a helper executable that talks to Bitamp over JSON on stdin/stdout, installed into `~/Library/Application Support/Bitamp/Paks`. Running them in-process would mean turning off library validation in the hardened runtime and tying every Pak to Bitamp's Swift build. A separate process avoids both, survives a Pak crashing, and can be written in any language. Most third-party Paks are stream Paks, so the protocol can mostly return URLs plus metadata.
+- **Third-party Paks** (since 0.4.0) run as separate processes: a `.bitpak` bundle containing a helper executable that talks to Bitamp over JSON on stdin/stdout, installed into `~/Library/Application Support/Bitamp/Paks`. Running them in-process would mean turning off library validation in the hardened runtime and tying every Pak to Bitamp's Swift build. A separate process avoids both, survives a Pak crashing, and can be written in any language. Most third-party Paks are stream Paks, so the protocol can mostly return URLs plus metadata. They can also be browsed (protocol 1, 0.11.0) or write notes as companions (protocol 2, 0.12.0); see Media Library and Backstory below.
 
 ## Apple Music
 - `ApplicationMusicPlayer` is in the macOS 14 SDK, but forum reports say playback may not work on macOS, especially outside the Mac App Store. The spike (`spikes/musickit`) tests this.
