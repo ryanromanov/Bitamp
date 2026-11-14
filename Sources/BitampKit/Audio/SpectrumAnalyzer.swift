@@ -21,6 +21,10 @@ final class SpectrumAnalyzer: @unchecked Sendable {
     private var wave = [Float](repeating: 0, count: waveformCount)
     private var updatedAt: TimeInterval = 0
     private var bands: [Range<Int>]
+    /// Sudden rises in the sound since the visualizer last asked, and the log spectrum they're
+    /// measured against.
+    private var onsets: [Onset] = []
+    private var previousLogSpectrum = [Float](repeating: 0, count: fftSize / 2)
 
     // Tap thread only.
     private var history = [Float](repeating: 0, count: fftSize)
@@ -102,8 +106,9 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         return min(max((decibels + 60) / 54, 0), 1)
     }
 
-    /// Called from the audio tap.
-    func process(_ buffer: AVAudioPCMBuffer) {
+    /// Called from the audio tap. `time` says when the sound was heard, on the system's uptime
+    /// clock, for the onsets; now, if left out.
+    func process(_ buffer: AVAudioPCMBuffer, at time: TimeInterval? = nil) {
         guard let channels = buffer.floatChannelData else { return }
         let frames = Int(buffer.frameLength)
         let channelCount = Int(buffer.format.channelCount)
@@ -148,6 +153,29 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         }
         power[0] = 0  // Bin 0 packs DC and Nyquist together.
 
+        // How much the sound just changed: the rise in log magnitude (spectral flux), counted
+        // twice over: across the low end (40-220 Hz, where a kick drum or a bass note begins),
+        // weighted by 3, and across everything from 50 Hz to 6 kHz, weighted by 1. A drum puts a
+        // lot into a few low bins; a piano puts a little into many bins, so the low end
+        // is what tells them apart. The visualizer's beat tracker works out which of these onsets
+        // is the beat.
+        let binWidth = sampleRate / Double(n)
+        let lowest = max(1, Int(40 / binWidth)), bassTop = max(lowest + 1, Int(220 / binWidth))
+        let high = min(n / 2 - 1, Int(6000 / binWidth))
+        var allRise: Float = 0, bassRise: Float = 0
+        if high > bassTop {
+            for k in lowest..<high {
+                let magnitude = power[k].squareRoot() * 2 / Float(n)
+                let logMagnitude = log(1 + 300 * magnitude)
+                let rise = max(0, logMagnitude - previousLogSpectrum[k])
+                previousLogSpectrum[k] = logMagnitude
+                if k < bassTop { bassRise += rise }
+                if k >= max(1, Int(50 / binWidth)) { allRise += rise }
+            }
+        }
+        let flux = 3 * bassRise / Float(max(1, bassTop - lowest)) + allRise / Float(max(1, high - max(1, Int(50 / binWidth))))
+        let onsetTime = time ?? ProcessInfo.processInfo.systemUptime
+
         lock.lock()
         let bands = self.bands
         lock.unlock()
@@ -162,8 +190,19 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         lock.lock()
         target = levels
         wave = newWave
+        onsets.append(Onset(time: onsetTime, strength: flux))
+        if onsets.count > 400 { onsets.removeFirst(onsets.count - 400) }
         updatedAt = ProcessInfo.processInfo.systemUptime
         lock.unlock()
+    }
+
+    /// The sudden rises in the sound since the last call, oldest first.
+    func drainOnsets() -> [Onset] {
+        lock.lock()
+        defer { lock.unlock() }
+        let drained = onsets
+        onsets.removeAll(keepingCapacity: true)
+        return drained
     }
 
     /// Moves the displayed bars and peaks one frame toward the latest data.

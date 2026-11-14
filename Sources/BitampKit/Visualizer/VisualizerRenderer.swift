@@ -47,12 +47,12 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
 
     private var start = CACurrentMediaTime()
     private var uniforms = Uniforms()
-    private var detector = BeatDetector()
+    private var tracker = BeatTracker()
     private var shootingStarStart: TimeInterval = -.infinity
     private static let shootingStarDuration: TimeInterval = 0.28
-    /// A shooting star needs a beat this many times the least that counts, and this long since
-    /// the last one.
-    private static let strongBeat: Float = 3
+    /// A shooting star needs a beat this many times as hard as beats have been lately, and
+    /// this long since the last one.
+    private static let strongBeat: Float = 1.6
     private static let shootingStarGap: TimeInterval = 20
     private var lastUpdate = CACurrentMediaTime()
     /// The last stretch of the analyzer, by how far the ship has travelled, for the star
@@ -297,7 +297,8 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         func average(_ range: Range<Int>) -> Float { range.map { bars[$0] }.reduce(0, +) / Float(range.count) }
         let bass = average(0..<4), mid = average(4..<12), treble = average(12..<SpectrumAnalyzer.barCount)
         let now = CACurrentMediaTime()
-        if let strength = detector.update(bars: bars, at: now) {
+        tracker.add(analyzer.drainOnsets())
+        if let strength = tracker.update(now: now) {
             uniforms.beat = 1
             // A strong beat, not too soon after the last shooting star, sends another.
             if strength >= Self.strongBeat, now - shootingStarStart >= Self.shootingStarGap {
