@@ -293,7 +293,7 @@ enum VisualizerShaders {
         float2 res = u.resolution;
         float2 px = floor(in.uv * res);
         float t = u.time;
-        float2 vanishing = floor(res * 0.5) + float2(floor(sin(t * 0.2) * res.x * 0.05), floor(cos(t * 0.15) * res.y * 0.05));
+        float2 vanishing = floor(res * 0.5);
         float scale = res.y * 0.9;
         float3 color = palette[0].rgb;
 
