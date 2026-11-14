@@ -47,17 +47,12 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
 
     private var start = CACurrentMediaTime()
     private var uniforms = Uniforms()
-    private var tracker = BeatTracker()
-    /// Set BITAMP_BEAT_LOG=1 to have what the beat tracker sees printed once a second.
-    private let logsBeats = ProcessInfo.processInfo.environment["BITAMP_BEAT_LOG"] != nil
-    private var lastLog = CACurrentMediaTime()
-    private var loggedOnsets = 0, loggedBeats = 0
-    private var loggedSum: Float = 0, loggedMax: Float = 0
+    private var detector = BeatDetector()
     private var shootingStarStart: TimeInterval = -.infinity
     private static let shootingStarDuration: TimeInterval = 0.28
-    /// A shooting star needs a beat this many times as hard as beats have been lately, and
-    /// this long since the last one.
-    private static let strongBeat: Float = 1.6
+    /// A shooting star needs a beat this many times the least that counts, and this long since
+    /// the last one.
+    private static let strongBeat: Float = 3
     private static let shootingStarGap: TimeInterval = 20
     private var lastUpdate = CACurrentMediaTime()
     /// The last stretch of the analyzer, by how far the ship has travelled, for the star
@@ -302,23 +297,7 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         func average(_ range: Range<Int>) -> Float { range.map { bars[$0] }.reduce(0, +) / Float(range.count) }
         let bass = average(0..<4), mid = average(4..<12), treble = average(12..<SpectrumAnalyzer.barCount)
         let now = CACurrentMediaTime()
-        let onsets = analyzer.drainOnsets()
-        tracker.add(onsets)
-        let beat = tracker.update(now: now)
-        if logsBeats {
-            loggedOnsets += onsets.count
-            loggedSum += onsets.reduce(0) { $0 + $1.strength }
-            loggedMax = max(loggedMax, onsets.map(\.strength).max() ?? 0)
-            if beat != nil { loggedBeats += 1 }
-            if now - lastLog >= 1 {
-                let period = tracker.period.map { String(format: "%.3f s (%.0f BPM)", $0, 60 / $0) } ?? "none"
-                let line = String(format: "beat: %d onsets, mean %.3f, max %.3f; confidence %.2f, period %@; %d beats this second\n",
-                                  loggedOnsets, loggedSum / Float(max(1, loggedOnsets)), loggedMax, tracker.confidence, period, loggedBeats)
-                FileHandle.standardError.write(Data(line.utf8))
-                lastLog = now; loggedOnsets = 0; loggedBeats = 0; loggedSum = 0; loggedMax = 0
-            }
-        }
-        if let strength = beat {
+        if let strength = detector.update(bars: bars, at: now) {
             uniforms.beat = 1
             // A strong beat, not too soon after the last shooting star, sends another.
             if strength >= Self.strongBeat, now - shootingStarStart >= Self.shootingStarGap {
