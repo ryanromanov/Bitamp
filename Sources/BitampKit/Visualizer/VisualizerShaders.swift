@@ -59,6 +59,7 @@ enum VisualizerShaders {
         float shoot;
         float shootSeed;
         float starCount;
+        float ring;
     };
 
     struct VertexOut {
@@ -230,10 +231,11 @@ enum VisualizerShaders {
         float r = length(pixelCenter - vanishing);
         float glow = (0.04 + 0.3 * u.bass + 0.4 * u.beat) * exp(-r * r / (res.y * res.y * 0.0125));
         if (glow > dither4(px)) color = ramp(palette, 0.2);
-        // The shockwave, a checkered ring that runs out from the middle on every beat.
-        if (u.beat > 0.04) {
-            float ring = (1.0 - u.beat) * res.y * 0.9;
-            if (abs(r - ring) < 0.8 && ((int(px.x) + int(px.y)) & 1) == 0) color = ramp(palette, 0.6);
+        // The shockwave, a checkered ring that runs out from the middle. It's sent only by a
+        // hard beat, not every one (see the renderer), or it's too much.
+        if (u.ring >= 0.0) {
+            float radius = u.ring * res.y * 0.9;
+            if (abs(r - radius) < 0.8 && ((int(px.x) + int(px.y)) & 1) == 0) color = ramp(palette, 0.6);
         }
 
         int count = int(u.starCount);

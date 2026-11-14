@@ -30,6 +30,8 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         var shootSeed: Float = 0
         /// How many entries of the star buffer to draw.
         var starCount: Float = 0
+        /// How far Solar Sailing's shockwave has run, 0 to 1, or -1 when there isn't one.
+        var ring: Float = -1
     }
 
     private let analyzer: SpectrumAnalyzer
@@ -54,6 +56,12 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
     /// the last one.
     private static let strongBeat: Float = 3
     private static let shootingStarGap: TimeInterval = 20
+    /// Solar Sailing's shockwave ring: sent by a beat this hard, at most this often, and
+    /// taking this long to run out.
+    private static let ringBeat: Float = 2
+    private static let ringGap: TimeInterval = 4
+    private static let ringDuration: TimeInterval = 0.8
+    private var ringStart: TimeInterval = -.infinity
     private var lastUpdate = CACurrentMediaTime()
     /// The last stretch of the analyzer, by how far the ship has travelled, for the star
     /// visuals: `historyBuckets` buckets of 0.01 travel for each of the 19 bands, as a ring.
@@ -254,6 +262,7 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
             uniforms.travel = Float(travel)
             // The first look at a loud analyzer is always a beat; a picture wants only the star it asked for.
             uniforms.shoot = shootingStar ?? -1
+            uniforms.ring = -1
             uniforms.shootSeed = 0.4
             encode(into: buffer, target: texture)
             buffer.commit()
@@ -300,6 +309,7 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         if let strength = detector.update(bars: bars, at: now) {
             uniforms.beat = 1
             // A strong beat, not too soon after the last shooting star, sends another.
+            if strength >= Self.ringBeat, now - ringStart >= Self.ringGap { ringStart = now }
             if strength >= Self.strongBeat, now - shootingStarStart >= Self.shootingStarGap {
                 shootingStarStart = now
                 uniforms.shootSeed = Float.random(in: 0..<1)
@@ -307,6 +317,8 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         } else {
             uniforms.beat *= 0.9
         }
+        let ringProgress = (now - ringStart) / Self.ringDuration
+        uniforms.ring = ringProgress >= 0 && ringProgress <= 1 ? Float(ringProgress) : -1
         let shot = (now - shootingStarStart) / Self.shootingStarDuration
         uniforms.shoot = shot >= 0 && shot <= 1 ? Float(shot) : -1
         travel += min(now - lastUpdate, 0.05) * Double(0.12 + 0.5 * (bass + mid + treble) / 3 + 0.3 * uniforms.beat)
