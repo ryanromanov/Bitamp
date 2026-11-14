@@ -47,7 +47,7 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
     private var uniforms = Uniforms()
     private var detector = BeatDetector()
     private var shootingStarStart: TimeInterval = -.infinity
-    private static let shootingStarDuration: TimeInterval = 0.9
+    private static let shootingStarDuration: TimeInterval = 0.28
     /// A shooting star needs a beat this many times the least that counts, and this long since
     /// the last one.
     private static let strongBeat: Float = 1.6
