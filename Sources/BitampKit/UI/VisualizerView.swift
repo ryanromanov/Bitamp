@@ -81,6 +81,7 @@ final class VisualizerView: SkinnedView {
 
     override func skinDidChange() {
         super.skinDidChange()
+        renderer?.setPalette(skin.visColors)
         needsLayout = true
     }
 
@@ -112,6 +113,8 @@ final class VisualizerView: SkinnedView {
         controller.visualizerWindowOpen = showing
         if showing { ensureMetal() }
         metal?.isPaused = !showing
+        // One picture pixel to a skin pixel, so it matches the player; full screen picks its own.
+        renderer?.pixelDivisor = fullScreen == nil ? max(1, Int((scale * (window?.backingScaleFactor ?? 2)).rounded())) : nil
         if showing, let renderer, let chosen = FullVisual(rawValue: preferences.fullVisual), chosen != renderer.visual {
             renderer.select(chosen)
         }
@@ -129,6 +132,7 @@ final class VisualizerView: SkinnedView {
             flashMessage?("THE VISUALIZER NEEDS METAL")
             return
         }
+        renderer.setPalette(skin.visColors)
         if let chosen = FullVisual(rawValue: preferences.fullVisual) { renderer.select(chosen) }
         view.onFullScreen = { [weak self] in self?.toggleFullScreen() }
         self.renderer = renderer
