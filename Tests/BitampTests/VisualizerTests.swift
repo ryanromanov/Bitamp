@@ -54,7 +54,7 @@ import Testing
         let loud = SpectrumAnalyzer()
         playing(loud)
         let quiet = SpectrumAnalyzer()
-        for visual in [FullVisual.starspray, .solarSailing, .starfield] {
+        for visual in [FullVisual.solarSailing, .starfield] {
             let busy = try #require(VisualizerRenderer(view: view, analyzer: loud))
             let still = try #require(VisualizerRenderer(view: view, analyzer: quiet))
             for renderer in [busy, still] {

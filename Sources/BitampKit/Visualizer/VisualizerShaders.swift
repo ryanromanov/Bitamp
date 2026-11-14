@@ -1,12 +1,11 @@
 /// The full-window visualizer's visuals. The raw value is what's saved in preferences.
 enum FullVisual: String, CaseIterable {
-    case barsAndWaves, plasma, starspray, solarSailing, starfield, alchemy
+    case barsAndWaves, plasma, solarSailing, starfield, alchemy
 
     var title: String {
         switch self {
         case .barsAndWaves: return "Bars and Waves"
         case .plasma: return "Plasma"
-        case .starspray: return "Starspray"
         case .solarSailing: return "Solar Sailing"
         case .starfield: return "Starfield"
         case .alchemy: return "Alchemy"
@@ -14,7 +13,7 @@ enum FullVisual: String, CaseIterable {
     }
 
     /// How many levels per colour channel the picture is reduced to, with an ordered dither,
-    /// or 0 to leave the colours as drawn. Bars and Waves, Plasma, Starspray, Solar Sailing and Starfield use the skin's
+    /// or 0 to leave the colours as drawn. Bars and Waves, Plasma, Solar Sailing and Starfield use the skin's
     /// own palette as it is; Alchemy's fading trails get the dither.
     var ditherLevels: Float {
         self == .alchemy ? 6 : 0
@@ -25,7 +24,6 @@ enum FullVisual: String, CaseIterable {
         switch self {
         case .barsAndWaves: return "bars_and_waves"
         case .plasma: return "plasma"
-        case .starspray: return "starspray"
         case .solarSailing: return "solar_sailing"
         case .starfield: return "starfield"
         case .alchemy: return nil
@@ -186,7 +184,7 @@ enum VisualizerShaders {
         return float4(ramp(palette, color), 1);
     }
 
-    // MARK: Starspray and Solar Sailing
+    // MARK: Solar Sailing
 
     // Streaking through the stars. The vanishing point wanders and the whole sky rolls; the
     // streaks lengthen with the music and the beat sends out a checkered shockwave and
@@ -199,8 +197,7 @@ enum VisualizerShaders {
     // rho over depth, so far stars are small, dim and nearly still, and speed up and
     // brighten as they come close. Streaks are how far it moved in a moment, so they're
     // short far away and long near the edge. `rhoMin` and `rhoSpan` say how far to the side
-    // the stars can be: Solar Sailing has them well spread; Starspray keeps them closer to
-    // the middle, so the streaks gather there more.
+    // the stars can be.
     static float4 streak_sky(float2 uv,
                              constant Uniforms &u,
                              constant float *bars,
@@ -228,14 +225,16 @@ enum VisualizerShaders {
 
         float k = res.y * 0.1;
         float lag = 0.02 + 0.05 * u.energy + 0.05 * u.beat;
-        for (int i = 0; i < 240; i++) {
+        // The first 170 are the streaks; the rest are far, slow, dim stars with no streak.
+        for (int i = 0; i < 420; i++) {
             float fi = float(i);
             bool dust = i >= 170;
             int band = min(int(hash(fi + 41.0) * 19.0), 18);
             float level = bars[band];
             float angle = hash(fi + 1.0) * 6.2831853 + roll;
             float2 direction = float2(cos(angle), sin(angle));
-            float rho = rhoMin + rhoSpan * hash(fi + 3.0);
+            // The far stars are spread much wider, so they fill the sky and not just the middle.
+            float rho = dust ? 0.6 + 5.4 * hash(fi + 3.0) : rhoMin + rhoSpan * hash(fi + 3.0);
             float speed = dust ? 0.15 : 0.5 + 0.8 * hash(fi + 13.0);
             float phase = hash(fi + 29.0);
             float x = phase - u.travel * speed;
@@ -276,16 +275,6 @@ enum VisualizerShaders {
                                   constant float *peaks [[buffer(4)]],
                                   constant float *history [[buffer(5)]]) {
         return streak_sky(in.uv, u, bars, palette, history, 0.2, 0.8);
-    }
-
-    fragment float4 starspray(VertexOut in [[stage_in]],
-                              constant Uniforms &u [[buffer(0)]],
-                              constant float *bars [[buffer(1)]],
-                              constant float *wave [[buffer(2)]],
-                              constant float4 *palette [[buffer(3)]],
-                              constant float *peaks [[buffer(4)]],
-                              constant float *history [[buffer(5)]]) {
-        return streak_sky(in.uv, u, bars, palette, history, 0.06, 0.35);
     }
 
     // MARK: Starfield
