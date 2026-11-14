@@ -68,6 +68,25 @@ import Testing
         }
     }
 
+    @Test func aShootingStarCrossesTheStarfield() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let view = MTKView(frame: NSRect(x: 0, y: 0, width: 320, height: 200), device: device)
+        let analyzer = SpectrumAnalyzer()
+        playing(analyzer)
+        let renderer = try #require(VisualizerRenderer(view: view, analyzer: analyzer))
+        renderer.setPalette(DefaultSkin().visColors)
+        renderer.pixelDivisor = 2
+        renderer.select(.starfield)
+        let without = litPixels(try #require(renderer.snapshot(width: 640, height: 400, frames: 5)))
+        let with = litPixels(try #require(renderer.snapshot(width: 640, height: 400, frames: 5, shootingStar: 0.5)))
+        if let folder = ProcessInfo.processInfo.environment["BITAMP_VISUALIZER_OUT"],
+           let image = renderer.snapshot(width: 640, height: 400, frames: 5, shootingStar: 0.5) {
+            try NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?
+                .write(to: URL(fileURLWithPath: folder).appendingPathComponent("shooting.png"))
+        }
+        #expect(with > without, "\(with) lit pixels with a shooting star, \(without) without")
+    }
+
     @Test func everyVisualDrawsAndFollowsTheAudio() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { return }
         let silent = SpectrumAnalyzer()
