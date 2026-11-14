@@ -106,36 +106,11 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         return min(max((decibels + 60) / 54, 0), 1)
     }
 
-    /// Called from the audio tap. `time` says when the sound was heard, on the system's uptime
-    /// clock, for the onsets; now, if left out.
-    func process(_ buffer: AVAudioPCMBuffer, at time: TimeInterval? = nil) {
-        guard let channels = buffer.floatChannelData else { return }
-        let frames = Int(buffer.frameLength)
-        let channelCount = Int(buffer.format.channelCount)
-        guard frames > 0, channelCount > 0 else { return }
-
+    /// The power spectrum of one window of `fftSize` samples.
+    private func powerSpectrum(of samples: ArraySlice<Float>) -> [Float] {
         let n = Self.fftSize
-        let take = min(frames, n)
-        var mono = [Float](repeating: 0, count: take)
-        for channel in 0..<channelCount {
-            let samples = channels[channel] + (frames - take)
-            for i in 0..<take { mono[i] += samples[i] }
-        }
-        let gain = 1 / Float(channelCount)
-        for i in 0..<take { mono[i] *= gain }
-        if take == n {
-            history = mono
-        } else {
-            history.removeFirst(take)
-            history.append(contentsOf: mono)
-        }
-
-        // The oscilloscope shows the most recent 512 samples.
-        let span = 512
-        let newWave = (0..<Self.waveformCount).map { history[n - span + $0 * span / Self.waveformCount] }
-
         var windowed = [Float](repeating: 0, count: n)
-        vDSP_vmul(history, 1, window, 1, &windowed, 1, vDSP_Length(n))
+        samples.withUnsafeBufferPointer { vDSP_vmul($0.baseAddress!, 1, window, 1, &windowed, 1, vDSP_Length(n)) }
         var real = [Float](repeating: 0, count: n / 2)
         var imaginary = [Float](repeating: 0, count: n / 2)
         var power = [Float](repeating: 0, count: n / 2)
@@ -152,29 +127,70 @@ final class SpectrumAnalyzer: @unchecked Sendable {
             }
         }
         power[0] = 0  // Bin 0 packs DC and Nyquist together.
+        return power
+    }
 
-        // How much the sound just changed: the rise in log magnitude (spectral flux), counted
-        // twice over: across the low end (40-220 Hz, where a kick drum or a bass note begins),
-        // weighted by 3, and across everything from 50 Hz to 6 kHz, weighted by 1. A drum puts a
-        // lot into a few low bins; a piano puts a little into many bins, so the low end
-        // is what tells them apart. The visualizer's beat tracker works out which of these onsets
-        // is the beat.
+    /// How much the sound just changed in `power`, since the last one given: the rise in log
+    /// magnitude (spectral flux), counted twice over: across the low end (40-220 Hz, where a
+    /// kick drum or a bass note begins), weighted by 3, and across everything from 50 Hz to
+    /// 6 kHz, weighted by 1. A drum puts a lot into a few low bins; a piano puts a little into
+    /// many bins, so the low end is what tells them apart. The visualizer's beat tracker works
+    /// out which of these onsets is the beat.
+    private func flux(of power: [Float]) -> Float {
+        let n = Self.fftSize
         let binWidth = sampleRate / Double(n)
         let lowest = max(1, Int(40 / binWidth)), bassTop = max(lowest + 1, Int(220 / binWidth))
+        let broadFirst = max(1, Int(50 / binWidth))
         let high = min(n / 2 - 1, Int(6000 / binWidth))
+        guard high > bassTop else { return 0 }
         var allRise: Float = 0, bassRise: Float = 0
-        if high > bassTop {
-            for k in lowest..<high {
-                let magnitude = power[k].squareRoot() * 2 / Float(n)
-                let logMagnitude = log(1 + 300 * magnitude)
-                let rise = max(0, logMagnitude - previousLogSpectrum[k])
-                previousLogSpectrum[k] = logMagnitude
-                if k < bassTop { bassRise += rise }
-                if k >= max(1, Int(50 / binWidth)) { allRise += rise }
-            }
+        for k in lowest..<high {
+            let magnitude = power[k].squareRoot() * 2 / Float(n)
+            let logMagnitude = log(1 + 300 * magnitude)
+            let rise = max(0, logMagnitude - previousLogSpectrum[k])
+            previousLogSpectrum[k] = logMagnitude
+            if k < bassTop { bassRise += rise }
+            if k >= broadFirst { allRise += rise }
         }
-        let flux = 3 * bassRise / Float(max(1, bassTop - lowest)) + allRise / Float(max(1, high - max(1, Int(50 / binWidth))))
-        let onsetTime = time ?? ProcessInfo.processInfo.systemUptime
+        return 3 * bassRise / Float(max(1, bassTop - lowest)) + allRise / Float(max(1, high - broadFirst))
+    }
+
+    /// Called from the audio tap. `time` says when the end of the buffer was heard, on the
+    /// system's uptime clock, for the onsets; now, if left out.
+    func process(_ buffer: AVAudioPCMBuffer, at time: TimeInterval? = nil) {
+        guard let channels = buffer.floatChannelData else { return }
+        let frames = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+        guard frames > 0, channelCount > 0 else { return }
+
+        let n = Self.fftSize
+        var mono = [Float](repeating: 0, count: frames)
+        for channel in 0..<channelCount {
+            let samples = channels[channel]
+            for i in 0..<frames { mono[i] += samples[i] }
+        }
+        let gain = 1 / Float(channelCount)
+        for i in 0..<frames { mono[i] *= gain }
+        let stream = history + mono
+        history = Array(stream.suffix(n))
+
+        // The oscilloscope shows the most recent 512 samples.
+        let span = 512
+        let newWave = (0..<Self.waveformCount).map { history[n - span + $0 * span / Self.waveformCount] }
+
+        // The tap hands over a buffer at a time, often 100 ms of sound, which is too coarse to
+        // time a beat by: look at windows a half window apart (23 ms) along the whole buffer,
+        // each with its own time, and the last of them gives the bars.
+        let heard = time ?? ProcessInfo.processInfo.systemUptime
+        let hop = n / 2
+        var ends = Array(stride(from: n + hop, through: stream.count, by: hop))
+        if ends.last != stream.count { ends.append(stream.count) }
+        var found: [Onset] = []
+        var power: [Float] = []
+        for end in ends.suffix(16) {
+            power = powerSpectrum(of: stream[(end - n)..<end])
+            found.append(Onset(time: heard - Double(stream.count - end) / sampleRate, strength: flux(of: power)))
+        }
 
         lock.lock()
         let bands = self.bands
@@ -190,7 +206,7 @@ final class SpectrumAnalyzer: @unchecked Sendable {
         lock.lock()
         target = levels
         wave = newWave
-        onsets.append(Onset(time: onsetTime, strength: flux))
+        onsets.append(contentsOf: found)
         if onsets.count > 400 { onsets.removeFirst(onsets.count - 400) }
         updatedAt = ProcessInfo.processInfo.systemUptime
         lock.unlock()
