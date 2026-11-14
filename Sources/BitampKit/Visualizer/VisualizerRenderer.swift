@@ -50,8 +50,8 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
     private static let shootingStarDuration: TimeInterval = 0.28
     /// A shooting star needs a beat this many times the least that counts, and this long since
     /// the last one.
-    private static let strongBeat: Float = 2.2
-    private static let shootingStarGap: TimeInterval = 8
+    private static let strongBeat: Float = 3
+    private static let shootingStarGap: TimeInterval = 20
     private var lastUpdate = CACurrentMediaTime()
     /// The last stretch of the analyzer, by how far the ship has travelled, for the star
     /// visuals: `historyBuckets` buckets of 0.01 travel for each of the 19 bands, as a ring.
