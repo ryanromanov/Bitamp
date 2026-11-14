@@ -51,6 +51,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             NSSound.beep()
             mainView?.flash(message)
         }
+        controller.onProblem = { advice in
+            // After the current callback, so the alert doesn't stop the player mid-skip.
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = advice.title
+                alert.informativeText = advice.advice
+                alert.runModal()
+            }
+        }
         let equalizerView = EqualizerView(controller: controller, skin: skin, scale: preferences.scale)
         let playlistView = PlaylistView(controller: controller, preferences: preferences, skin: skin)
         playlistView.keyFallback = mainView
