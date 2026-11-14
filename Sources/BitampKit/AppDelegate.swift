@@ -9,6 +9,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The Backstory Pak, when this copy of Bitamp has a service for it.
     private let backstoryPak: BackstoryPak?
     private var backstoryView: BackstoryView?
+    private var visualizerWindow: VisualizerWindowController?
     /// Third-party notes Paks' windows, by Pak id.
     private var notesViews: [String: BackstoryView] = [:]
     private lazy var pakLibrary = PakLibrary()
@@ -595,6 +596,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         backstoryView?.window?.makeKeyAndOrderFront(nil)
     }
 
+    @objc private func toggleVisualizer(_ sender: Any?) {
+        if visualizerWindow == nil { visualizerWindow = VisualizerWindowController(analyzer: controller.engine.analyzer) }
+        visualizerWindow?.toggle()
+    }
+
     @objc private func toggleBackstory(_ sender: Any?) {
         windowGroup?.toggle(.backstory)
     }
@@ -659,10 +665,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let shadows = Menus.item("Window Shadows", #selector(toggleShadows(_:)))
         let raiseAll = Menus.item("Bring All Windows Forward", #selector(toggleRaiseAllWindows(_:)))
         let backstory = backstoryPak.map { _ in Menus.item("Backstory", #selector(toggleBackstory(_:)), "b", [.option]) }
-        for item in [mainWindow, equalizer, playlist, paksWindow, library, regroup, minimize, equalizerShade, playlistShade, libraryShade, shadows, raiseAll]
+        let visualizer = Menus.item("Visualizer", #selector(toggleVisualizer(_:)), "v", [.option])
+        for item in [visualizer, mainWindow, equalizer, playlist, paksWindow, library, regroup, minimize, equalizerShade, playlistShade, libraryShade, shadows, raiseAll]
             + [backstory].compactMap({ $0 }) { item.target = self }
         let windowMenu = Menus.menu("Window", [
-            mainWindow, equalizer, playlist, paksWindow, library] + [backstory].compactMap { $0 } + [regroup, .separator(),
+            mainWindow, equalizer, playlist, paksWindow, library] + [backstory].compactMap { $0 } + [visualizer, regroup, .separator(),
             mainShade, equalizerShade, playlistShade, libraryShade, .separator(),
             Menus.submenu(Menus.menu("Size", sizes)), shadows, raiseAll, .separator(),
             minimize, cycle, cycleBack,
@@ -699,6 +706,7 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(togglePlaylist(_:)): item.state = windowGroup?.isVisible(.playlist) == true ? .on : .off
         case #selector(togglePaks(_:)): item.state = windowGroup?.isVisible(.paks) == true ? .on : .off
         case #selector(toggleLibrary(_:)): item.state = windowGroup?.isVisible(.library) == true ? .on : .off
+        case #selector(toggleVisualizer(_:)): item.state = visualizerWindow?.isVisible == true ? .on : .off
         case #selector(toggleBackstory(_:)): item.state = windowGroup?.isVisible(.backstory) == true ? .on : .off
         case #selector(toggleNotesWindow(_:)):
             item.state = (item.representedObject as? String).map { windowGroup?.isVisible(.pak($0)) == true } == true ? .on : .off
