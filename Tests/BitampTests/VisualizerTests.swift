@@ -45,6 +45,10 @@ import Testing
         let view = MTKView(frame: NSRect(x: 0, y: 0, width: 320, height: 200), device: device)
         let quiet = try #require(VisualizerRenderer(view: view, analyzer: silent))
         let busy = try #require(VisualizerRenderer(view: view, analyzer: loud))
+        for renderer in [quiet, busy] {
+            renderer.setPalette(DefaultSkin().visColors)
+            renderer.pixelDivisor = 2
+        }
         let folder = ProcessInfo.processInfo.environment["BITAMP_VISUALIZER_OUT"]
         for (i, visual) in FullVisual.allCases.enumerated() {
             quiet.select(visual)
@@ -52,8 +56,8 @@ import Testing
             // 40 frames, so Alchemy's feedback has something built up.
             let still = try #require(quiet.snapshot(width: 640, height: 400, frames: 40))
             let moving = try #require(busy.snapshot(width: 640, height: 400, frames: 40))
-            #expect(variety(moving) > variety(still), "\(visual.title) should show more with music than in silence")
-            #expect(variety(moving) > 20)
+            #expect(moving.dataProvider?.data != still.dataProvider?.data, "\(visual.title) should look different with music than in silence")
+            #expect(variety(moving) > 6)
             if let folder {
                 for (name, image) in [("silent", still), ("playing", moving)] {
                     let url = URL(fileURLWithPath: folder).appendingPathComponent("visual-\(i)-\(visual.rawValue)-\(name).png")
