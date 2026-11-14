@@ -58,8 +58,8 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
     private static let shootingStarGap: TimeInterval = 20
     /// Solar Sailing's shockwave ring: sent by a beat this hard, at most this often, and
     /// taking this long to run out.
-    private static let ringBeat: Float = 2
-    private static let ringGap: TimeInterval = 4
+    private static let ringBeat: Float = 2.4
+    private static let ringGap: TimeInterval = 8
     private static let ringDuration: TimeInterval = 0.8
     private var ringStart: TimeInterval = -.infinity
     private var lastUpdate = CACurrentMediaTime()
