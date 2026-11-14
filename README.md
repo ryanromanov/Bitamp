@@ -25,6 +25,7 @@ Bitamp isn't affiliated with or endorsed by Winamp or Nullsoft. Its default skin
 - Spectrum and oscilloscope visualizer, shuffle and repeat, `.m3u` playlists
 - Retro Sound (Playback ▸ Retro Sound, or T): an 8-bit crush that plays the song as 8-bit samples, or an experimental chiptune cover that transcribes the song, follows the sung melody for the lead, and plays it on pulse, triangle and noise voices, with some of the original mixed in if you like
 - [Expansion Paks](#expansion-paks): other music sources in Bitamp's playlist, browsed in a skinned Media Library with album art, or notes about the song that's playing, like Backstory. Apple Music comes built in, and anyone can write more
+- A full-window visualizer (Window ▸ Visualizer, ⌥V) in the spirit of Windows Media Player: Bars and Waves, Ambience, Battery and Alchemy, drawn with Metal; ← → change the visual, F or a double-click goes full screen
 - [Backstory](#backstory): short notes about the song that's playing, free from Apple's on-device model with nothing to set up, or with sources from Claude or OpenAI with your own key
 
 ## Expansion Paks

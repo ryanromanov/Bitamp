@@ -1,3 +1,27 @@
+/// The full-window visualizer's visuals. The raw value is what's saved in preferences.
+enum FullVisual: String, CaseIterable {
+    case barsAndWaves, ambience, battery, alchemy
+
+    var title: String {
+        switch self {
+        case .barsAndWaves: return "Bars and Waves"
+        case .ambience: return "Ambience"
+        case .battery: return "Battery"
+        case .alchemy: return "Alchemy"
+        }
+    }
+
+    /// The single fragment shader that draws it, or nil for one that feeds back on itself.
+    var shader: String? {
+        switch self {
+        case .barsAndWaves: return "bars_and_waves"
+        case .ambience: return "ambience"
+        case .battery: return "battery"
+        case .alchemy: return nil
+        }
+    }
+}
+
 /// Metal source for the full-window visualizer's visuals, compiled when the window first
 /// opens (`MTLDevice.makeLibrary(source:)`), so SwiftPM needs no .metal build step.
 ///
@@ -122,11 +146,74 @@ enum VisualizerShaders {
         color = 1.0 - exp(-color * 1.4);
         return float4(color, 1);
     }
-    """
 
-    /// Fragment function names in the order they are listed in the window.
-    static let visuals: [(name: String, function: String)] = [
-        ("Bars and Waves", "bars_and_waves"),
-        ("Ambience", "ambience"),
-    ]
+    // MARK: Battery
+
+    // A tunnel of rings and spokes rushing toward you, lit by the bars around the circle.
+    fragment float4 battery(VertexOut in [[stage_in]],
+                            constant Uniforms &u [[buffer(0)]],
+                            constant float *bars [[buffer(1)]],
+                            constant float *wave [[buffer(2)]]) {
+        float aspect = u.resolution.x / u.resolution.y;
+        float2 p = (in.uv - 0.5) * float2(aspect, 1.0);
+        float r = length(p);
+        float a = atan2(p.y, p.x);
+
+        float depth = 0.3 / (r + 0.03);
+        float z = depth - u.time * (0.9 + 0.6 * u.energy) - u.beat * 0.15;
+        float level = barLevel(bars, abs(a) / 3.14159265);
+
+        float band = abs(fract(z) - 0.5) * 2.0;
+        float ring = smoothstep(0.82, 1.0, band);
+        float spokeAngle = a / 6.2831853 * 14.0 + depth * 0.06 * sin(u.time * 0.4) + u.time * 0.05;
+        float spoke = smoothstep(0.88, 1.0, abs(sin(spokeAngle * 3.14159265)));
+
+        float3 tint = hsv(fract(0.02 * depth + u.time * 0.04 + level * 0.25), 0.8, 1.0);
+        float lit = (ring + 0.7 * spoke) * (0.25 + 1.3 * level + 0.5 * u.beat);
+        float fade = smoothstep(0.0, 0.18, r) * smoothstep(1.1, 0.4, r);
+        float3 color = tint * lit * fade;
+        color += hsv(0.6 + u.time * 0.03, 0.5, 1.0) * (0.015 / (r + 0.02)) * (0.4 + u.beat + u.bass);
+        color = 1.0 - exp(-color * 1.5);
+        return float4(color, 1);
+    }
+
+    // MARK: Alchemy
+
+    // One step of the feedback loop: the last frame, zoomed, turned and faded, with a
+    // ring drawn from the waveform on top.
+    fragment float4 alchemy_step(VertexOut in [[stage_in]],
+                                 constant Uniforms &u [[buffer(0)]],
+                                 constant float *bars [[buffer(1)]],
+                                 constant float *wave [[buffer(2)]],
+                                 texture2d<float> previous [[texture(0)]]) {
+        constexpr sampler smp(address::mirrored_repeat, filter::linear);
+        float aspect = u.resolution.x / u.resolution.y;
+        float2 p = (in.uv - 0.5) * float2(aspect, 1.0);
+
+        float zoom = 0.985 - 0.02 * u.bass - 0.03 * u.beat;
+        float angle = 0.012 * sin(u.time * 0.4) + 0.025 * (u.mid - 0.25);
+        float c = cos(angle), s = sin(angle);
+        float2 q = float2(c * p.x - s * p.y, s * p.x + c * p.y) * zoom;
+        q += 0.004 * float2(sin(p.y * 6.0 + u.time), cos(p.x * 6.0 - u.time));
+        float3 old = previous.sample(smp, q / float2(aspect, 1.0) + 0.5).rgb;
+        old = (old * 0.96 + old.gbr * 0.04) * 0.955;
+
+        float r = length(p);
+        float theta = atan2(p.y, p.x);
+        float m = abs(theta / 3.14159265);
+        float ring = 0.17 + 0.06 * u.bass;
+        float d = abs(r - ring - waveSample(wave, m) * 0.35);
+        float ink = 0.006 / (d + 0.006);
+        float3 tint = hsv(fract(u.time * 0.05 + m * 0.5), 0.8, 1.0);
+        float3 color = old + tint * ink * (0.25 + 0.6 * u.energy) * 0.35;
+        color += hsv(fract(u.time * 0.1 + 0.3), 0.6, 1.0) * u.beat * exp(-r * r * 18.0) * 0.25;
+        return float4(color, 1);
+    }
+
+    fragment float4 present(VertexOut in [[stage_in]], texture2d<float> image [[texture(0)]]) {
+        constexpr sampler smp(filter::linear);
+        float3 color = image.sample(smp, in.uv).rgb;
+        return float4(1.0 - exp(-color * 1.3), 1);
+    }
+    """
 }

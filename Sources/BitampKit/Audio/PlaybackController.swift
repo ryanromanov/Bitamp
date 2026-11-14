@@ -341,8 +341,12 @@ final class PlaybackController {
     }
 
     /// Listens to a Pak's own player while it plays and the visualizer is on. Called every frame.
+    /// Whether the full-window Visualizer is on screen, which needs Apple Music's sound
+    /// even when the main window's visualizer is off.
+    var visualizerWindowOpen = false
+
     func updateListener(visualizerOn: Bool) {
-        listener.update(listening: visualizerOn && player.state == .playing && !player.capabilities.contains(.visualizer))
+        listener.update(listening: (visualizerOn || visualizerWindowOpen) && player.state == .playing && !player.capabilities.contains(.visualizer))
     }
 
     /// Why a control does nothing for the current track, or nil when it works: a Pak

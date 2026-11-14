@@ -43,6 +43,9 @@ enum Menus {
             submenu(menu("Peak Falloff", Falloff.allCases.map {
                 choice($0.rawValue.capitalized, #selector(MainView.setPeakFalloff(_:)), $0)
             })),
+            submenu(menu("Visualizer Window", FullVisual.allCases.map {
+                choice($0.title, #selector(MainView.setFullVisual(_:)), $0)
+            })),
             submenu(menu("Oscilloscope Style", OscilloscopeStyle.allCases.map {
                 choice($0.rawValue.capitalized, #selector(MainView.setOscilloscopeStyle(_:)), $0)
             })),
