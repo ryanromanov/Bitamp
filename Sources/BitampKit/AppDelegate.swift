@@ -9,7 +9,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The Backstory Pak, when this copy of Bitamp has a service for it.
     private let backstoryPak: BackstoryPak?
     private var backstoryView: BackstoryView?
-    private var visualizerWindow: VisualizerWindowController?
     /// Third-party notes Paks' windows, by Pak id.
     private var notesViews: [String: BackstoryView] = [:]
     private lazy var pakLibrary = PakLibrary()
@@ -71,7 +70,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             if !inserted { self?.closeLibrary(showing: pak) }
         }
         mainView.onShowPaks = { [weak self] in self?.windowGroup?.setVisible(.paks, true) }
-        var extraViews: [SkinnedView] = [libraryView]
+        let visualizerView = VisualizerView(controller: controller, preferences: preferences, skin: skin, scale: preferences.scale)
+        visualizerView.keyFallback = mainView
+        var extraViews: [SkinnedView] = [libraryView, visualizerView]
         if let backstoryPak {
             let view = makeNotesView(backstoryPak, panel: .backstory, skin: skin)
             view.keyFallback = mainView
@@ -100,6 +101,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             .playlist: SkinnedWindow(view: playlistView, layoutName: "PlaylistWindow", isMain: false),
             .paks: SkinnedWindow(view: pakView, layoutName: "PaksWindow", isMain: false),
             .library: SkinnedWindow(view: libraryView, layoutName: "LibraryWindow", isMain: false),
+            .visualizer: SkinnedWindow(view: visualizerView, layoutName: "VisualizerWindow", isMain: false),
         ]
         if let backstoryView {
             panels[.backstory] = SkinnedWindow(view: backstoryView, layoutName: "BackstoryWindow", isMain: false)
@@ -597,8 +599,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleVisualizer(_ sender: Any?) {
-        if visualizerWindow == nil { visualizerWindow = VisualizerWindowController(analyzer: controller.engine.analyzer) }
-        visualizerWindow?.toggle()
+        windowGroup?.toggle(.visualizer)
     }
 
     @objc private func toggleBackstory(_ sender: Any?) {
@@ -706,7 +707,7 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(togglePlaylist(_:)): item.state = windowGroup?.isVisible(.playlist) == true ? .on : .off
         case #selector(togglePaks(_:)): item.state = windowGroup?.isVisible(.paks) == true ? .on : .off
         case #selector(toggleLibrary(_:)): item.state = windowGroup?.isVisible(.library) == true ? .on : .off
-        case #selector(toggleVisualizer(_:)): item.state = visualizerWindow?.isVisible == true ? .on : .off
+        case #selector(toggleVisualizer(_:)): item.state = windowGroup?.isVisible(.visualizer) == true ? .on : .off
         case #selector(toggleBackstory(_:)): item.state = windowGroup?.isVisible(.backstory) == true ? .on : .off
         case #selector(toggleNotesWindow(_:)):
             item.state = (item.representedObject as? String).map { windowGroup?.isVisible(.pak($0)) == true } == true ? .on : .off

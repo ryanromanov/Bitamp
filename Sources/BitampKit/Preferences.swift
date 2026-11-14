@@ -95,6 +95,12 @@ final class Preferences {
         set { defaults.set(newValue.rawValue, forKey: Key.visMode) }
     }
 
+    /// The full-window Visualizer's visual, a `FullVisual` raw value.
+    var fullVisual: String {
+        get { defaults.string(forKey: Key.fullVisual) ?? FullVisual.barsAndWaves.rawValue }
+        set { defaults.set(newValue, forKey: Key.fullVisual) }
+    }
+
     var showPeaks: Bool {
         get { defaults.bool(forKey: Key.showPeaks) }
         set { defaults.set(newValue, forKey: Key.showPeaks) }
@@ -184,6 +190,7 @@ final class Preferences {
         static let chipBlend = "chiptuneBlend"
         static let showRemaining = "showRemainingTime"
         static let visMode = "visualizerMode"
+        static let fullVisual = "fullVisualizerVisual"
         static let showPeaks = "visualizerPeaks"
         static let barFalloff = "visualizerBarFalloff"
         static let peakFalloff = "visualizerPeakFalloff"

@@ -850,6 +850,12 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         marquee.flash("ANALYZER FALLOFF: \(falloff.rawValue)", for: 1.5)
     }
 
+    @objc func setFullVisual(_ sender: NSMenuItem) {
+        guard let visual = choice(FullVisual.self, sender) else { return }
+        preferences.fullVisual = visual.rawValue
+        marquee.flash("VISUALIZER: \(visual.title.uppercased())", for: 1.5)
+    }
+
     @objc func setPeakFalloff(_ sender: NSMenuItem) {
         guard let falloff = choice(Falloff.self, sender) else { return }
         preferences.peakFalloff = falloff
@@ -899,6 +905,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         case #selector(togglePeaks(_:)): item.state = preferences.showPeaks ? .on : .off
         case #selector(setVisMode(_:)): item.state = selected == preferences.visMode.rawValue ? .on : .off
         case #selector(setBarFalloff(_:)): item.state = selected == preferences.barFalloff.rawValue ? .on : .off
+        case #selector(setFullVisual(_:)): item.state = selected == preferences.fullVisual ? .on : .off
         case #selector(setPeakFalloff(_:)): item.state = selected == preferences.peakFalloff.rawValue ? .on : .off
         case #selector(setOscilloscopeStyle(_:)):
             item.state = selected == preferences.oscilloscopeStyle.rawValue ? .on : .off

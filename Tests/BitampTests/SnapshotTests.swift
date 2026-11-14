@@ -46,6 +46,7 @@ struct SnapshotTests {
             let controller = controller()
             try save(MainView(controller: controller, preferences: preferences(), skin: skin), "\(name)-main")
             try save(EqualizerView(controller: controller, skin: skin, scale: 2), "\(name)-eq")
+            try save(VisualizerView(controller: controller, preferences: preferences(), skin: skin, scale: 2), "\(name)-visualizer")
             try save(PlaylistView(controller: controller, preferences: preferences(), skin: skin), "\(name)-playlist")
 
             // Expansion Paks: one playing, one ejected, one slot empty; and the main window's badge.
