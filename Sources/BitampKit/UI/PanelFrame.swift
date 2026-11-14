@@ -60,9 +60,6 @@ struct PanelFrame {
     /// The playlist's top and side tiles, and a closing strip from its bottom tile.
     private func drawPlaylistTiles(_ c: Canvas, closePressed: Bool) {
         let (w, h) = (Int(size.width), Int(size.height))
-        for x in stride(from: 0, to: w, by: 25) {
-            c.draw(skin.image(for: .playlistBottomTile), x, h - Self.bottom)
-        }
         for x in stride(from: 25, to: w - 25, by: 25) {
             c.draw(skin.image(for: .playlistTopTile(active: active)), x, 0)
         }
@@ -71,6 +68,12 @@ struct PanelFrame {
         for y in stride(from: Self.top, to: h - Self.bottom, by: Int(PlaylistLayout.heightStep)) {
             c.draw(skin.image(for: .playlistLeftTile), 0, y)
             c.draw(skin.image(for: .playlistRightTile), w - Self.rightTile, y)
+        }
+        // The bottom strip last: a side tile that runs past `bottom` (a window whose height
+        // isn't a whole number of tiles, such as the visualizer's) would otherwise be drawn
+        // over its ends, leaving the bar cut off where it meets the sides.
+        for x in stride(from: 0, to: w, by: 25) {
+            c.draw(skin.image(for: .playlistBottomTile), x, h - Self.bottom)
         }
         c.draw(skin.image(for: .playlistCloseButton(pressed: closePressed)), at: close.origin)
         drawTitle(c)
