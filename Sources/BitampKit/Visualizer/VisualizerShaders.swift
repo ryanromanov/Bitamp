@@ -1,19 +1,20 @@
 /// The full-window visualizer's visuals. The raw value is what's saved in preferences.
 enum FullVisual: String, CaseIterable {
-    case barsAndWaves, plasma, starspray, starfield, alchemy
+    case barsAndWaves, plasma, starspray, solarSailing, starfield, alchemy
 
     var title: String {
         switch self {
         case .barsAndWaves: return "Bars and Waves"
         case .plasma: return "Plasma"
         case .starspray: return "Starspray"
+        case .solarSailing: return "Solar Sailing"
         case .starfield: return "Starfield"
         case .alchemy: return "Alchemy"
         }
     }
 
     /// How many levels per colour channel the picture is reduced to, with an ordered dither,
-    /// or 0 to leave the colours as drawn. Bars and Waves, Plasma, Starspray and Starfield use the skin's
+    /// or 0 to leave the colours as drawn. Bars and Waves, Plasma, Starspray, Solar Sailing and Starfield use the skin's
     /// own palette as it is; Alchemy's fading trails get the dither.
     var ditherLevels: Float {
         self == .alchemy ? 6 : 0
@@ -25,6 +26,7 @@ enum FullVisual: String, CaseIterable {
         case .barsAndWaves: return "bars_and_waves"
         case .plasma: return "plasma"
         case .starspray: return "starspray"
+        case .solarSailing: return "solar_sailing"
         case .starfield: return "starfield"
         case .alchemy: return nil
         }
@@ -171,26 +173,32 @@ enum VisualizerShaders {
         return float4(ramp(palette, color), 1);
     }
 
-    // MARK: Starspray
+    // MARK: Starspray and Solar Sailing
 
-    // Streaking through the stars at warp speed. The vanishing point wanders and the whole
-    // sky rolls; the streaks lengthen with the music and the beat sends out a checkered
-    // shockwave and flashes the glow at the far end. Each star has a band of the
-    // analyzer of its own, chosen at random so the sky fills evenly, and takes its colour
-    // from how loud that band is.
-    fragment float4 starspray(VertexOut in [[stage_in]],
-                               constant Uniforms &u [[buffer(0)]],
-                               constant float *bars [[buffer(1)]],
-                               constant float *wave [[buffer(2)]],
-                               constant float4 *palette [[buffer(3)]],
-                               constant float *peaks [[buffer(4)]]) {
+    // Streaking through the stars. The vanishing point wanders and the whole sky rolls; the
+    // streaks lengthen with the music and the beat sends out a checkered shockwave and
+    // flashes the glow at the far end. Each star has a band of the analyzer of its own,
+    // chosen at random so the sky fills evenly, and takes its colour from how loud that band
+    // is. Stars never switch on and off with the music: that looked like flicker.
+    //
+    // Real perspective: a star sits off to the side of the ship's path by a fixed amount
+    // (rho) and is at some distance (depth, 1 far, 0 near). Where it shows on the screen is
+    // rho over depth, so far stars are small, dim and nearly still, and speed up and
+    // brighten as they come close. Streaks are how far it moved in a moment, so they're
+    // short far away and long near the edge. `rhoMin` and `rhoSpan` say how far to the side
+    // the stars can be: Solar Sailing has them well spread; Starspray keeps them closer to
+    // the middle, so the streaks gather there more.
+    static float4 streak_sky(float2 uv,
+                             constant Uniforms &u,
+                             constant float *bars,
+                             constant float4 *palette,
+                             float rhoMin, float rhoSpan) {
         float2 res = u.resolution;
-        float2 px = floor(in.uv * res);
+        float2 px = floor(uv * res);
         float2 pixelCenter = px + 0.5;
         float t = u.time;
         float2 vanishing = floor(res * 0.5) + 0.5
                          + float2(sin(t * 0.31) * res.x * 0.07, cos(t * 0.23) * res.y * 0.07);
-        float scale = res.y * 0.9;
         float roll = sin(t * 0.17) * 0.7 + u.travel * 0.04;
         float3 color = palette[0].rgb;
 
@@ -204,22 +212,15 @@ enum VisualizerShaders {
             if (abs(r - ring) < 0.8 && ((int(px.x) + int(px.y)) & 1) == 0) color = ramp(palette, 0.6);
         }
 
-        // Real perspective: a star sits off to the side of the ship's path by a fixed amount
-        // (rho) and is at some distance (depth, 1 far, 0 near). Where it shows on the screen
-        // is rho over depth, so far stars are small, dim and nearly still, and speed up and
-        // brighten as they come close. Streaks are how far it moved in a moment, so they're
-        // short far away and long near the edge.
         float k = res.y * 0.1;
         float lag = 0.02 + 0.05 * u.energy + 0.05 * u.beat;
-        for (int i = 0; i < 220; i++) {
+        for (int i = 0; i < 160; i++) {
             float fi = float(i);
-            bool dust = i >= 170;
-            int band = min(int(hash(fi + 41.0) * 19.0), 18);
-            float level = bars[band];
-            if (hash(fi + 77.0) > 0.3 + 0.7 * level) continue;
+            bool dust = i >= 120;
+            float level = bars[min(int(hash(fi + 41.0) * 19.0), 18)];
             float angle = hash(fi + 1.0) * 6.2831853 + roll;
             float2 direction = float2(cos(angle), sin(angle));
-            float rho = 0.2 + 0.8 * hash(fi + 3.0);
+            float rho = rhoMin + rhoSpan * hash(fi + 3.0);
             float speed = dust ? 0.15 : 0.5 + 0.8 * hash(fi + 13.0);
             float along = fract(hash(fi + 29.0) - u.travel * speed);
             float depth = 0.03 + 0.97 * pow(along, 1.5);
@@ -230,18 +231,39 @@ enum VisualizerShaders {
             float length2 = dot(trail, trail);
             float t01 = length2 > 0.0 ? clamp(dot(pixelCenter - tail, trail) / length2, 0.0, 1.0) : 1.0;
             float d = length(pixelCenter - (tail + trail * t01));
-            if (d < (depth < 0.3 ? 0.75 : 0.55)) {
+            // A star always lights the pixel it's in, so a far one that has hardly moved
+            // can't slip between pixels and wink out.
+            bool onHead = all(px == floor(head));
+            if (onHead || d < (depth < 0.3 ? 0.75 : 0.55)) {
                 if (depth > 0.6 || dust) {
                     color = ramp(palette, 0.05 + 0.25 * level);
-                } else if (depth < 0.18 && t01 > 0.8) {
+                } else if (depth < 0.18 && (t01 > 0.8 || onHead)) {
                     color = palette[23].rgb;
                 } else {
                     float brightness = clamp(0.15 + level * 0.9 + (0.6 - depth) * 0.5, 0.0, 1.0);
-                    color = ramp(palette, t01 > 0.8 ? brightness : brightness * 0.6);
+                    color = ramp(palette, (t01 > 0.8 || onHead) ? brightness : brightness * 0.6);
                 }
             }
         }
         return float4(color, 1);
+    }
+
+    fragment float4 solar_sailing(VertexOut in [[stage_in]],
+                                  constant Uniforms &u [[buffer(0)]],
+                                  constant float *bars [[buffer(1)]],
+                                  constant float *wave [[buffer(2)]],
+                                  constant float4 *palette [[buffer(3)]],
+                                  constant float *peaks [[buffer(4)]]) {
+        return streak_sky(in.uv, u, bars, palette, 0.2, 0.8);
+    }
+
+    fragment float4 starspray(VertexOut in [[stage_in]],
+                              constant Uniforms &u [[buffer(0)]],
+                              constant float *bars [[buffer(1)]],
+                              constant float *wave [[buffer(2)]],
+                              constant float4 *palette [[buffer(3)]],
+                              constant float *peaks [[buffer(4)]]) {
+        return streak_sky(in.uv, u, bars, palette, 0.1, 0.5);
     }
 
     // MARK: Starfield
@@ -270,11 +292,10 @@ enum VisualizerShaders {
             color = twinkle < 0.12 ? palette[23].rgb : ramp(palette, 0.06 + 0.1 * twinkle);
         }
 
-        for (int i = 0; i < 200; i++) {
+        for (int i = 0; i < 150; i++) {
             float fi = float(i);
             int band = min(int(hash(fi + 41.0) * 19.0), 18);
             float level = bars[band];
-            if (hash(fi + 77.0) > 0.4 + 0.6 * level) continue;
             float speed = 0.2 + 0.3 * hash(fi + 13.0);
             float z = fract(hash(fi + 29.0) - u.travel * speed);
             float angle = hash(fi + 1.0) * 6.2831853 + (1.0 - z) * 1.1 + u.travel * 0.02;
