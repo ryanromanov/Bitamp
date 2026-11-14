@@ -79,7 +79,7 @@ import Testing
         let (view, preferences, _) = panel()
         #expect(preferences.fullVisual == FullVisual.barsAndWaves.rawValue)
         view.step(1)
-        #expect(preferences.fullVisual == FullVisual.ambience.rawValue)
+        #expect(preferences.fullVisual == FullVisual.plasma.rawValue)
         view.step(-1)
         view.step(-1)
         #expect(preferences.fullVisual == FullVisual.alchemy.rawValue, "stepping back from the first wraps to the last")
