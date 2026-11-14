@@ -44,6 +44,12 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
     private var bassAverage: Float = 0
     private var sinceBeat = 0
     private var lastUpdate = CACurrentMediaTime()
+    /// The last stretch of the analyzer, by how far the ship has travelled, for the star
+    /// visuals: `historyBuckets` buckets of 0.01 travel for each of the 19 bands, as a ring.
+    /// A star asks how loud its band was when it was born.
+    private let history: MTLBuffer
+    private var lastBucket = 0
+    private static let historyBuckets = 1024
     private(set) var visual: FullVisual = .barsAndWaves
 
     /// How many screen pixels make one pixel of the picture. The panel sets this to match the
@@ -61,6 +67,10 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         self.device = device
         self.queue = queue
         format = view.colorPixelFormat
+        let historyBytes = SpectrumAnalyzer.barCount * Self.historyBuckets * MemoryLayout<Float>.stride
+        guard let history = device.makeBuffer(length: historyBytes, options: .storageModeShared) else { return nil }
+        memset(history.contents(), 0, historyBytes)
+        self.history = history
 
         func pipeline(_ name: String, _ pixelFormat: MTLPixelFormat) -> MTLRenderPipelineState? {
             guard let fragment = library.makeFunction(name: name) else { return nil }
@@ -149,6 +159,7 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
             encoder.setFragmentBytes(&wave, length: wave.count * MemoryLayout<Float>.stride, index: 2)
             encoder.setFragmentBytes(&palette, length: palette.count * MemoryLayout<SIMD4<Float>>.stride, index: 3)
             encoder.setFragmentBytes(&peaks, length: peaks.count * MemoryLayout<Float>.stride, index: 4)
+            encoder.setFragmentBuffer(history, offset: 0, index: 5)
             if let input { encoder.setFragmentTexture(input, index: 0) }
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             encoder.endEncoding()
@@ -194,6 +205,7 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         feedback = []
         scene = nil
         start = CACurrentMediaTime() - 5
+        fillHistory()
         for frame in 0..<frames {
             updateUniforms()
             uniforms.time = 5 + Float(frame) / 60
@@ -209,6 +221,29 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
             CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
                     space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: info, provider: $0, decode: nil,
                     shouldInterpolate: false, intent: .defaultIntent)
+        }
+    }
+
+    /// Writes the analyzer's levels for every bucket the ship has passed since the last frame.
+    private func recordHistory() {
+        let bars = analyzer.bars
+        let slots = Self.historyBuckets
+        let pointer = history.contents().bindMemory(to: Float.self, capacity: SpectrumAnalyzer.barCount * slots)
+        let bucket = Int((uniforms.travel * 100).rounded(.down))
+        let first = max(lastBucket + 1, bucket - slots + 1)
+        for b in min(first, bucket)...bucket {
+            for band in 0..<SpectrumAnalyzer.barCount { pointer[band * slots + (b & (slots - 1))] = bars[band] }
+        }
+        lastBucket = max(lastBucket, bucket)
+    }
+
+    /// Makes the whole history the analyzer's levels now, so a picture taken at once has stars.
+    private func fillHistory() {
+        let bars = analyzer.bars
+        let slots = Self.historyBuckets
+        let pointer = history.contents().bindMemory(to: Float.self, capacity: SpectrumAnalyzer.barCount * slots)
+        for band in 0..<SpectrumAnalyzer.barCount {
+            for b in 0..<slots { pointer[band * slots + b] = bars[band] }
         }
     }
 
@@ -233,5 +268,6 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         uniforms.mid = mid
         uniforms.treble = treble
         uniforms.energy = (bass + mid + treble) / 3
+        recordHistory()
     }
 }
