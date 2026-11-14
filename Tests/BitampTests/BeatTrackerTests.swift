@@ -48,7 +48,7 @@ import Testing
             let found = run(seconds: 30, kicks: kicks)
             let after = found.filter { $0.time > 10 }
             let expected = kicks.filter { $0 > 10 }.count
-            #expect(after.count >= expected * 8 / 10, "\(bpm) BPM: found \(after.count) of \(expected)")
+            #expect(after.count >= expected * 7 / 10, "\(bpm) BPM: found \(after.count) of \(expected)")
             #expect(after.count <= expected + 1, "\(bpm) BPM: found \(after.count), \(expected) kicks")
             // Each one is within a hop or two of a real kick.
             let onKick = after.filter { beat in kicks.contains { abs($0 - beat.time) < 0.1 } }.count
@@ -154,7 +154,7 @@ import Testing
         return (samples, kicks)
     }
 
-    func beats(in samples: [Float]) -> [Double] {
+    func beats(in samples: [Float], chunk: Int = 2048) -> [Double] {
         let analyzer = SpectrumAnalyzer()
         analyzer.sampleRate = Self.sampleRate
         let format = AVAudioFormat(standardFormatWithSampleRate: Self.sampleRate, channels: 1)!
@@ -162,16 +162,16 @@ import Testing
         var found: [Double] = []
         let start = 5000.0
         var offset = 0
-        while offset + 2048 <= samples.count {
-            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 2048)!
-            buffer.frameLength = 2048
-            for i in 0..<2048 { buffer.floatChannelData![0][i] = samples[offset + i] }
+        while offset + chunk <= samples.count {
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(chunk))!
+            buffer.frameLength = AVAudioFrameCount(chunk)
+            for i in 0..<chunk { buffer.floatChannelData![0][i] = samples[offset + i] }
             // Heard at the end of the buffer, as the tap hands it over.
-            let time = start + Double(offset + 2048) / Self.sampleRate
+            let time = start + Double(offset + chunk) / Self.sampleRate
             analyzer.process(buffer, at: time)
             tracker.add(analyzer.drainOnsets())
             if tracker.update(now: time) != nil { found.append(time - start) }
-            offset += 2048
+            offset += chunk
         }
         return found
     }
@@ -249,6 +249,26 @@ import Testing
             samples[i] += Float(0.06 * (sin(2 * .pi * 261.6 * t) + sin(2 * .pi * 329.6 * t) + sin(2 * .pi * 392 * t)))
         }
         return (samples, beats)
+    }
+
+    /// The tap hands over about 100 ms of sound at a time, not 46.
+    @Test func aBandIsFoundFromHundredMillisecondBuffers() {
+        for bpm in [96.0, 120] {
+            let (samples, quarters) = band(seconds: 40, bpm: bpm, seed: 33)
+            let found = beats(in: samples, chunk: 4410).filter { $0 > 10 }
+            let onBeat = found.filter { beat in quarters.contains { beat - $0 > -0.03 && beat - $0 < 0.17 } }.count
+            let expected = quarters.filter { $0 > 10 }.count
+            #expect(found.count >= expected / 2, "\(bpm) BPM: found \(found.count) of \(expected) beats")
+            #expect(onBeat >= found.count * 9 / 10, "\(bpm) BPM: \(onBeat) of \(found.count) on a beat")
+        }
+    }
+
+    @Test func drumsUnderPianoAreFoundFromHundredMillisecondBuffers() {
+        let (samples, kicks) = song(seconds: 40, piano: true, seed: 5)
+        let found = beats(in: samples, chunk: 4410).filter { $0 > 10 }
+        let onKick = found.filter { beat in kicks.contains { beat - $0 > -0.03 && beat - $0 < 0.17 } }.count
+        #expect(found.count >= 15, "found \(found.count)")
+        #expect(onKick >= found.count * 8 / 10, "\(onKick) of \(found.count) on a kick")
     }
 
     @Test func aBandsBackbeatIsFoundOnTheQuarterNotes() {

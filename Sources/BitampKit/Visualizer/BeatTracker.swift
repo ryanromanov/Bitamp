@@ -38,7 +38,11 @@ struct BeatTracker {
     private var lastOnsetBin: Int?
     private var lastAnalysis = -Double.infinity
     private var firstOnset: Double?
-    private var picked = -1
+    /// The last few seconds of onsets, for picking out the ones that stand out.
+    private var recent: [Onset] = []
+    /// The time of the latest onset already looked at.
+    private var examined = -Double.infinity
+    private var lastOnsetTime = -Double.infinity
     private var lastBeat = -Double.infinity
     /// How many analyses in a row have found a tempo sure enough to believe: a tempo has to
     /// keep turning up before it counts.
@@ -80,6 +84,11 @@ struct BeatTracker {
             for b in min(from, target)...target { envelope[b % Self.size] = max(envelope[b % Self.size], onset.strength) }
             lastOnsetBin = target
             if firstOnset == nil { firstOnset = onset.time }
+            lastOnsetTime = max(lastOnsetTime, onset.time)
+            recent.append(onset)
+        }
+        if let latest = recent.last?.time, let first = recent.first?.time, latest - first > 3.5 {
+            recent.removeAll { latest - $0.time > 3.5 }
         }
     }
 
@@ -90,6 +99,11 @@ struct BeatTracker {
         if now - lastAnalysis >= 0.5 {
             lastAnalysis = now
             analyse(now: now)
+        }
+        // The sound has stopped: nothing is keeping time.
+        if now - lastOnsetTime > 1.5 {
+            period = nil
+            believed = 0
         }
         return pickBeat()
     }
@@ -203,33 +217,42 @@ struct BeatTracker {
     // MARK: - Beats
 
     private mutating func pickBeat() -> Float? {
-        defer { picked = newest - 2 }
-        guard let period, newest - 2 > picked else { return nil }
+        guard recent.count >= 3 else { return nil }
+        defer { examined = recent[recent.count - 2].time }
+        guard let period else { return nil }
         var result: Float?
-        for i in max(picked + 1, newest - Self.window)...(newest - 2) {
-            let v = value(i)
-            guard v > value(i - 1), v >= value(i + 1) else { continue }
+        // Each onset is judged once the next has come, to see it was a peak.
+        for index in 1..<(recent.count - 1) {
+            let onset = recent[index]
+            guard onset.time > examined else { continue }
+            guard onset.strength > recent[index - 1].strength, onset.strength >= recent[index + 1].strength else { continue }
+
             // It has to stand out from the last second or two.
             var sum: Float = 0, squares: Float = 0
-            for j in (i - 100)..<i { sum += value(j); squares += value(j) * value(j) }
-            let mean = sum / 100
-            let deviation = max(0, squares / 100 - mean * mean).squareRoot()
+            var count: Float = 0
+            for earlier in recent[0..<index] where onset.time - earlier.time <= 2 {
+                sum += earlier.strength
+                squares += earlier.strength * earlier.strength
+                count += 1
+            }
+            guard count >= 20 else { continue }
+            let mean = sum / count
+            let deviation = max(0, squares / count - mean * mean).squareRoot()
             let threshold = max(mean + 1.2 * deviation, 1e-4)
-            guard v > threshold, v > 1.5 * mean else { continue }
+            guard onset.strength > threshold, onset.strength > 1.5 * mean else { continue }
 
             // And land on the beat.
-            let time = (Double(i) + 0.5) / Self.rate
-            let beats = ((time - anchor) / period).rounded()
+            let beats = ((onset.time - anchor) / period).rounded()
             let grid = anchor + beats * period
-            let error = time - grid
-            guard abs(error) <= Self.tolerance * period, time - lastBeat >= 0.6 * period else { continue }
+            let error = onset.time - grid
+            guard abs(error) <= Self.tolerance * period, onset.time - lastBeat >= 0.6 * period else { continue }
             // Follow the beat: move the grid part of the way to where it really fell, and
             // set the period by how far apart the last two really were.
             let sinceLast = max(1, beats - ((lastBeat - anchor) / period).rounded())
             anchor = grid + 0.4 * error
             self.period = period + 0.08 * error / sinceLast
-            lastBeat = time
-            let ratio = v / threshold
+            lastBeat = onset.time
+            let ratio = onset.strength / threshold
             let relative = typical > 0 ? ratio / typical : 1
             typical = typical > 0 ? 0.9 * typical + 0.1 * ratio : ratio
             result = max(result ?? 0, relative)
