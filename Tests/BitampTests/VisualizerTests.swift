@@ -88,6 +88,26 @@ import Testing
         }
     }
 
+    /// A frame whose height isn't a whole number of tiles, like a resized visualizer, must still
+    /// have its bottom bar run unbroken to both sides.
+    @Test func theBottomBarRunsToTheSidesAtAnyHeight() {
+        for skin in [DefaultSkin(), DefaultSkin(theme: .millennium), DefaultSkin(theme: .orb)] as [Skin] {
+            for height in 120...150 {
+                let size = CGSize(width: 275, height: CGFloat(height))
+                let canvas = Canvas(size)
+                PanelFrame(skin: skin, size: size, title: "VISUALIZER", active: true).draw(canvas, closePressed: false)
+                let rep = NSBitmapImageRep(cgImage: canvas.image())
+                let row = height - 4  // Inside the bottom bar.
+                // The bar's colour in the middle, against under the sides' columns (the left tile,
+                // and the right tile with its scroll groove).
+                let middle = rep.colorAt(x: 137, y: row)
+                for x in [4, 6, 8, 258, 262, 266, 270] {
+                    #expect(rep.colorAt(x: x, y: row) == middle, "row \(row), x \(x), height \(height)")
+                }
+            }
+        }
+    }
+
     @Test func aShootingStarCrossesTheStarfield() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { return }
         let view = MTKView(frame: NSRect(x: 0, y: 0, width: 320, height: 200), device: device)
