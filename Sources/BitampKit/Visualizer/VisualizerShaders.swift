@@ -312,7 +312,7 @@ enum VisualizerShaders {
 
         // The sky: dots that glitter in white as the treble gets louder (hi-hats, cymbals),
         // each one picked by a fixed chance of its own, so a busier treble lights more of them.
-        if (hash2(px) > 0.997) {
+        if (hash2(px) > 0.9993) {
             float chance = hash2(px + float2(131.0, 71.0));
             color = chance < 0.04 + 1.2 * u.treble ? palette[23].rgb : ramp(palette, 0.06 + 0.1 * chance);
         }
