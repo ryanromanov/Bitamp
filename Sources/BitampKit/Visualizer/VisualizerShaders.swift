@@ -228,9 +228,9 @@ enum VisualizerShaders {
 
         float k = res.y * 0.1;
         float lag = 0.02 + 0.05 * u.energy + 0.05 * u.beat;
-        for (int i = 0; i < 160; i++) {
+        for (int i = 0; i < 240; i++) {
             float fi = float(i);
-            bool dust = i >= 120;
+            bool dust = i >= 170;
             int band = min(int(hash(fi + 41.0) * 19.0), 18);
             float level = bars[band];
             float angle = hash(fi + 1.0) * 6.2831853 + roll;
@@ -241,7 +241,7 @@ enum VisualizerShaders {
             float x = phase - u.travel * speed;
             // Quiet music makes few stars, loud music many; a star keeps the verdict it was
             // born with.
-            if (hash(fi + 77.0 + floor(x) * 13.37) > 0.05 + 0.95 * birthLevel(history, band, phase, x, speed)) continue;
+            if (hash(fi + 77.0 + floor(x) * 13.37) > 0.15 + 1.6 * birthLevel(history, band, phase, x, speed)) continue;
             float along = fract(x);
             float depth = 0.03 + 0.97 * pow(along, 1.5);
             float tailDepth = min(depth + (dust ? 0.0 : lag), 1.0);
@@ -315,7 +315,7 @@ enum VisualizerShaders {
             color = twinkle < 0.12 ? palette[23].rgb : ramp(palette, 0.06 + 0.1 * twinkle);
         }
 
-        for (int i = 0; i < 150; i++) {
+        for (int i = 0; i < 200; i++) {
             float fi = float(i);
             int band = min(int(hash(fi + 41.0) * 19.0), 18);
             float level = bars[band];
@@ -323,7 +323,7 @@ enum VisualizerShaders {
             float phase = hash(fi + 29.0);
             float x = phase - u.travel * speed;
             // As in the streaks: the music decides which stars are made, not which stay.
-            if (hash(fi + 77.0 + floor(x) * 13.37) > 0.1 + 0.9 * birthLevel(history, band, phase, x, speed)) continue;
+            if (hash(fi + 77.0 + floor(x) * 13.37) > 0.15 + 1.6 * birthLevel(history, band, phase, x, speed)) continue;
             float z = fract(x);
             float angle = hash(fi + 1.0) * 6.2831853 + (1.0 - z) * 1.1 + u.travel * 0.02;
             float2 position = floor(vanishing + float2(cos(angle), sin(angle)) * ((1.0 - z) * (1.0 - z) * 0.85) * scale);
