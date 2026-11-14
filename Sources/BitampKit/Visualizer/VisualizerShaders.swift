@@ -377,7 +377,7 @@ enum VisualizerShaders {
         // The ring's colour walks up the palette as the song gets louder.
         float3 ink = ramp(palette, clamp(0.25 + 0.6 * u.energy * 3.0 + 0.3 * m, 0.0, 1.0));
         if (d < 1.5 / u.resolution.y) color = max(color, ink);
-        if (u.beat > 0.5 && abs(r - 0.04 - 0.2 * (1.0 - u.beat)) < 1.5 / u.resolution.y) color = max(color, palette[23].rgb);
+        if (u.beat > 0.5 && abs(r - 0.04 - 0.2 * (1.0 - u.beat)) < 1.5 / u.resolution.y) color = max(color, ramp(palette, 0.55));
         return float4(color, 1);
     }
 
