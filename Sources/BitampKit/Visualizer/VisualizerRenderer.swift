@@ -22,6 +22,8 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         var beat: Float = 0
         var energy: Float = 0
         var levels: Float = 0
+        /// How far the starfield has flown, which speeds up with the music.
+        var travel: Float = 0
     }
 
     private let analyzer: SpectrumAnalyzer
@@ -41,6 +43,7 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
     private var uniforms = Uniforms()
     private var bassAverage: Float = 0
     private var sinceBeat = 0
+    private var lastUpdate = CACurrentMediaTime()
     private(set) var visual: FullVisual = .barsAndWaves
 
     /// How many screen pixels make one pixel of the picture. The panel sets this to match the
@@ -194,6 +197,7 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         for frame in 0..<frames {
             updateUniforms()
             uniforms.time = 5 + Float(frame) / 60
+            uniforms.travel = 0.3 + Float(frame) / 60 * 0.3
             encode(into: buffer, target: texture)
         }
         buffer.commit()
@@ -221,7 +225,10 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
             uniforms.beat *= 0.9
         }
         bassAverage += (bass - bassAverage) * 0.05
-        uniforms.time = Float(CACurrentMediaTime() - start)
+        let now = CACurrentMediaTime()
+        uniforms.travel += Float(min(now - lastUpdate, 0.05)) * (0.12 + 0.5 * (bass + mid + treble) / 3 + 0.3 * uniforms.beat)
+        lastUpdate = now
+        uniforms.time = Float(now - start)
         uniforms.bass = bass
         uniforms.mid = mid
         uniforms.treble = treble

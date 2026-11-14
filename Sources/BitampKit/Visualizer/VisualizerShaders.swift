@@ -1,18 +1,18 @@
 /// The full-window visualizer's visuals. The raw value is what's saved in preferences.
 enum FullVisual: String, CaseIterable {
-    case barsAndWaves, ambience, battery, alchemy
+    case barsAndWaves, plasma, starfield, alchemy
 
     var title: String {
         switch self {
         case .barsAndWaves: return "Bars and Waves"
-        case .ambience: return "Ambience"
-        case .battery: return "Battery"
+        case .plasma: return "Plasma"
+        case .starfield: return "Starfield"
         case .alchemy: return "Alchemy"
         }
     }
 
     /// How many levels per colour channel the picture is reduced to, with an ordered dither,
-    /// or 0 to leave the colours as drawn. Bars and Waves, Ambience and Battery use the skin's
+    /// or 0 to leave the colours as drawn. Bars and Waves, Plasma and Starfield use the skin's
     /// own palette as it is; Alchemy's fading trails get the dither.
     var ditherLevels: Float {
         self == .alchemy ? 6 : 0
@@ -22,8 +22,8 @@ enum FullVisual: String, CaseIterable {
     var shader: String? {
         switch self {
         case .barsAndWaves: return "bars_and_waves"
-        case .ambience: return "ambience"
-        case .battery: return "battery"
+        case .plasma: return "plasma"
+        case .starfield: return "starfield"
         case .alchemy: return nil
         }
     }
@@ -53,6 +53,7 @@ enum VisualizerShaders {
         float beat;
         float energy;
         float levels;
+        float travel;
     };
 
     struct VertexOut {
@@ -133,11 +134,11 @@ enum VisualizerShaders {
         return float4(color, 1);
     }
 
-    // MARK: Ambience
+    // MARK: Plasma
 
     // The old plasma: a few sine waves added up and run through the palette, which turns
     // with the music. Bands of the analyzer stretch each wave.
-    fragment float4 ambience(VertexOut in [[stage_in]],
+    fragment float4 plasma(VertexOut in [[stage_in]],
                              constant Uniforms &u [[buffer(0)]],
                              constant float *bars [[buffer(1)]],
                              constant float *wave [[buffer(2)]],
@@ -156,31 +157,52 @@ enum VisualizerShaders {
         return float4(ramp(palette, color), 1);
     }
 
-    // MARK: Battery
+    // MARK: Starfield
 
-    // A tunnel of rings and spokes rushing toward you, lit by the bars around the circle.
-    fragment float4 battery(VertexOut in [[stage_in]],
-                            constant Uniforms &u [[buffer(0)]],
-                            constant float *bars [[buffer(1)]],
-                            constant float *wave [[buffer(2)]],
-                            constant float4 *palette [[buffer(3)]],
-                            constant float *peaks [[buffer(4)]]) {
-        float2 p = (floor(in.uv * u.resolution) + 0.5 - u.resolution * 0.5) / u.resolution.y;
-        float r = length(p);
-        float a = atan2(p.y, p.x);
+    static float hash(float n) {
+        return fract(sin(n * 127.1) * 43758.5453);
+    }
+
+    // Flying through stars, as on the old screensavers. Each star comes out of the middle and
+    // speeds up toward you, near ones bigger and whiter. Which stars show depends on the
+    // analyzer bar for the direction they're heading, so the music fills the sky.
+    fragment float4 starfield(VertexOut in [[stage_in]],
+                              constant Uniforms &u [[buffer(0)]],
+                              constant float *bars [[buffer(1)]],
+                              constant float *wave [[buffer(2)]],
+                              constant float4 *palette [[buffer(3)]],
+                              constant float *peaks [[buffer(4)]]) {
+        float2 res = u.resolution;
+        float2 px = floor(in.uv * res);
+        float2 center = floor(res * 0.5);
+        float scale = res.y * 0.9;
         float3 color = palette[0].rgb;
-        if (r > 0.02) {
-            float depth = 0.3 / r;
-            float z = depth - u.time * (0.9 + 0.6 * u.energy) - u.beat * 0.15;
-            float level = barLevel(bars, abs(a) / 3.14159265);
-            float band = abs(fract(z) - 0.5) * 2.0;
-            float ring = step(0.9 - 0.08 * u.beat, band);
-            float spokeAngle = a / 6.2831853 * 14.0 + u.time * 0.05;
-            float spoke = step(0.93, abs(sin(spokeAngle * 3.14159265)));
-            if (ring + spoke > 0.0) {
-                color = ramp(palette, clamp(0.15 + level * 1.1 + 0.2 * u.beat, 0.0, 1.0));
+        float2 pixelCenter = px + 0.5;
+        for (int i = 0; i < 200; i++) {
+            float fi = float(i);
+            float turn = hash(fi + 1.0);
+            float2 direction = float2(cos(turn * 6.2831853), sin(turn * 6.2831853));
+            float mirrored = abs(turn * 2.0 - 1.0);
+            if (hash(fi + 41.0) > 0.3 + 0.7 * bars[int(mirrored * 18.0)]) continue;
+            float speed = 0.6 + hash(fi + 13.0);
+            float phase = hash(fi + 29.0);
+            float z = fract(phase - u.travel * speed);
+            // The star's head and the point it was a moment ago, as a short streak.
+            float headRadius = (1.0 - z) * (1.0 - z) * 1.25;
+            float zTail = min(z + 0.06, 1.0);
+            float tailRadius = (1.0 - zTail) * (1.0 - zTail) * 1.25;
+            float2 head = center + 0.5 + direction * headRadius * scale;
+            float2 tail = center + 0.5 + direction * tailRadius * scale;
+            float2 along = head - tail;
+            float length2 = dot(along, along);
+            float k = length2 > 0.0 ? clamp(dot(pixelCenter - tail, along) / length2, 0.0, 1.0) : 1.0;
+            float d = length(pixelCenter - (tail + along * k));
+            float width = z < 0.3 ? 1.0 : 0.7;
+            if (d < width) {
+                color = (k > 0.8 && z < 0.22) ? palette[23].rgb
+                      : k > 0.8 ? ramp(palette, 0.3 + (1.0 - z) * 0.5)
+                      : ramp(palette, 0.05 + (1.0 - z) * 0.3);
             }
-            if (r < 0.05 && u.beat > 0.3) color = palette[23].rgb;
         }
         return float4(color, 1);
     }
