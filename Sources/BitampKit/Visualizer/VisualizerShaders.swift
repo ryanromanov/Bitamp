@@ -280,9 +280,10 @@ enum VisualizerShaders {
     // MARK: Starfield
 
     // The same flight, with stars instead of streaks. Far stars are single pixels; nearer
-    // ones grow into plus signs and then glinting four- and eight-point sparkles, and some
-    // flare a size on the beat. They swing round in a slow spiral. Behind them a sky of
-    // twinkling dots, and now and then a shooting star.
+    // ones grow into plus signs and then four- and eight-point sparkles. Everything that
+    // pulses follows the music: the whole sky flares a size on each beat, a star glints
+    // while its own band of the analyzer is loud, and the dots behind glitter with the
+    // treble. They swing round in a slow spiral. Now and then a shooting star crosses.
     fragment float4 starfield(VertexOut in [[stage_in]],
                               constant Uniforms &u [[buffer(0)]],
                               constant float *bars [[buffer(1)]],
@@ -297,11 +298,12 @@ enum VisualizerShaders {
         float scale = res.y * 0.9;
         float3 color = palette[0].rgb;
 
-        // The sky: dots that twinkle, each at its own pace.
+        // The sky: dots that glitter in white as the treble gets louder (hi-hats, cymbals),
+        // each one picked by a fixed chance of its own, so a busier treble lights more of them.
         float sky = hash(px.x * 1.37 + px.y * 91.71);
         if (sky > 0.991) {
-            float twinkle = fract(sky * 311.0 + t * (0.25 + sky * 0.5));
-            color = twinkle < 0.12 ? palette[23].rgb : ramp(palette, 0.06 + 0.1 * twinkle);
+            float chance = fract(sky * 311.0);
+            color = chance < 0.04 + 1.2 * u.treble ? palette[23].rgb : ramp(palette, 0.06 + 0.1 * chance);
         }
 
         for (int i = 0; i < 200; i++) {
@@ -321,8 +323,8 @@ enum VisualizerShaders {
             if (ax > 4.0 || ay > 4.0) continue;
 
             int size = z > 0.65 ? 0 : z > 0.4 ? 1 : z > 0.2 ? 2 : 3;
-            if (u.beat > 0.5 && size < 3 && hash(fi + 5.0) < 0.5) size += 1;
-            bool glint = fract(hash(fi + 9.0) + t * 0.5) < 0.2;
+            if (u.beat > 0.35 && size < 3) size += 1;
+            bool glint = level > 0.55;
             float arm = size == 0 ? 0.0 : size == 1 ? 1.0 : size == 2 ? 2.0 : 4.0;
             bool onAxis = (ax == 0.0 && ay <= arm) || (ay == 0.0 && ax <= arm);
             bool diagonal = (size >= 3 && ax == ay && ax <= 2.0) || (size == 2 && glint && ax == 1.0 && ay == 1.0);
