@@ -196,7 +196,7 @@ enum VisualizerShaders {
 
         // The glow at the far end: a two-tone dithered gradient that swells with the bass.
         float r = length(pixelCenter - vanishing);
-        float glow = (0.15 + 0.7 * u.bass + 0.6 * u.beat) * exp(-r * r / (res.y * res.y * 0.0125));
+        float glow = (0.04 + 0.3 * u.bass + 0.4 * u.beat) * exp(-r * r / (res.y * res.y * 0.0125));
         if (glow > dither4(px)) color = ramp(palette, 0.2);
         // The shockwave, a checkered ring that runs out from the middle on every beat.
         if (u.beat > 0.04) {
@@ -204,31 +204,40 @@ enum VisualizerShaders {
             if (abs(r - ring) < 0.8 && ((int(px.x) + int(px.y)) & 1) == 0) color = ramp(palette, 0.6);
         }
 
-        float streak = min(0.04 + 0.3 * u.energy + 0.12 * u.beat, 0.3);
-        for (int i = 0; i < 260; i++) {
+        // Real perspective: a star sits off to the side of the ship's path by a fixed amount
+        // (rho) and is at some distance (depth, 1 far, 0 near). Where it shows on the screen
+        // is rho over depth, so far stars are small, dim and nearly still, and speed up and
+        // brighten as they come close. Streaks are how far it moved in a moment, so they're
+        // short far away and long near the edge.
+        float k = res.y * 0.1;
+        float lag = 0.02 + 0.05 * u.energy + 0.05 * u.beat;
+        for (int i = 0; i < 220; i++) {
             float fi = float(i);
-            bool dust = i >= 200;
+            bool dust = i >= 170;
             int band = min(int(hash(fi + 41.0) * 19.0), 18);
             float level = bars[band];
             if (hash(fi + 77.0) > 0.3 + 0.7 * level) continue;
             float angle = hash(fi + 1.0) * 6.2831853 + roll;
             float2 direction = float2(cos(angle), sin(angle));
-            float speed = dust ? 0.2 : 0.6 + hash(fi + 13.0);
-            float z = fract(hash(fi + 29.0) - u.travel * speed);
-            float zTail = min(z + (dust ? 0.0 : streak), 1.0);
-            float2 head = vanishing + direction * ((1.0 - z) * (1.0 - z) * 1.25) * scale;
-            float2 tail = vanishing + direction * ((1.0 - zTail) * (1.0 - zTail) * 1.25) * scale;
-            float2 along = head - tail;
-            float length2 = dot(along, along);
-            float k = length2 > 0.0 ? clamp(dot(pixelCenter - tail, along) / length2, 0.0, 1.0) : 1.0;
-            float d = length(pixelCenter - (tail + along * k));
-            if (d < (z < 0.3 ? 0.75 : 0.55)) {
-                if (dust) {
-                    color = ramp(palette, 0.1 + 0.3 * level);
-                } else if (k > 0.8) {
-                    color = z < 0.2 ? palette[23].rgb : ramp(palette, clamp(0.15 + level * 1.1, 0.0, 1.0));
+            float rho = 0.2 + 0.8 * hash(fi + 3.0);
+            float speed = dust ? 0.15 : 0.5 + 0.8 * hash(fi + 13.0);
+            float along = fract(hash(fi + 29.0) - u.travel * speed);
+            float depth = 0.03 + 0.97 * pow(along, 1.5);
+            float tailDepth = min(depth + (dust ? 0.0 : lag), 1.0);
+            float2 head = vanishing + direction * (rho * k / depth);
+            float2 tail = vanishing + direction * (rho * k / tailDepth);
+            float2 trail = head - tail;
+            float length2 = dot(trail, trail);
+            float t01 = length2 > 0.0 ? clamp(dot(pixelCenter - tail, trail) / length2, 0.0, 1.0) : 1.0;
+            float d = length(pixelCenter - (tail + trail * t01));
+            if (d < (depth < 0.3 ? 0.75 : 0.55)) {
+                if (depth > 0.6 || dust) {
+                    color = ramp(palette, 0.05 + 0.25 * level);
+                } else if (depth < 0.18 && t01 > 0.8) {
+                    color = palette[23].rgb;
                 } else {
-                    color = ramp(palette, clamp(0.05 + level * 0.6, 0.0, 1.0));
+                    float brightness = clamp(0.15 + level * 0.9 + (0.6 - depth) * 0.5, 0.0, 1.0);
+                    color = ramp(palette, t01 > 0.8 ? brightness : brightness * 0.6);
                 }
             }
         }
