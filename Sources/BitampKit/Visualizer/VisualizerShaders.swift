@@ -293,9 +293,9 @@ enum VisualizerShaders {
 
     // The same flight, with stars instead of streaks. Far stars are single pixels; nearer
     // ones grow into plus signs and then four- and eight-point sparkles. Everything that
-    // pulses follows the music: the whole sky flares a size on each beat, a star glints
-    // while its own band of the analyzer is loud, and the dots behind glitter with the
-    // treble. They swing round in a slow spiral. A shooting star crosses on a strong beat.
+    // pulses follows the music: the whole sky flares a size on each beat, and a star glints
+    // while its own band of the analyzer is loud. They swing round in a slow spiral. A
+    // shooting star crosses on a rare, strong beat.
     fragment float4 starfield(VertexOut in [[stage_in]],
                               constant Uniforms &u [[buffer(0)]],
                               constant float *bars [[buffer(1)]],
@@ -309,13 +309,6 @@ enum VisualizerShaders {
         float2 vanishing = floor(res * 0.5);
         float scale = res.y * 0.9;
         float3 color = palette[0].rgb;
-
-        // The sky: dots that glitter in white as the treble gets louder (hi-hats, cymbals),
-        // each one picked by a fixed chance of its own, so a busier treble lights more of them.
-        if (hash2(px) > 0.9993) {
-            float chance = hash2(px + float2(131.0, 71.0));
-            color = chance < 0.04 + 1.2 * u.treble ? palette[23].rgb : ramp(palette, 0.06 + 0.1 * chance);
-        }
 
         for (int i = 0; i < 200; i++) {
             float fi = float(i);
@@ -348,14 +341,14 @@ enum VisualizerShaders {
             }
         }
 
-        // A shooting star, sent by a strong beat: it starts in a corner of the sky and runs
-        // across, from the left or the right.
+        // A shooting star, sent by a rare, strong beat. It crosses the picture from any
+        // direction, off one edge and out of another, along a line a little off the middle.
         if (u.shoot >= 0.0) {
-            bool fromRight = u.shootSeed > 0.5;
-            float2 direction = normalize(float2(fromRight ? -1.0 : 1.0, 0.6));
-            float2 start = float2(res.x * (fromRight ? 0.95 - 0.4 * fract(u.shootSeed * 7.3) : 0.05 + 0.4 * fract(u.shootSeed * 7.3)),
-                                  res.y * (0.1 + 0.4 * fract(u.shootSeed * 13.1)));
-            float2 head = start + direction * u.shoot * res.x * 0.6;
+            float angle = u.shootSeed * 6.2831853;
+            float2 direction = float2(cos(angle), sin(angle));
+            float2 across = float2(-direction.y, direction.x);
+            float2 middle = res * 0.5 + across * res.y * (fract(u.shootSeed * 7.3) - 0.5) * 0.7;
+            float2 head = middle + direction * (u.shoot * 1.2 - 0.6) * res.x;
             float2 headPixel = floor(head);
             if (px.x >= headPixel.x && px.x <= headPixel.x + 1.0 && px.y >= headPixel.y && px.y <= headPixel.y + 1.0) {
                 color = palette[23].rgb;
