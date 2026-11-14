@@ -159,7 +159,19 @@ final class AppleMusicBackend: PlaybackBackend {
         guard generation == self.generation else { return }
         let wanted = state != .stopped
         stop()
-        if wanted { onLoadFailure?(error) }
+        if wanted { onLoadFailure?(Self.advice(for: error) ?? error) }
+    }
+
+    /// MusicKit gives only "failed to prepare to play" when Apple Music won't hand over a song.
+    /// The usual causes are on the Apple Music side: terms or a privacy notice that Music has
+    /// yet to show, or no signed-in account with a subscription.
+    private static func advice(for error: Error) -> PlaybackAdvice? {
+        let nsError = error as NSError
+        guard nsError.domain == "MPMusicPlayerControllerErrorDomain", nsError.code == 6 else { return nil }
+        return PlaybackAdvice(
+            title: "Apple Music won't play this song.",
+            advice: "Open the Music app and accept any terms or privacy notice it shows, then play a song there. "
+                + "Also check that you're signed in with an active subscription. Then try again in Bitamp.")
     }
 
     // MARK: - Watching the player

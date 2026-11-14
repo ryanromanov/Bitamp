@@ -80,9 +80,9 @@ private final class FakeBackend: PlaybackBackend {
     }
 
     /// Like a song whose lookup failed after `load` returned.
-    func failLater() {
+    func failLater(_ error: Error = CocoaError(.fileReadUnknown)) {
         stop()
-        onLoadFailure?(CocoaError(.fileReadUnknown))
+        onLoadFailure?(error)
     }
 }
 
@@ -173,6 +173,27 @@ private final class FakeBackend: PlaybackBackend {
         #expect(pak.backend.loaded == [one, two])
         #expect(pak.backend.state == .playing)
         #expect(errors.count == 1)
+    }
+
+    /// Two songs in a row failing for a reason the listener can fix gets one alert, not one each.
+    @Test func repeatedFixableFailuresReportOnce() {
+        let pak = FakePak()
+        let controller = controller(pak)
+        controller.repeats = true
+        var problems: [PlaybackAdvice] = []
+        controller.onProblem = { problems.append($0) }
+        controller.enqueue([one, two])
+        let advice = PlaybackAdvice(title: "Won't play.", advice: "Fix it.")
+        pak.backend.failLater(advice)
+        #expect(problems.isEmpty)
+        pak.backend.failLater(advice)
+        pak.backend.failLater(advice)
+        #expect(problems.count == 1)
+        // An ordinary failure never alerts.
+        controller.enqueue([one, two])
+        pak.backend.failLater()
+        pak.backend.failLater()
+        #expect(problems.count == 1)
     }
 
     /// With repeat on and every track failing, the skipping stops after one time around.

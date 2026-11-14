@@ -47,6 +47,20 @@ public struct NowPlaying: Sendable, Equatable {
 /// Something that plays one queue item at a time: Bitamp's own engine, or a Pak that
 /// plays audio itself.
 @MainActor
+/// A load failure the listener can probably fix themselves, with what to tell them. A backend
+/// passes this to `onLoadFailure` when it knows the likely cause.
+public struct PlaybackAdvice: LocalizedError {
+    public let title: String
+    public let advice: String
+
+    public init(title: String, advice: String) {
+        self.title = title
+        self.advice = advice
+    }
+
+    public var errorDescription: String? { "\(title) \(advice)" }
+}
+
 public protocol PlaybackBackend: AnyObject {
     var state: PlaybackState { get }
     var nowPlaying: NowPlaying? { get }

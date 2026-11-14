@@ -16,9 +16,13 @@ final class PlaybackController {
     private let preferences: Preferences
     /// Short, marquee-sized messages about files that couldn't be opened.
     var onError: ((String) -> Void)?
+    /// Called once when songs keep failing for a reason the listener can fix, so a message
+    /// that flashes by isn't the only sign.
+    var onProblem: ((PlaybackAdvice) -> Void)?
     /// Tracks in a row that turned out not to play after loading. Stops the skipping
     /// once every track has failed.
     private var lateFailures = 0
+    private var reportedProblem = false
     /// The queue item last loaded, whichever backend plays it.
     private var loadedURL: URL?
     /// The Pak track whose audio is on its way, while it is.
@@ -292,6 +296,10 @@ final class PlaybackController {
         onError?("CAN'T PLAY \(info.displayName(for: url))")
         NSLog("Bitamp: couldn't play \(url): \(error)")
         lateFailures += 1
+        if lateFailures >= 2, !reportedProblem, let advice = error as? PlaybackAdvice {
+            reportedProblem = true
+            onProblem?(advice)
+        }
         guard lateFailures < queue.count, queue.next() != nil else {
             lateFailures = 0
             return
@@ -302,7 +310,10 @@ final class PlaybackController {
     /// Loads the queue's current track, skipping forward past files that won't open.
     /// However many it skips, it reports them once.
     private func loadCurrent(andPlay play: Bool, afterFailure: Bool = false) {
-        if !afterFailure { lateFailures = 0 }
+        if !afterFailure {
+            lateFailures = 0
+            reportedProblem = false
+        }
         var skipped: [String] = []
         defer { if let message = Self.skipMessage(skipped) { onError?(message) } }
         for _ in 0..<queue.count {
