@@ -1,19 +1,19 @@
 /// The full-window visualizer's visuals. The raw value is what's saved in preferences.
 enum FullVisual: String, CaseIterable {
-    case barsAndWaves, plasma, hyperspace, starfield, alchemy
+    case barsAndWaves, plasma, starspray, starfield, alchemy
 
     var title: String {
         switch self {
         case .barsAndWaves: return "Bars and Waves"
         case .plasma: return "Plasma"
-        case .hyperspace: return "Hyperspace"
+        case .starspray: return "Starspray"
         case .starfield: return "Starfield"
         case .alchemy: return "Alchemy"
         }
     }
 
     /// How many levels per colour channel the picture is reduced to, with an ordered dither,
-    /// or 0 to leave the colours as drawn. Bars and Waves, Plasma, Hyperspace and Starfield use the skin's
+    /// or 0 to leave the colours as drawn. Bars and Waves, Plasma, Starspray and Starfield use the skin's
     /// own palette as it is; Alchemy's fading trails get the dither.
     var ditherLevels: Float {
         self == .alchemy ? 6 : 0
@@ -24,7 +24,7 @@ enum FullVisual: String, CaseIterable {
         switch self {
         case .barsAndWaves: return "bars_and_waves"
         case .plasma: return "plasma"
-        case .hyperspace: return "hyperspace"
+        case .starspray: return "starspray"
         case .starfield: return "starfield"
         case .alchemy: return nil
         }
@@ -171,14 +171,14 @@ enum VisualizerShaders {
         return float4(ramp(palette, color), 1);
     }
 
-    // MARK: Hyperspace
+    // MARK: Starspray
 
     // Streaking through the stars at warp speed. The vanishing point wanders and the whole
-    // sky rolls; the streaks lengthen with the music and the beat kicks the ship (a shake,
-    // a checkered shockwave and a flash at the far end). Each star has a band of the
+    // sky rolls; the streaks lengthen with the music and the beat sends out a checkered
+    // shockwave and flashes the glow at the far end. Each star has a band of the
     // analyzer of its own, chosen at random so the sky fills evenly, and takes its colour
     // from how loud that band is.
-    fragment float4 hyperspace(VertexOut in [[stage_in]],
+    fragment float4 starspray(VertexOut in [[stage_in]],
                                constant Uniforms &u [[buffer(0)]],
                                constant float *bars [[buffer(1)]],
                                constant float *wave [[buffer(2)]],
@@ -189,15 +189,14 @@ enum VisualizerShaders {
         float2 pixelCenter = px + 0.5;
         float t = u.time;
         float2 vanishing = floor(res * 0.5) + 0.5
-                         + float2(sin(t * 0.31) * res.x * 0.07, cos(t * 0.23) * res.y * 0.07)
-                         + floor(float2(sin(t * 60.0), cos(t * 47.0)) * u.beat * 1.5);
+                         + float2(sin(t * 0.31) * res.x * 0.07, cos(t * 0.23) * res.y * 0.07);
         float scale = res.y * 0.9;
         float roll = sin(t * 0.17) * 0.7 + u.travel * 0.04;
         float3 color = palette[0].rgb;
 
         // The glow at the far end: a two-tone dithered gradient that swells with the bass.
         float r = length(pixelCenter - vanishing);
-        float glow = (0.15 + 0.7 * u.bass + 0.6 * u.beat) * exp(-r * r / (res.y * res.y * 0.05));
+        float glow = (0.15 + 0.7 * u.bass + 0.6 * u.beat) * exp(-r * r / (res.y * res.y * 0.0125));
         if (glow > dither4(px)) color = ramp(palette, 0.2);
         // The shockwave, a checkered ring that runs out from the middle on every beat.
         if (u.beat > 0.04) {
@@ -223,7 +222,7 @@ enum VisualizerShaders {
             float length2 = dot(along, along);
             float k = length2 > 0.0 ? clamp(dot(pixelCenter - tail, along) / length2, 0.0, 1.0) : 1.0;
             float d = length(pixelCenter - (tail + along * k));
-            if (d < (z < 0.3 ? 1.0 : 0.7)) {
+            if (d < (z < 0.3 ? 0.75 : 0.55)) {
                 if (dust) {
                     color = ramp(palette, 0.1 + 0.3 * level);
                 } else if (k > 0.8) {
