@@ -107,6 +107,16 @@ enum VisualizerShaders {
         return fract(sin(n * 127.1) * 43758.5453);
     }
 
+    // A hash of two whole numbers, with no sines: `sin` of a big number loses its precision on
+    // a GPU, which once left the sky's dots only in the top rows of the picture.
+    static float hash2(float2 p) {
+        uint2 q = uint2(int2(p));
+        uint h = q.x * 374761393u + q.y * 668265263u;
+        h = (h ^ (h >> 13)) * 1274126177u;
+        h = h ^ (h >> 16);
+        return float(h & 0xFFFFFFu) / 16777215.0;
+    }
+
     // How loud a band was when a star was born. The renderer keeps the last few seconds of the
     // analyzer in `history`, a ring of 1024 buckets per band, a bucket for each 0.01 the ship
     // has travelled. A star's journey runs `x` from some whole number down to the one below it
@@ -242,7 +252,7 @@ enum VisualizerShaders {
             float x = phase - u.travel * speed;
             // Quiet music makes few stars, loud music many; a star keeps the verdict it was
             // born with.
-            if (hash(fi + 77.0 + floor(x) * 13.37) > 0.15 + 1.6 * birthLevel(history, band, phase, x, speed)) continue;
+            if (hash2(float2(fi, floor(x))) > 0.15 + 1.6 * birthLevel(history, band, phase, x, speed)) continue;
             float along = fract(x);
             float depth = 0.03 + 0.97 * pow(along, 1.5);
             float tailDepth = min(depth + (dust ? 0.0 : lag), 1.0);
@@ -302,9 +312,8 @@ enum VisualizerShaders {
 
         // The sky: dots that glitter in white as the treble gets louder (hi-hats, cymbals),
         // each one picked by a fixed chance of its own, so a busier treble lights more of them.
-        float sky = hash(px.x * 1.37 + px.y * 91.71);
-        if (sky > 0.991) {
-            float chance = fract(sky * 311.0);
+        if (hash2(px) > 0.997) {
+            float chance = hash2(px + float2(131.0, 71.0));
             color = chance < 0.04 + 1.2 * u.treble ? palette[23].rgb : ramp(palette, 0.06 + 0.1 * chance);
         }
 
@@ -316,7 +325,7 @@ enum VisualizerShaders {
             float phase = hash(fi + 29.0);
             float x = phase - u.travel * speed;
             // As in the streaks: the music decides which stars are made, not which stay.
-            if (hash(fi + 77.0 + floor(x) * 13.37) > 0.15 + 1.6 * birthLevel(history, band, phase, x, speed)) continue;
+            if (hash2(float2(fi, floor(x))) > 0.15 + 1.6 * birthLevel(history, band, phase, x, speed)) continue;
             float z = fract(x);
             float angle = hash(fi + 1.0) * 6.2831853 + (1.0 - z) * 1.1 + u.travel * 0.02;
             float2 position = floor(vanishing + float2(cos(angle), sin(angle)) * ((1.0 - z) * (1.0 - z) * 0.85) * scale);
@@ -345,7 +354,7 @@ enum VisualizerShaders {
             bool fromRight = u.shootSeed > 0.5;
             float2 direction = normalize(float2(fromRight ? -1.0 : 1.0, 0.6));
             float2 start = float2(res.x * (fromRight ? 0.95 - 0.4 * fract(u.shootSeed * 7.3) : 0.05 + 0.4 * fract(u.shootSeed * 7.3)),
-                                  res.y * (0.05 + 0.25 * fract(u.shootSeed * 13.1)));
+                                  res.y * (0.1 + 0.4 * fract(u.shootSeed * 13.1)));
             float2 head = start + direction * u.shoot * res.x * 0.6;
             float2 headPixel = floor(head);
             if (px.x >= headPixel.x && px.x <= headPixel.x + 1.0 && px.y >= headPixel.y && px.y <= headPixel.y + 1.0) {
