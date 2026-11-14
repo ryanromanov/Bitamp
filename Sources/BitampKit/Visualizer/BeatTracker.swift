@@ -13,7 +13,7 @@ struct Onset {
 /// something that keeps time, so this works out the tempo first and only believes onsets that
 /// fall on it:
 ///  1. The onsets are kept as an envelope, 50 values a second.
-///  2. Every half second the last six seconds are autocorrelated: a steady beat shows up as a
+///  2. Every quarter second the last four seconds are autocorrelated: a steady beat shows up as a
 ///     lag at which the envelope matches itself. That lag, between 60 and 180 beats a minute and
 ///     leaning toward the usual middle, is the tempo, and how strongly it matches says how sure
 ///     to be. With no steady beat, there is no tempo and no pulses.
@@ -24,12 +24,15 @@ struct Onset {
 struct BeatTracker {
     static let rate = 50.0
     private static let size = 512
-    private static let window = 300
+    /// How much of the past the tempo is worked out from: four seconds.
+    private static let window = 200
     private static let minLag = 17
     private static let maxLag = 50
     /// How sure the tempo must be to be believed, and how unsure before it's dropped.
     static let lockAt: Float = 0.25
     static let dropAt: Float = 0.12
+    /// How many analyses in a row, a quarter second apart, must agree on a tempo before it's believed.
+    static let agreement = 3
     /// How close to the grid an onset must be, as a fraction of a beat.
     static let tolerance = 0.15
 
@@ -44,8 +47,12 @@ struct BeatTracker {
     private var examined = -Double.infinity
     private var lastOnsetTime = -Double.infinity
     private var lastBeat = -Double.infinity
-    /// How many analyses in a row have found a tempo sure enough to believe: a tempo has to
-    /// keep turning up before it counts.
+    /// A tempo that has been turning up in the last few analyses, and how many in a row: it has to
+    /// keep turning up before it's believed.
+    private var candidate: Double?
+    /// A new tempo is a guess until two beats in a row land on it; pulses wait for that.
+    private var confirmed = false
+    private var lastCounted = -Double.infinity
     private var believed = 0
     /// How strong beats have been lately, so a beat can be called hard or soft by comparison.
     private var typical: Float = 0
@@ -96,13 +103,14 @@ struct BeatTracker {
     /// the beats lately (1 is typical, 2 twice as hard), or nil if there wasn't one.
     mutating func update(now: Double) -> Float? {
         advance(to: bin(now))
-        if now - lastAnalysis >= 0.5 {
+        if now - lastAnalysis >= 0.25 {
             lastAnalysis = now
             analyse(now: now)
         }
         // The sound has stopped: nothing is keeping time.
         if now - lastOnsetTime > 1.5 {
             period = nil
+            candidate = nil
             believed = 0
         }
         return pickBeat()
@@ -111,6 +119,7 @@ struct BeatTracker {
     // MARK: - Tempo
 
     private mutating func analyse(now: Double) {
+        // Three seconds of sound before the first guess at a tempo: less is mostly chance.
         guard let firstOnset, now - firstOnset >= 3 else { return }
         let end = newest
         let begin = end - Self.window + 1
@@ -123,6 +132,7 @@ struct BeatTracker {
         guard energy > 1e-9 else {
             confidence = 0
             period = nil
+            candidate = nil
             believed = 0
             return
         }
@@ -149,32 +159,60 @@ struct BeatTracker {
             }
         }
         confidence = correlations[bestLag]
-        if confidence < Self.dropAt {
-            period = nil
-            believed = 0
-            return
-        }
-        believed = confidence >= Self.lockAt ? believed + 1 : 0
-        guard period != nil || believed >= 2 else { return }
 
         // Between the neighbouring lags, for a period finer than one value of the envelope.
         let a = correlations[bestLag - 1], b = correlations[bestLag], c = correlations[bestLag + 1]
         let curve = a - 2 * b + c
         let shift = curve < 0 ? Double(max(-0.5, min(0.5, 0.5 * (a - c) / curve))) : 0
         let measured = (Double(bestLag) + shift) / Self.rate
-        if let current = period, abs(measured - current) / current < 0.08 {
-            // The same tempo. The beats themselves keep the period exact (see `pickBeat`); this
-            // only eases it toward what the autocorrelation says.
-            period = 0.95 * current + 0.05 * measured
-            // If the grid has slipped off the beats, move it back.
-            let best = bestComb(samples, begin: begin)
-            if comb(samples, begin: begin, lastBeat: latestGridBeat(before: Double(begin + end) / Self.rate)) < 0.7 * best.score {
-                anchor = best.anchor
+
+        if let current = period {
+            if abs(measured - current) / current < 0.08 {
+                // The same tempo. The beats themselves keep the period exact (see `pickBeat`);
+                // this only eases it toward what the autocorrelation says.
+                period = 0.95 * current + 0.05 * measured
+                candidate = nil
+                believed = 0
+                // If the grid has slipped off the beats, move it back.
+                let best = bestComb(samples, begin: begin, period: current)
+                if comb(samples, begin: begin, period: current, lastBeat: latestGridBeat(before: Double(begin + end) / Self.rate)) < 0.7 * best.score {
+                    anchor = best.anchor
+                }
+            } else if confidence >= Self.lockAt {
+                // Something else, which has to keep turning up before the music is taken to
+                // have changed tempo.
+                consider(measured, samples: samples, begin: begin, now: now)
             }
+            // Lost: the beats stopped landing on the grid and nothing steady has replaced them.
+            if confidence < Self.dropAt, now - lastBeat > 4 * current {
+                period = nil
+                candidate = nil
+                believed = 0
+            }
+        } else if confidence >= Self.lockAt {
+            consider(measured, samples: samples, begin: begin, now: now)
         } else {
-            period = measured
-            anchor = bestComb(samples, begin: begin).anchor
+            candidate = nil
+            believed = 0
         }
+    }
+
+    /// Counts `measured` toward a new tempo, and takes it up once the last few analyses agree.
+    private mutating func consider(_ measured: Double, samples: [Float], begin: Int, now: Double) {
+        if let known = candidate, abs(measured - known) / known < 0.06 {
+            believed += 1
+            candidate = 0.5 * (known + measured)
+        } else {
+            candidate = measured
+            believed = 1
+        }
+        guard believed >= Self.agreement, let tempo = candidate else { return }
+        period = tempo
+        anchor = bestComb(samples, begin: begin, period: tempo).anchor
+        lastBeat = now
+        confirmed = true
+        candidate = nil
+        believed = 0
     }
 
     /// The time of the latest beat on the grid at or before `time`.
@@ -185,8 +223,7 @@ struct BeatTracker {
 
     /// How much of the envelope's energy lies on beats spaced a period apart, walking back from
     /// the beat at `lastBeat`.
-    private func comb(_ samples: [Float], begin: Int, lastBeat: Double) -> Float {
-        guard let period else { return 0 }
+    private func comb(_ samples: [Float], begin: Int, period: Double, lastBeat: Double) -> Float {
         let lag = period * Self.rate
         var sum: Float = 0
         var t = lastBeat * Self.rate - 0.5 - Double(begin)
@@ -201,14 +238,13 @@ struct BeatTracker {
     }
 
     /// The comb that catches the most of the envelope: where, in the last stretch, the beats fall.
-    private func bestComb(_ samples: [Float], begin: Int) -> (score: Float, anchor: Double) {
-        guard let period else { return (0, anchor) }
+    private func bestComb(_ samples: [Float], begin: Int, period: Double) -> (score: Float, anchor: Double) {
         let lag = period * Self.rate
         var best: (score: Float, anchor: Double) = (-1, anchor)
         let end = Double(begin + samples.count - 1)
         for offset in 0..<max(1, Int(lag.rounded())) {
             let lastBeat = (end - Double(offset) + 0.5) / Self.rate
-            let score = comb(samples, begin: begin, lastBeat: lastBeat)
+            let score = comb(samples, begin: begin, period: period, lastBeat: lastBeat)
             if score > best.score { best = (score, lastBeat) }
         }
         return best
@@ -252,6 +288,12 @@ struct BeatTracker {
             anchor = grid + 0.4 * error
             self.period = period + 0.08 * error / sinceLast
             lastBeat = onset.time
+            // Two beats in a row on the grid, a beat or so apart, and it's a real tempo.
+            if !confirmed {
+                if onset.time - lastCounted <= 1.6 * period { confirmed = true }
+                lastCounted = onset.time
+                continue
+            }
             let ratio = onset.strength / threshold
             let relative = typical > 0 ? ratio / typical : 1
             typical = typical > 0 ? 0.9 * typical + 0.1 * ratio : ratio
