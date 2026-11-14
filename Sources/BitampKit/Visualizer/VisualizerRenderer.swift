@@ -28,6 +28,8 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         var shoot: Float = -1
         /// Picks where the shooting star starts.
         var shootSeed: Float = 0
+        /// How many entries of the star buffer to draw.
+        var starCount: Float = 0
     }
 
     private let analyzer: SpectrumAnalyzer
@@ -58,11 +60,18 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
     /// A star asks how loud its band was when it was born.
     private let history: MTLBuffer
     private var lastBucket = 0
+    /// Solar Sailing's stars, written on the CPU a frame at a time into a ring of buffers, so one
+    /// being drawn is never being written.
+    private let starBuffers: [MTLBuffer]
+    private var starFrame = 0
+    /// How far the ship has gone, kept in double precision: a long listen would blur a float.
+    private var travel: Double = 0
     private static let historyBuckets = 1024
     private(set) var visual: FullVisual = .barsAndWaves
 
     /// How many screen pixels make one pixel of the picture. The panel sets this to match the
-    /// skin's pixels; nil picks a size that gives about 200 rows, for full screen.
+    /// skin's pixels, and so does full screen unless that would be too many rows to draw; nil
+    /// picks a size that gives about 200 rows.
     var pixelDivisor: Int?
     /// The skin's 24 analyzer colours (`viscolor.txt`), as RGBA.
     private var palette = [SIMD4<Float>](repeating: SIMD4(0, 0, 0, 1), count: 24)
@@ -80,6 +89,10 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         guard let history = device.makeBuffer(length: historyBytes, options: .storageModeShared) else { return nil }
         memset(history.contents(), 0, historyBytes)
         self.history = history
+        let starBytes = StreakSky.total * MemoryLayout<StreakStar>.stride
+        let buffers = (0..<4).compactMap { _ in device.makeBuffer(length: starBytes, options: .storageModeShared) }
+        guard buffers.count == 4 else { return nil }
+        starBuffers = buffers
 
         func pipeline(_ name: String, _ pixelFormat: MTLPixelFormat) -> MTLRenderPipelineState? {
             guard let fragment = library.makeFunction(name: name) else { return nil }
@@ -156,6 +169,21 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         var peaks = analyzer.peaks
         var palette = self.palette
 
+        // Solar Sailing's stars: worked out here, drawn by the shader.
+        var starBuffer: MTLBuffer?
+        if visual == .solarSailing {
+            starFrame = (starFrame + 1) % starBuffers.count
+            let buffer = starBuffers[starFrame]
+            let frame = StreakSky.Frame(resolution: uniforms.resolution, time: Double(uniforms.time), travel: travel,
+                                        energy: uniforms.energy, beat: uniforms.beat)
+            let count = StreakSky.stars(frame, bars: bars,
+                                        history: history.contents().assumingMemoryBound(to: Float.self),
+                                        rhoMin: 0.2, rhoSpan: 0.8,
+                                        into: buffer.contents().assumingMemoryBound(to: StreakStar.self), capacity: StreakSky.total)
+            uniforms.starCount = Float(count)
+            starBuffer = buffer
+        }
+
         func pass(_ texture: MTLTexture, _ state: MTLRenderPipelineState, input: MTLTexture? = nil) {
             let descriptor = MTLRenderPassDescriptor()
             descriptor.colorAttachments[0].texture = texture
@@ -169,6 +197,7 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
             encoder.setFragmentBytes(&palette, length: palette.count * MemoryLayout<SIMD4<Float>>.stride, index: 3)
             encoder.setFragmentBytes(&peaks, length: peaks.count * MemoryLayout<Float>.stride, index: 4)
             encoder.setFragmentBuffer(history, offset: 0, index: 5)
+            if let starBuffer { encoder.setFragmentBuffer(starBuffer, offset: 0, index: 6) }
             if let input { encoder.setFragmentTexture(input, index: 0) }
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             encoder.endEncoding()
@@ -210,22 +239,26 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format, width: width, height: height, mipmapped: false)
         descriptor.usage = [.renderTarget]
         descriptor.storageMode = .shared
-        guard let texture = device.makeTexture(descriptor: descriptor), let buffer = queue.makeCommandBuffer() else { return nil }
+        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
         feedback = []
         scene = nil
         start = CACurrentMediaTime() - 5
         fillHistory()
+        // One command buffer a frame, each finished before the next: the star buffers are
+        // rewritten every frame.
         for frame in 0..<frames {
+            guard let buffer = queue.makeCommandBuffer() else { return nil }
             updateUniforms()
             uniforms.time = 5 + Float(frame) / 60
-            uniforms.travel = 0.3 + Float(frame) / 60 * 0.3
+            travel = 0.3 + Double(frame) / 60 * 0.3
+            uniforms.travel = Float(travel)
             // The first look at a loud analyzer is always a beat; a picture wants only the star it asked for.
             uniforms.shoot = shootingStar ?? -1
             uniforms.shootSeed = 0.4
             encode(into: buffer, target: texture)
+            buffer.commit()
+            buffer.waitUntilCompleted()
         }
-        buffer.commit()
-        buffer.waitUntilCompleted()
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         texture.getBytes(&pixels, bytesPerRow: width * 4, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
         let info = CGBitmapInfo.byteOrder32Little.union(CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue))
@@ -276,7 +309,8 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         }
         let shot = (now - shootingStarStart) / Self.shootingStarDuration
         uniforms.shoot = shot >= 0 && shot <= 1 ? Float(shot) : -1
-        uniforms.travel += Float(min(now - lastUpdate, 0.05)) * (0.12 + 0.5 * (bass + mid + treble) / 3 + 0.3 * uniforms.beat)
+        travel += min(now - lastUpdate, 0.05) * Double(0.12 + 0.5 * (bass + mid + treble) / 3 + 0.3 * uniforms.beat)
+        uniforms.travel = Float(travel)
         lastUpdate = now
         uniforms.time = Float(now - start)
         uniforms.bass = bass

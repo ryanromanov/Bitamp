@@ -113,8 +113,15 @@ final class VisualizerView: SkinnedView {
         controller.visualizerWindowOpen = showing
         if showing { ensureMetal() }
         metal?.isPaused = !showing
-        // One picture pixel to a skin pixel, so it matches the player; full screen picks its own.
-        renderer?.pixelDivisor = fullScreen == nil ? max(1, Int((scale * (window?.backingScaleFactor ?? 2)).rounded())) : nil
+        // One picture pixel to a skin pixel, so it matches the player, in full screen too: the
+        // same fine pixels, not the same number of rows, which made them huge. A very big screen
+        // takes bigger ones, so there are never more than about 540 rows to draw.
+        let skinPixel = max(1, Int((scale * (window?.backingScaleFactor ?? 2)).rounded()))
+        if fullScreen != nil, let metal {
+            renderer?.pixelDivisor = max(skinPixel, Int((metal.drawableSize.height / 540).rounded(.up)))
+        } else {
+            renderer?.pixelDivisor = skinPixel
+        }
         if showing, let renderer, let chosen = FullVisual(rawValue: preferences.fullVisual), chosen != renderer.visual {
             renderer.select(chosen)
         }
