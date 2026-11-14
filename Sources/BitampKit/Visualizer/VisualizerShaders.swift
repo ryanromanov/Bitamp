@@ -56,6 +56,8 @@ enum VisualizerShaders {
         float energy;
         float levels;
         float travel;
+        float shoot;
+        float shootSeed;
     };
 
     struct VertexOut {
@@ -283,7 +285,7 @@ enum VisualizerShaders {
     // ones grow into plus signs and then four- and eight-point sparkles. Everything that
     // pulses follows the music: the whole sky flares a size on each beat, a star glints
     // while its own band of the analyzer is loud, and the dots behind glitter with the
-    // treble. They swing round in a slow spiral. Now and then a shooting star crosses.
+    // treble. They swing round in a slow spiral. A shooting star crosses on a strong beat.
     fragment float4 starfield(VertexOut in [[stage_in]],
                               constant Uniforms &u [[buffer(0)]],
                               constant float *bars [[buffer(1)]],
@@ -337,16 +339,21 @@ enum VisualizerShaders {
             }
         }
 
-        // A shooting star every few seconds.
-        float period = t / 6.5 + 0.3;
-        float along = fract(period) / 0.1;
-        if (along < 1.0) {
-            float2 direction = normalize(float2(1.0, 0.6));
-            float2 start = float2(res.x * (0.1 + 0.5 * hash(floor(period))), res.y * 0.08);
-            float2 head = start + direction * along * res.x * 0.5;
-            for (int j = 0; j < 8; j++) {
-                if (all(px == floor(head - direction * float(j) * 1.6))) {
-                    color = j == 0 ? palette[23].rgb : ramp(palette, 0.75 - 0.08 * float(j));
+        // A shooting star, sent by a strong beat: it starts in a corner of the sky and runs
+        // across, from the left or the right.
+        if (u.shoot >= 0.0) {
+            bool fromRight = u.shootSeed > 0.5;
+            float2 direction = normalize(float2(fromRight ? -1.0 : 1.0, 0.6));
+            float2 start = float2(res.x * (fromRight ? 0.95 - 0.4 * fract(u.shootSeed * 7.3) : 0.05 + 0.4 * fract(u.shootSeed * 7.3)),
+                                  res.y * (0.05 + 0.25 * fract(u.shootSeed * 13.1)));
+            float2 head = start + direction * u.shoot * res.x * 0.6;
+            float2 headPixel = floor(head);
+            if (px.x >= headPixel.x && px.x <= headPixel.x + 1.0 && px.y >= headPixel.y && px.y <= headPixel.y + 1.0) {
+                color = palette[23].rgb;
+            }
+            for (int j = 1; j < 28; j++) {
+                if (all(px == floor(head - direction * float(j)))) {
+                    color = ramp(palette, 0.85 - 0.028 * float(j));
                 }
             }
         }

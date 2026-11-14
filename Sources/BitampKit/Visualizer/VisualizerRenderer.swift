@@ -24,6 +24,10 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         var levels: Float = 0
         /// How far the starfield has flown, which speeds up with the music.
         var travel: Float = 0
+        /// How far through a shooting star is, 0 to 1, or -1 when there isn't one.
+        var shoot: Float = -1
+        /// Picks where the shooting star starts.
+        var shootSeed: Float = 0
     }
 
     private let analyzer: SpectrumAnalyzer
@@ -41,8 +45,13 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
 
     private var start = CACurrentMediaTime()
     private var uniforms = Uniforms()
-    private var bassAverage: Float = 0
-    private var sinceBeat = 0
+    private var detector = BeatDetector()
+    private var shootingStarStart: TimeInterval = -.infinity
+    private static let shootingStarDuration: TimeInterval = 0.9
+    /// A shooting star needs a beat this many times the least that counts, and this long since
+    /// the last one.
+    private static let strongBeat: Float = 1.6
+    private static let shootingStarGap: TimeInterval = 2.5
     private var lastUpdate = CACurrentMediaTime()
     /// The last stretch of the analyzer, by how far the ship has travelled, for the star
     /// visuals: `historyBuckets` buckets of 0.01 travel for each of the 19 bands, as a ring.
@@ -197,7 +206,7 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
     }
 
     /// The current visual drawn off screen after `frames` frames, for tests and pictures.
-    func snapshot(width: Int, height: Int, frames: Int = 1) -> CGImage? {
+    func snapshot(width: Int, height: Int, frames: Int = 1, shootingStar: Float? = nil) -> CGImage? {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format, width: width, height: height, mipmapped: false)
         descriptor.usage = [.renderTarget]
         descriptor.storageMode = .shared
@@ -210,6 +219,9 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
             updateUniforms()
             uniforms.time = 5 + Float(frame) / 60
             uniforms.travel = 0.3 + Float(frame) / 60 * 0.3
+            // The first look at a loud analyzer is always a beat; a picture wants only the star it asked for.
+            uniforms.shoot = shootingStar ?? -1
+            uniforms.shootSeed = 0.4
             encode(into: buffer, target: texture)
         }
         buffer.commit()
@@ -251,16 +263,19 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         let bars = analyzer.bars
         func average(_ range: Range<Int>) -> Float { range.map { bars[$0] }.reduce(0, +) / Float(range.count) }
         let bass = average(0..<4), mid = average(4..<12), treble = average(12..<SpectrumAnalyzer.barCount)
-        // A beat is the bass jumping well above its recent average.
-        sinceBeat += 1
-        if bass > 0.2, bass > bassAverage * 1.35, sinceBeat > 12 {
+        let now = CACurrentMediaTime()
+        if let strength = detector.update(bars: bars, at: now) {
             uniforms.beat = 1
-            sinceBeat = 0
+            // A strong beat, not too soon after the last shooting star, sends another.
+            if strength >= Self.strongBeat, now - shootingStarStart >= Self.shootingStarGap {
+                shootingStarStart = now
+                uniforms.shootSeed = Float.random(in: 0..<1)
+            }
         } else {
             uniforms.beat *= 0.9
         }
-        bassAverage += (bass - bassAverage) * 0.05
-        let now = CACurrentMediaTime()
+        let shot = (now - shootingStarStart) / Self.shootingStarDuration
+        uniforms.shoot = shot >= 0 && shot <= 1 ? Float(shot) : -1
         uniforms.travel += Float(min(now - lastUpdate, 0.05)) * (0.12 + 0.5 * (bass + mid + treble) / 3 + 0.3 * uniforms.beat)
         lastUpdate = now
         uniforms.time = Float(now - start)
