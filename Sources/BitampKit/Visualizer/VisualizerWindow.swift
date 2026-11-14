@@ -1,7 +1,7 @@
 import AppKit
 import MetalKit
 
-/// The full-window visualizer. Click or use ← → to change visuals, F for full screen.
+/// The full-window visualizer. ← → change visuals; F or a double-click goes full screen.
 /// A plain resizable window for now; the skinned frame comes after the visuals settle.
 @MainActor
 final class VisualizerWindowController: NSWindowController, NSWindowDelegate {
@@ -51,7 +51,7 @@ final class VisualizerView: MTKView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
-        if event.clickCount == 2 { onFullScreen?() } else { onStep?(1) }
+        if event.clickCount == 2 { onFullScreen?() }
     }
 
     override func keyDown(with event: NSEvent) {
