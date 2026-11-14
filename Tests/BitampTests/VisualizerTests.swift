@@ -68,6 +68,26 @@ import Testing
         }
     }
 
+    @Test func manyRowsStillDrawTheStars() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let view = MTKView(frame: NSRect(x: 0, y: 0, width: 320, height: 200), device: device)
+        let analyzer = SpectrumAnalyzer()
+        playing(analyzer)
+        for visual in [FullVisual.solarSailing, .starfield] {
+            let renderer = try #require(VisualizerRenderer(view: view, analyzer: analyzer))
+            renderer.setPalette(DefaultSkin().visColors)
+            // One screen pixel to a picture pixel on a 640 by 400 target: more rows than the panel's.
+            renderer.pixelDivisor = 1
+            renderer.select(visual)
+            let image = try #require(renderer.snapshot(width: 640, height: 400, frames: 30))
+            #expect(litPixels(image) > 200)
+            if let folder = ProcessInfo.processInfo.environment["BITAMP_VISUALIZER_OUT"] {
+                try NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?
+                    .write(to: URL(fileURLWithPath: folder).appendingPathComponent("full-\(visual.rawValue).png"))
+            }
+        }
+    }
+
     @Test func aShootingStarCrossesTheStarfield() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { return }
         let view = MTKView(frame: NSRect(x: 0, y: 0, width: 320, height: 200), device: device)

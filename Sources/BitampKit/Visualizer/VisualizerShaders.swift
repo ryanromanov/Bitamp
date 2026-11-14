@@ -58,6 +58,7 @@ enum VisualizerShaders {
         float travel;
         float shoot;
         float shootSeed;
+        float starCount;
     };
 
     struct VertexOut {
@@ -200,29 +201,29 @@ enum VisualizerShaders {
 
     // Streaking through the stars. The vanishing point wanders and the whole sky rolls; the
     // streaks lengthen with the music and the beat sends out a checkered shockwave and
-    // flashes the glow at the far end. Each star has a band of the analyzer of its own,
-    // chosen at random so the sky fills evenly, and takes its colour from how loud that band
-    // is. Stars never switch on and off with the music: that looked like flicker.
-    //
-    // Real perspective: a star sits off to the side of the ship's path by a fixed amount
-    // (rho) and is at some distance (depth, 1 far, 0 near). Where it shows on the screen is
-    // rho over depth, so far stars are small, dim and nearly still, and speed up and
-    // brighten as they come close. Streaks are how far it moved in a moment, so they're
-    // short far away and long near the edge. `rhoMin` and `rhoSpan` say how far to the side
-    // the stars can be.
+    // flashes the glow at the far end. Where the stars are is worked out on the CPU
+    // (`StreakSky`), which also decides which exist, from how loud their band was when they
+    // were born; this just draws them. A star's colour follows how loud its band is now.
+
+    struct StreakStar {
+        float2 head;
+        float2 tail;
+        float depth;
+        float level;
+        float dust;
+        float padding;
+    };
+
     static float4 streak_sky(float2 uv,
                              constant Uniforms &u,
-                             constant float *bars,
                              constant float4 *palette,
-                             constant float *history,
-                             float rhoMin, float rhoSpan) {
+                             constant StreakStar *stars) {
         float2 res = u.resolution;
         float2 px = floor(uv * res);
         float2 pixelCenter = px + 0.5;
         float t = u.time;
         float2 vanishing = floor(res * 0.5) + 0.5
                          + float2(sin(t * 0.31) * res.x * 0.07, cos(t * 0.23) * res.y * 0.07);
-        float roll = sin(t * 0.17) * 0.7 + u.travel * 0.04;
         float3 color = palette[0].rgb;
 
         // The glow at the far end: a two-tone dithered gradient that swells with the bass.
@@ -235,43 +236,27 @@ enum VisualizerShaders {
             if (abs(r - ring) < 0.8 && ((int(px.x) + int(px.y)) & 1) == 0) color = ramp(palette, 0.6);
         }
 
-        float k = res.y * 0.1;
-        float lag = 0.02 + 0.05 * u.energy + 0.05 * u.beat;
-        // The first 170 are the streaks; the rest are far, slow, dim stars with no streak.
-        for (int i = 0; i < 420; i++) {
-            float fi = float(i);
-            bool dust = i >= 170;
-            int band = min(int(hash(fi + 41.0) * 19.0), 18);
-            float level = bars[band];
-            float angle = hash(fi + 1.0) * 6.2831853 + roll;
-            float2 direction = float2(cos(angle), sin(angle));
-            // The far stars are spread much wider, so they fill the sky and not just the middle.
-            float rho = dust ? 0.6 + 5.4 * hash(fi + 3.0) : rhoMin + rhoSpan * hash(fi + 3.0);
-            float speed = dust ? 0.15 : 0.5 + 0.8 * hash(fi + 13.0);
-            float phase = hash(fi + 29.0);
-            float x = phase - u.travel * speed;
-            // Quiet music makes few stars, loud music many; a star keeps the verdict it was
-            // born with.
-            if (hash2(float2(fi, floor(x))) > 0.15 + 1.6 * birthLevel(history, band, phase, x, speed)) continue;
-            float along = fract(x);
-            float depth = 0.03 + 0.97 * pow(along, 1.5);
-            float tailDepth = min(depth + (dust ? 0.0 : lag), 1.0);
-            float2 head = vanishing + direction * (rho * k / depth);
-            float2 tail = vanishing + direction * (rho * k / tailDepth);
-            float2 trail = head - tail;
+        int count = int(u.starCount);
+        for (int i = 0; i < count; i++) {
+            StreakStar star = stars[i];
+            // Most stars are nowhere near this pixel.
+            float2 low = min(star.head, star.tail) - 1.5;
+            float2 high = max(star.head, star.tail) + 1.5;
+            if (any(pixelCenter < low) || any(pixelCenter > high)) continue;
+            float2 trail = star.head - star.tail;
             float length2 = dot(trail, trail);
-            float t01 = length2 > 0.0 ? clamp(dot(pixelCenter - tail, trail) / length2, 0.0, 1.0) : 1.0;
-            float d = length(pixelCenter - (tail + trail * t01));
+            float t01 = length2 > 0.0 ? clamp(dot(pixelCenter - star.tail, trail) / length2, 0.0, 1.0) : 1.0;
+            float d = length(pixelCenter - (star.tail + trail * t01));
             // A star always lights the pixel it's in, so a far one that has hardly moved
             // can't slip between pixels and wink out.
-            bool onHead = all(px == floor(head));
-            if (onHead || d < (depth < 0.3 ? 0.75 : 0.55)) {
-                if (depth > 0.6 || dust) {
-                    color = ramp(palette, 0.05 + 0.25 * level);
-                } else if (depth < 0.18 && (t01 > 0.8 || onHead)) {
+            bool onHead = all(px == floor(star.head));
+            if (onHead || d < (star.depth < 0.3 ? 0.75 : 0.55)) {
+                if (star.depth > 0.6 || star.dust > 0.5) {
+                    color = ramp(palette, 0.05 + 0.25 * star.level);
+                } else if (star.depth < 0.18 && (t01 > 0.8 || onHead)) {
                     color = palette[23].rgb;
                 } else {
-                    float brightness = clamp(0.15 + level * 0.9 + (0.6 - depth) * 0.5, 0.0, 1.0);
+                    float brightness = clamp(0.15 + star.level * 0.9 + (0.6 - star.depth) * 0.5, 0.0, 1.0);
                     color = ramp(palette, (t01 > 0.8 || onHead) ? brightness : brightness * 0.6);
                 }
             }
@@ -285,8 +270,9 @@ enum VisualizerShaders {
                                   constant float *wave [[buffer(2)]],
                                   constant float4 *palette [[buffer(3)]],
                                   constant float *peaks [[buffer(4)]],
-                                  constant float *history [[buffer(5)]]) {
-        return streak_sky(in.uv, u, bars, palette, history, 0.2, 0.8);
+                                  constant float *history [[buffer(5)]],
+                                  constant StreakStar *stars [[buffer(6)]]) {
+        return streak_sky(in.uv, u, palette, stars);
     }
 
     // MARK: Starfield
