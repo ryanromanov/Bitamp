@@ -1,18 +1,19 @@
 /// The full-window visualizer's visuals. The raw value is what's saved in preferences.
 enum FullVisual: String, CaseIterable {
-    case barsAndWaves, plasma, starfield, alchemy
+    case barsAndWaves, plasma, hyperspace, starfield, alchemy
 
     var title: String {
         switch self {
         case .barsAndWaves: return "Bars and Waves"
         case .plasma: return "Plasma"
+        case .hyperspace: return "Hyperspace"
         case .starfield: return "Starfield"
         case .alchemy: return "Alchemy"
         }
     }
 
     /// How many levels per colour channel the picture is reduced to, with an ordered dither,
-    /// or 0 to leave the colours as drawn. Bars and Waves, Plasma and Starfield use the skin's
+    /// or 0 to leave the colours as drawn. Bars and Waves, Plasma, Hyperspace and Starfield use the skin's
     /// own palette as it is; Alchemy's fading trails get the dither.
     var ditherLevels: Float {
         self == .alchemy ? 6 : 0
@@ -23,6 +24,7 @@ enum FullVisual: String, CaseIterable {
         switch self {
         case .barsAndWaves: return "bars_and_waves"
         case .plasma: return "plasma"
+        case .hyperspace: return "hyperspace"
         case .starfield: return "starfield"
         case .alchemy: return nil
         }
@@ -91,6 +93,18 @@ enum VisualizerShaders {
         return mix(bars[i], bars[j], f - float(i));
     }
 
+    // A 4 by 4 ordered-dither threshold between 0 and 1 for a pixel, for the cheap two-tone
+    // gradients of the era.
+    constant float bayer[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
+
+    static float dither4(float2 px) {
+        return (bayer[(int(px.y) & 3) * 4 + (int(px.x) & 3)] + 0.5) / 16.0;
+    }
+
+    static float hash(float n) {
+        return fract(sin(n * 127.1) * 43758.5453);
+    }
+
     // MARK: Bars and Waves
 
     // The analyzer as chunky segments with falling peak caps, under an oscilloscope.
@@ -157,15 +171,77 @@ enum VisualizerShaders {
         return float4(ramp(palette, color), 1);
     }
 
-    // MARK: Starfield
+    // MARK: Hyperspace
 
-    static float hash(float n) {
-        return fract(sin(n * 127.1) * 43758.5453);
+    // Streaking through the stars at warp speed. The vanishing point wanders and the whole
+    // sky rolls; the streaks lengthen with the music and the beat kicks the ship (a shake,
+    // a checkered shockwave and a flash at the far end). Each star has a band of the
+    // analyzer of its own, chosen at random so the sky fills evenly, and takes its colour
+    // from how loud that band is.
+    fragment float4 hyperspace(VertexOut in [[stage_in]],
+                               constant Uniforms &u [[buffer(0)]],
+                               constant float *bars [[buffer(1)]],
+                               constant float *wave [[buffer(2)]],
+                               constant float4 *palette [[buffer(3)]],
+                               constant float *peaks [[buffer(4)]]) {
+        float2 res = u.resolution;
+        float2 px = floor(in.uv * res);
+        float2 pixelCenter = px + 0.5;
+        float t = u.time;
+        float2 vanishing = floor(res * 0.5) + 0.5
+                         + float2(sin(t * 0.31) * res.x * 0.07, cos(t * 0.23) * res.y * 0.07)
+                         + floor(float2(sin(t * 60.0), cos(t * 47.0)) * u.beat * 1.5);
+        float scale = res.y * 0.9;
+        float roll = sin(t * 0.17) * 0.7 + u.travel * 0.04;
+        float3 color = palette[0].rgb;
+
+        // The glow at the far end: a two-tone dithered gradient that swells with the bass.
+        float r = length(pixelCenter - vanishing);
+        float glow = (0.15 + 0.7 * u.bass + 0.6 * u.beat) * exp(-r * r / (res.y * res.y * 0.05));
+        if (glow > dither4(px)) color = ramp(palette, 0.2);
+        // The shockwave, a checkered ring that runs out from the middle on every beat.
+        if (u.beat > 0.04) {
+            float ring = (1.0 - u.beat) * res.y * 0.9;
+            if (abs(r - ring) < 0.8 && ((int(px.x) + int(px.y)) & 1) == 0) color = ramp(palette, 0.6);
+        }
+
+        float streak = min(0.04 + 0.3 * u.energy + 0.12 * u.beat, 0.3);
+        for (int i = 0; i < 260; i++) {
+            float fi = float(i);
+            bool dust = i >= 200;
+            int band = min(int(hash(fi + 41.0) * 19.0), 18);
+            float level = bars[band];
+            if (hash(fi + 77.0) > 0.3 + 0.7 * level) continue;
+            float angle = hash(fi + 1.0) * 6.2831853 + roll;
+            float2 direction = float2(cos(angle), sin(angle));
+            float speed = dust ? 0.2 : 0.6 + hash(fi + 13.0);
+            float z = fract(hash(fi + 29.0) - u.travel * speed);
+            float zTail = min(z + (dust ? 0.0 : streak), 1.0);
+            float2 head = vanishing + direction * ((1.0 - z) * (1.0 - z) * 1.25) * scale;
+            float2 tail = vanishing + direction * ((1.0 - zTail) * (1.0 - zTail) * 1.25) * scale;
+            float2 along = head - tail;
+            float length2 = dot(along, along);
+            float k = length2 > 0.0 ? clamp(dot(pixelCenter - tail, along) / length2, 0.0, 1.0) : 1.0;
+            float d = length(pixelCenter - (tail + along * k));
+            if (d < (z < 0.3 ? 1.0 : 0.7)) {
+                if (dust) {
+                    color = ramp(palette, 0.1 + 0.3 * level);
+                } else if (k > 0.8) {
+                    color = z < 0.2 ? palette[23].rgb : ramp(palette, clamp(0.15 + level * 1.1, 0.0, 1.0));
+                } else {
+                    color = ramp(palette, clamp(0.05 + level * 0.6, 0.0, 1.0));
+                }
+            }
+        }
+        return float4(color, 1);
     }
 
-    // Flying through stars, as on the old screensavers. Each star comes out of the middle and
-    // speeds up toward you, near ones bigger and whiter. Which stars show depends on the
-    // analyzer bar for the direction they're heading, so the music fills the sky.
+    // MARK: Starfield
+
+    // The same flight, with stars instead of streaks. Far stars are single pixels; nearer
+    // ones grow into plus signs and then glinting four- and eight-point sparkles, and some
+    // flare a size on the beat. They swing round in a slow spiral. Behind them a sky of
+    // twinkling dots, and now and then a shooting star.
     fragment float4 starfield(VertexOut in [[stage_in]],
                               constant Uniforms &u [[buffer(0)]],
                               constant float *bars [[buffer(1)]],
@@ -174,34 +250,57 @@ enum VisualizerShaders {
                               constant float *peaks [[buffer(4)]]) {
         float2 res = u.resolution;
         float2 px = floor(in.uv * res);
-        float2 center = floor(res * 0.5);
+        float t = u.time;
+        float2 vanishing = floor(res * 0.5) + float2(floor(sin(t * 0.2) * res.x * 0.05), floor(cos(t * 0.15) * res.y * 0.05));
         float scale = res.y * 0.9;
         float3 color = palette[0].rgb;
-        float2 pixelCenter = px + 0.5;
+
+        // The sky: dots that twinkle, each at its own pace.
+        float sky = hash(px.x * 1.37 + px.y * 91.71);
+        if (sky > 0.991) {
+            float twinkle = fract(sky * 311.0 + t * (0.25 + sky * 0.5));
+            color = twinkle < 0.12 ? palette[23].rgb : ramp(palette, 0.06 + 0.1 * twinkle);
+        }
+
         for (int i = 0; i < 200; i++) {
             float fi = float(i);
-            float turn = hash(fi + 1.0);
-            float2 direction = float2(cos(turn * 6.2831853), sin(turn * 6.2831853));
-            float mirrored = abs(turn * 2.0 - 1.0);
-            if (hash(fi + 41.0) > 0.3 + 0.7 * bars[int(mirrored * 18.0)]) continue;
-            float speed = 0.6 + hash(fi + 13.0);
-            float phase = hash(fi + 29.0);
-            float z = fract(phase - u.travel * speed);
-            // The star's head and the point it was a moment ago, as a short streak.
-            float headRadius = (1.0 - z) * (1.0 - z) * 1.25;
-            float zTail = min(z + 0.06, 1.0);
-            float tailRadius = (1.0 - zTail) * (1.0 - zTail) * 1.25;
-            float2 head = center + 0.5 + direction * headRadius * scale;
-            float2 tail = center + 0.5 + direction * tailRadius * scale;
-            float2 along = head - tail;
-            float length2 = dot(along, along);
-            float k = length2 > 0.0 ? clamp(dot(pixelCenter - tail, along) / length2, 0.0, 1.0) : 1.0;
-            float d = length(pixelCenter - (tail + along * k));
-            float width = z < 0.3 ? 1.0 : 0.7;
-            if (d < width) {
-                color = (k > 0.8 && z < 0.22) ? palette[23].rgb
-                      : k > 0.8 ? ramp(palette, 0.3 + (1.0 - z) * 0.5)
-                      : ramp(palette, 0.05 + (1.0 - z) * 0.3);
+            int band = min(int(hash(fi + 41.0) * 19.0), 18);
+            float level = bars[band];
+            if (hash(fi + 77.0) > 0.4 + 0.6 * level) continue;
+            float speed = 0.2 + 0.3 * hash(fi + 13.0);
+            float z = fract(hash(fi + 29.0) - u.travel * speed);
+            float angle = hash(fi + 1.0) * 6.2831853 + (1.0 - z) * 1.1 + u.travel * 0.02;
+            float2 position = floor(vanishing + float2(cos(angle), sin(angle)) * ((1.0 - z) * (1.0 - z) * 0.85) * scale);
+            float2 d = px - position;
+            float ax = abs(d.x), ay = abs(d.y);
+            if (ax > 4.0 || ay > 4.0) continue;
+
+            int size = z > 0.65 ? 0 : z > 0.4 ? 1 : z > 0.2 ? 2 : 3;
+            if (u.beat > 0.5 && size < 3 && hash(fi + 5.0) < 0.5) size += 1;
+            bool glint = fract(hash(fi + 9.0) + t * 0.5) < 0.2;
+            float arm = size == 0 ? 0.0 : size == 1 ? 1.0 : size == 2 ? 2.0 : 4.0;
+            bool onAxis = (ax == 0.0 && ay <= arm) || (ay == 0.0 && ax <= arm);
+            bool diagonal = (size >= 3 && ax == ay && ax <= 2.0) || (size == 2 && glint && ax == 1.0 && ay == 1.0);
+            if (!onAxis && !diagonal) continue;
+            if (ax == 0.0 && ay == 0.0) {
+                color = size >= 1 ? palette[23].rgb : ramp(palette, clamp(0.2 + level, 0.0, 1.0));
+            } else {
+                float edge = max(ax, ay) / max(arm, 1.0);
+                color = ramp(palette, clamp((edge > 0.6 ? 0.1 : 0.3) + level * 0.8, 0.0, 1.0));
+            }
+        }
+
+        // A shooting star every few seconds.
+        float period = t / 6.5 + 0.3;
+        float along = fract(period) / 0.1;
+        if (along < 1.0) {
+            float2 direction = normalize(float2(1.0, 0.6));
+            float2 start = float2(res.x * (0.1 + 0.5 * hash(floor(period))), res.y * 0.08);
+            float2 head = start + direction * along * res.x * 0.5;
+            for (int j = 0; j < 8; j++) {
+                if (all(px == floor(head - direction * float(j) * 1.6))) {
+                    color = j == 0 ? palette[23].rgb : ramp(palette, 0.75 - 0.08 * float(j));
+                }
             }
         }
         return float4(color, 1);
@@ -242,8 +341,6 @@ enum VisualizerShaders {
 
     // Draws the small picture at full size with no smoothing, and, for the visuals that
     // ask, in a few levels per colour with an ordered dither.
-    constant float bayer[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
-
     fragment float4 present(VertexOut in [[stage_in]],
                             constant Uniforms &u [[buffer(0)]],
                             texture2d<float> image [[texture(0)]]) {
