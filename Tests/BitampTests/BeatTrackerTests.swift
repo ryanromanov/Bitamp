@@ -271,6 +271,24 @@ import Testing
         #expect(onKick >= found.count * 8 / 10, "\(onKick) of \(found.count) on a kick")
     }
 
+    /// How soon the pulses start once the beat does.
+    @Test func theBeatIsFoundWithinTwoSecondsOfStarting() {
+        for chunk in [2048, 4410] {
+            for bpm in [100.0, 128] {
+                var (samples, quarters) = band(seconds: 30, bpm: bpm, seed: 41)
+                // A quiet pad for the first 8 seconds, then the band comes in.
+                let entry = 8.0
+                for i in 0..<Int(entry * Self.sampleRate) where i < samples.count {
+                    samples[i] = 0.02 * sin(2 * .pi * 220 * Float(i) / Float(Self.sampleRate))
+                }
+                quarters = quarters.filter { $0 >= entry }
+                let found = beats(in: samples, chunk: chunk).filter { $0 >= entry }
+                let first = found.first.map { $0 - entry }
+                #expect(first != nil && first! <= 2.0, "\(bpm) BPM, \(chunk)-sample buffers: first beat \(first.map { String(format: "%.1f s", $0) } ?? "never") after the band came in")
+            }
+        }
+    }
+
     @Test func aBandsBackbeatIsFoundOnTheQuarterNotes() {
         for bpm in [96.0, 120, 150] {
             let (samples, quarters) = band(seconds: 40, bpm: bpm, seed: 21)
