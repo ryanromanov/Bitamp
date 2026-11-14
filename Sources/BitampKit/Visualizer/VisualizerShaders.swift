@@ -107,6 +107,19 @@ enum VisualizerShaders {
         return fract(sin(n * 127.1) * 43758.5453);
     }
 
+    // How loud a band was when a star was born. The renderer keeps the last few seconds of the
+    // analyzer in `history`, a ring of 1024 buckets per band, a bucket for each 0.01 the ship
+    // has travelled. A star's journey runs `x` from some whole number down to the one below it
+    // as the ship travels `speed` times as far, so it was born when the travel was
+    // (phase - cycle - 1) / speed, which stays the same for the whole journey. Asking for the
+    // level at that moment lets the music decide which stars are made, without stars that are
+    // already flying switching on and off.
+    static float birthLevel(constant float *history, int band, float phase, float x, float speed) {
+        float born = (phase - floor(x) - 1.0) / speed;
+        int bucket = int(floor(born * 100.0)) & 1023;
+        return history[band * 1024 + bucket];
+    }
+
     // MARK: Bars and Waves
 
     // The analyzer as chunky segments with falling peak caps, under an oscilloscope.
@@ -192,6 +205,7 @@ enum VisualizerShaders {
                              constant Uniforms &u,
                              constant float *bars,
                              constant float4 *palette,
+                             constant float *history,
                              float rhoMin, float rhoSpan) {
         float2 res = u.resolution;
         float2 px = floor(uv * res);
@@ -217,12 +231,18 @@ enum VisualizerShaders {
         for (int i = 0; i < 160; i++) {
             float fi = float(i);
             bool dust = i >= 120;
-            float level = bars[min(int(hash(fi + 41.0) * 19.0), 18)];
+            int band = min(int(hash(fi + 41.0) * 19.0), 18);
+            float level = bars[band];
             float angle = hash(fi + 1.0) * 6.2831853 + roll;
             float2 direction = float2(cos(angle), sin(angle));
             float rho = rhoMin + rhoSpan * hash(fi + 3.0);
             float speed = dust ? 0.15 : 0.5 + 0.8 * hash(fi + 13.0);
-            float along = fract(hash(fi + 29.0) - u.travel * speed);
+            float phase = hash(fi + 29.0);
+            float x = phase - u.travel * speed;
+            // Quiet music makes few stars, loud music many; a star keeps the verdict it was
+            // born with.
+            if (hash(fi + 77.0 + floor(x) * 13.37) > 0.05 + 0.95 * birthLevel(history, band, phase, x, speed)) continue;
+            float along = fract(x);
             float depth = 0.03 + 0.97 * pow(along, 1.5);
             float tailDepth = min(depth + (dust ? 0.0 : lag), 1.0);
             float2 head = vanishing + direction * (rho * k / depth);
@@ -253,8 +273,9 @@ enum VisualizerShaders {
                                   constant float *bars [[buffer(1)]],
                                   constant float *wave [[buffer(2)]],
                                   constant float4 *palette [[buffer(3)]],
-                                  constant float *peaks [[buffer(4)]]) {
-        return streak_sky(in.uv, u, bars, palette, 0.2, 0.8);
+                                  constant float *peaks [[buffer(4)]],
+                                  constant float *history [[buffer(5)]]) {
+        return streak_sky(in.uv, u, bars, palette, history, 0.2, 0.8);
     }
 
     fragment float4 starspray(VertexOut in [[stage_in]],
@@ -262,8 +283,9 @@ enum VisualizerShaders {
                               constant float *bars [[buffer(1)]],
                               constant float *wave [[buffer(2)]],
                               constant float4 *palette [[buffer(3)]],
-                              constant float *peaks [[buffer(4)]]) {
-        return streak_sky(in.uv, u, bars, palette, 0.1, 0.5);
+                              constant float *peaks [[buffer(4)]],
+                              constant float *history [[buffer(5)]]) {
+        return streak_sky(in.uv, u, bars, palette, history, 0.06, 0.35);
     }
 
     // MARK: Starfield
@@ -277,7 +299,8 @@ enum VisualizerShaders {
                               constant float *bars [[buffer(1)]],
                               constant float *wave [[buffer(2)]],
                               constant float4 *palette [[buffer(3)]],
-                              constant float *peaks [[buffer(4)]]) {
+                              constant float *peaks [[buffer(4)]],
+                              constant float *history [[buffer(5)]]) {
         float2 res = u.resolution;
         float2 px = floor(in.uv * res);
         float t = u.time;
@@ -297,7 +320,11 @@ enum VisualizerShaders {
             int band = min(int(hash(fi + 41.0) * 19.0), 18);
             float level = bars[band];
             float speed = 0.2 + 0.3 * hash(fi + 13.0);
-            float z = fract(hash(fi + 29.0) - u.travel * speed);
+            float phase = hash(fi + 29.0);
+            float x = phase - u.travel * speed;
+            // As in the streaks: the music decides which stars are made, not which stay.
+            if (hash(fi + 77.0 + floor(x) * 13.37) > 0.1 + 0.9 * birthLevel(history, band, phase, x, speed)) continue;
+            float z = fract(x);
             float angle = hash(fi + 1.0) * 6.2831853 + (1.0 - z) * 1.1 + u.travel * 0.02;
             float2 position = floor(vanishing + float2(cos(angle), sin(angle)) * ((1.0 - z) * (1.0 - z) * 0.85) * scale);
             float2 d = px - position;

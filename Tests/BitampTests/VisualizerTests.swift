@@ -37,6 +37,37 @@ import Testing
         return colors.count
     }
 
+    /// How many pixels differ from the top-left one, which is background in every visual here.
+    func litPixels(_ image: CGImage) -> Int {
+        let rep = NSBitmapImageRep(cgImage: image)
+        let background = rep.colorAt(x: 0, y: 0)
+        var count = 0
+        for y in 0..<rep.pixelsHigh {
+            for x in 0..<rep.pixelsWide where rep.colorAt(x: x, y: y) != background { count += 1 }
+        }
+        return count
+    }
+
+    @Test func starsAreMadeFromLoudMusicAndNotFromQuietMusic() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let view = MTKView(frame: NSRect(x: 0, y: 0, width: 320, height: 200), device: device)
+        let loud = SpectrumAnalyzer()
+        playing(loud)
+        let quiet = SpectrumAnalyzer()
+        for visual in [FullVisual.starspray, .solarSailing, .starfield] {
+            let busy = try #require(VisualizerRenderer(view: view, analyzer: loud))
+            let still = try #require(VisualizerRenderer(view: view, analyzer: quiet))
+            for renderer in [busy, still] {
+                renderer.setPalette(DefaultSkin().visColors)
+                renderer.pixelDivisor = 2
+                renderer.select(visual)
+            }
+            let some = litPixels(try #require(busy.snapshot(width: 640, height: 400, frames: 30)))
+            let few = litPixels(try #require(still.snapshot(width: 640, height: 400, frames: 30)))
+            #expect(few * 4 < some, "\(visual.title): \(few) lit pixels in quiet music against \(some) in loud")
+        }
+    }
+
     @Test func everyVisualDrawsAndFollowsTheAudio() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { return }
         let silent = SpectrumAnalyzer()
