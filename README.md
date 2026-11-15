@@ -32,9 +32,9 @@ Bitamp isn't affiliated with or endorsed by Winamp or Nullsoft. Its default skin
 
 Bitamp has two kinds. The little spectrum or oscilloscope in the main window follows your skin, as in the classic players. The **full-window visualizer** (Window ▸ Visualizer, ⌥V) is a panel you can resize or take full screen with F or a double-click, drawn with Metal and reading the same sound the analyzer does. ← → step through the visuals, and the choice is remembered. Everything is drawn small, at your skin's own pixel size, and scaled up with no smoothing, so it looks like the rest of the player.
 
-### Skin visuals
+### Retro
 
-Hand-written for Bitamp and drawn in your skin's own colours, so they change when you change skins.
+The original visuals: hand-written for Bitamp and drawn in your skin's own colours, so they change when you change skins.
 
 - **Bars and Waves**: the analyzer bars with peaks, over the scope.
 - **Plasma**: slow, rolling sine waves run through the skin's palette.
