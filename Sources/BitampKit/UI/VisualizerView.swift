@@ -122,8 +122,8 @@ final class VisualizerView: SkinnedView {
         } else {
             renderer?.pixelDivisor = skinPixel
         }
-        if showing, let renderer, let chosen = FullVisual(rawValue: preferences.fullVisual), chosen != renderer.visual {
-            renderer.select(chosen)
+        if showing, let renderer {
+            renderer.select(VisualChoice(raw: preferences.fullVisual))
         }
     }
 
@@ -140,7 +140,8 @@ final class VisualizerView: SkinnedView {
             return
         }
         renderer.setPalette(skin.visColors)
-        if let chosen = FullVisual(rawValue: preferences.fullVisual) { renderer.select(chosen) }
+        renderer.onPreset = { [weak self] name in self?.flashMessage?("PRESET: \(name.uppercased())") }
+        renderer.select(VisualChoice(raw: preferences.fullVisual))
         view.onFullScreen = { [weak self] in self?.toggleFullScreen() }
         self.renderer = renderer
         metal = view
@@ -151,10 +152,10 @@ final class VisualizerView: SkinnedView {
 
     /// Moves to the next or previous visual and says which.
     func step(_ direction: Int) {
-        let all = FullVisual.allCases
-        let current = all.firstIndex(of: FullVisual(rawValue: preferences.fullVisual) ?? .barsAndWaves) ?? 0
+        let all = VisualChoice.all(presetNames: MilkPresetLibrary.names())
+        let current = all.firstIndex(of: VisualChoice(raw: preferences.fullVisual)) ?? 0
         let next = all[(current + direction + all.count) % all.count]
-        preferences.fullVisual = next.rawValue
+        preferences.fullVisual = next.raw
         flashMessage?("VISUALIZER: \(next.title.uppercased())")
         announce?(nil)
         needsDisplay = true
@@ -218,7 +219,7 @@ final class VisualizerView: SkinnedView {
     // MARK: - Accessibility
 
     override func accessibleControls() -> [AccessibleControl] {
-        let visual = FullVisual(rawValue: preferences.fullVisual) ?? .barsAndWaves
+        let visual = VisualChoice(raw: preferences.fullVisual)
         return [
             AccessibleControl(id: "close", kind: .button, label: "Close",
                               rect: PanelFrame(skin: skin, size: pixelSize, title: title, active: isActive).close,

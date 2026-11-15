@@ -32,6 +32,8 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         var starCount: Float = 0
         /// How far Solar Sailing's shockwave has run, 0 to 1, or -1 when there isn't one.
         var ring: Float = -1
+        /// How far Drift has faded to the next preset, 0 to 1.
+        var fade: Float = 0
     }
 
     private let analyzer: SpectrumAnalyzer
@@ -76,6 +78,25 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
     private var travel: Double = 0
     private static let historyBuckets = 1024
     private(set) var visual: FullVisual = .barsAndWaves
+    /// The Presets visual: MilkDrop-format presets, each shown for a while in turn.
+    private var milk: MilkdropEngine?
+    /// The engine and picture for the preset Drift is fading to.
+    private var milkNext: MilkdropEngine?
+    private var sceneNext: MTLTexture?
+    private var milkPresets: [MilkPresetLibrary.Entry] = []
+    private var milkIndex = 0
+    private var nextIndex: Int?
+    private var fadeStart = CACurrentMediaTime()
+    /// The preset being held, or nil for Drift.
+    private var heldPreset: String?
+    private var milkShownSince = CACurrentMediaTime()
+    private var milkLastFrame = CACurrentMediaTime()
+    /// Drift shows a preset this long, then fades to the next over `fadeSeconds`.
+    var presetSeconds: TimeInterval = 30
+    var fadeSeconds: TimeInterval = 6
+    private let mix: MTLRenderPipelineState
+    /// Called with a preset's name when it comes on screen.
+    var onPreset: ((String) -> Void)?
 
     /// How many screen pixels make one pixel of the picture. The panel sets this to match the
     /// skin's pixels, and so does full screen unless that would be too many rows to draw; nil
@@ -115,18 +136,46 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
             guard let state = pipeline(shader, .rgba16Float) else { return nil }
             single[visual] = state
         }
-        guard let step = pipeline("alchemy_step", .rgba16Float), let present = pipeline("present", view.colorPixelFormat) else { return nil }
+        guard let step = pipeline("alchemy_step", .rgba16Float), let present = pipeline("present", view.colorPixelFormat),
+              let mix = pipeline("present_mix", view.colorPixelFormat) else { return nil }
         feedbackStep = step
+        self.mix = mix
         self.present = present
         super.init()
         view.device = device
         view.delegate = self
     }
 
-    func select(_ new: FullVisual) {
-        guard new != visual else { return }
-        visual = new
+    private var choice = VisualChoice(visual: .barsAndWaves)
+
+    func select(_ new: FullVisual) { select(VisualChoice(visual: new)) }
+
+    func select(_ new: VisualChoice) {
+        guard new != choice else { return }
+        choice = new
+        visual = new.visual
         feedback = []  // Alchemy starts from black each time it's chosen.
+        nextIndex = nil
+        if new.visual == .presets { startPresets(held: new.preset) }
+    }
+
+    private func startPresets(held: String?) {
+        if milk == nil { milk = MilkdropEngine(device: device) }
+        if milkNext == nil { milkNext = MilkdropEngine(device: device) }
+        milkPresets = MilkPresetLibrary.load()
+        guard !milkPresets.isEmpty else { return }
+        heldPreset = held
+        let index = held.flatMap { name in milkPresets.firstIndex { $0.name == name } } ?? Int.random(in: 0..<milkPresets.count)
+        showPreset(index)
+    }
+
+    private func showPreset(_ index: Int) {
+        milkIndex = index
+        nextIndex = nil
+        milkShownSince = CACurrentMediaTime()
+        milkLastFrame = milkShownSince
+        milk?.load(milkPresets[index].preset, at: Double(uniforms.time))
+        onPreset?(milkPresets[index].name)
     }
 
     /// Takes the picture's colours from a skin.
@@ -192,7 +241,7 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
             starBuffer = buffer
         }
 
-        func pass(_ texture: MTLTexture, _ state: MTLRenderPipelineState, input: MTLTexture? = nil) {
+        func pass(_ texture: MTLTexture, _ state: MTLRenderPipelineState, input: MTLTexture? = nil, second: MTLTexture? = nil) {
             let descriptor = MTLRenderPassDescriptor()
             descriptor.colorAttachments[0].texture = texture
             descriptor.colorAttachments[0].loadAction = .dontCare
@@ -207,12 +256,54 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
             encoder.setFragmentBuffer(history, offset: 0, index: 5)
             if let starBuffer { encoder.setFragmentBuffer(starBuffer, offset: 0, index: 6) }
             if let input { encoder.setFragmentTexture(input, index: 0) }
+            if let second { encoder.setFragmentTexture(second, index: 1) }
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             encoder.endEncoding()
         }
 
         let drawn: MTLTexture
-        if let state = single[visual] {
+        if visual == .presets, let milk, !milkPresets.isEmpty {
+            if scene.map({ ($0.width, $0.height) != (width, height) }) ?? true {
+                scene = texture(width, height, usage: [.renderTarget, .shaderRead])
+            }
+            guard let scene else { return }
+            let now = CACurrentMediaTime()
+            let delta = min(max(now - milkLastFrame, 0), 0.1)
+            milkLastFrame = now
+            let audio = MilkAudio(bars: bars, waveform: wave)
+            // Drift: after a while, start the next preset behind this one and fade over to it.
+            if heldPreset == nil, milkPresets.count > 1, nextIndex == nil, now - milkShownSince > presetSeconds, let milkNext {
+                let next = (milkIndex + 1) % milkPresets.count
+                nextIndex = next
+                fadeStart = now
+                milkNext.load(milkPresets[next].preset, at: Double(uniforms.time))
+                onPreset?(milkPresets[next].name)
+            }
+            milk.render(audio: audio, time: Double(uniforms.time), deltaTime: delta, into: scene)
+            if let next = nextIndex, let milkNext {
+                if sceneNext.map({ ($0.width, $0.height) != (width, height) }) ?? true {
+                    sceneNext = texture(width, height, usage: [.renderTarget, .shaderRead])
+                }
+                let progress = Float(min(1, (now - fadeStart) / fadeSeconds))
+                if let sceneNext {
+                    milkNext.render(audio: audio, time: Double(uniforms.time), deltaTime: delta, into: sceneNext)
+                    uniforms.fade = progress * progress * (3 - 2 * progress)
+                    if progress >= 1 {
+                        // The new preset has the screen; its engine takes over from here.
+                        swap(&self.milk, &self.milkNext)
+                        swap(&self.scene, &self.sceneNext)
+                        milkIndex = next
+                        nextIndex = nil
+                        milkShownSince = now
+                        uniforms.fade = 0
+                    } else {
+                        pass(target, mix, input: scene, second: sceneNext)
+                        return
+                    }
+                }
+            }
+            drawn = self.scene ?? scene
+        } else if let state = single[visual] {
             if scene.map({ ($0.width, $0.height) != (width, height) }) ?? true {
                 scene = texture(width, height, usage: [.renderTarget, .shaderRead])
             }

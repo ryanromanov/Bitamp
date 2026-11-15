@@ -19,7 +19,7 @@ let package = Package(
             name: "BitampKit", dependencies: ["BitampAtomics", "BitampPakKit", "BitampPakProtocol"],
             // Core ML models, compiled when first used: Basic Pitch (see BasicPitch.swift)
             // and MSNet vocal (scripts/msnet/convert.py).
-            resources: [.copy("Resources/BasicPitch"), .copy("Resources/MSNet")]),
+            resources: [.copy("Resources/BasicPitch"), .copy("Resources/MSNet"), .copy("Resources/Presets")]),
         .target(name: "BitampAtomics"),
         // What an Expansion Pak sees of Bitamp: protocols and value types only. See docs/PAKS.md.
         .target(name: "BitampPakKit"),

@@ -1,6 +1,6 @@
 /// The full-window visualizer's visuals. The raw value is what's saved in preferences.
 enum FullVisual: String, CaseIterable {
-    case barsAndWaves, plasma, solarSailing, starfield, alchemy
+    case barsAndWaves, plasma, solarSailing, starfield, alchemy, presets
 
     var title: String {
         switch self {
@@ -9,6 +9,7 @@ enum FullVisual: String, CaseIterable {
         case .solarSailing: return "Solar Sailing"
         case .starfield: return "Starfield"
         case .alchemy: return "Alchemy"
+        case .presets: return "Drift"
         }
     }
 
@@ -16,7 +17,7 @@ enum FullVisual: String, CaseIterable {
     /// or 0 to leave the colours as drawn. Bars and Waves, Plasma, Solar Sailing and Starfield use the skin's
     /// own palette as it is; Alchemy's fading trails get the dither.
     var ditherLevels: Float {
-        self == .alchemy ? 6 : 0
+        self == .alchemy || self == .presets ? 6 : 0
     }
 
     /// The single fragment shader that draws it, or nil for one that feeds back on itself.
@@ -26,7 +27,7 @@ enum FullVisual: String, CaseIterable {
         case .plasma: return "plasma"
         case .solarSailing: return "solar_sailing"
         case .starfield: return "starfield"
-        case .alchemy: return nil
+        case .alchemy, .presets: return nil
         }
     }
 }
@@ -60,6 +61,7 @@ enum VisualizerShaders {
         float shootSeed;
         float starCount;
         float ring;
+        float fade;
     };
 
     struct VertexOut {
@@ -381,6 +383,22 @@ enum VisualizerShaders {
         if (d < 1.5 / u.resolution.y) color = max(color, ink);
         if (u.beat > 0.5 && abs(r - 0.04 - 0.2 * (1.0 - u.beat)) < 1.5 / u.resolution.y) color = max(color, ramp(palette, 0.55));
         return float4(color, 1);
+    }
+
+    // Two pictures faded into one, for Drift moving between presets, dithered like `present`.
+    fragment float4 present_mix(VertexOut in [[stage_in]],
+                                constant Uniforms &u [[buffer(0)]],
+                                texture2d<float> image [[texture(0)]],
+                                texture2d<float> other [[texture(1)]]) {
+        constexpr sampler smp(filter::nearest);
+        float3 color = mix(image.sample(smp, in.uv).rgb, other.sample(smp, in.uv).rgb, u.fade);
+        if (u.levels > 1.0) {
+            float2 cell = floor(in.uv * u.resolution);
+            int index = (int(cell.y) & 3) * 4 + (int(cell.x) & 3);
+            float threshold = (bayer[index] + 0.5) / 16.0 - 0.5;
+            color = floor(color * (u.levels - 1.0) + 0.5 + threshold) / (u.levels - 1.0);
+        }
+        return float4(clamp(color, 0.0, 1.0), 1);
     }
 
     // Draws the small picture at full size with no smoothing, and, for the visuals that

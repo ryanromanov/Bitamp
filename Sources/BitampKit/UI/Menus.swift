@@ -43,9 +43,7 @@ enum Menus {
             submenu(menu("Peak Falloff", Falloff.allCases.map {
                 choice($0.rawValue.capitalized, #selector(MainView.setPeakFalloff(_:)), $0)
             })),
-            submenu(menu("Visualizer Window", FullVisual.allCases.map {
-                choice($0.title, #selector(MainView.setFullVisual(_:)), $0)
-            })),
+            submenu(menu("Visualizer Window", visualizerChoices())),
             submenu(menu("Oscilloscope Style", OscilloscopeStyle.allCases.map {
                 choice($0.rawValue.capitalized, #selector(MainView.setOscilloscopeStyle(_:)), $0)
             })),
@@ -101,6 +99,18 @@ enum Menus {
     }
 
     /// One option of a setting; the action reads the value back from `representedObject`.
+    /// The visuals, then a separator, Drift and each preset.
+    private static func visualizerChoices() -> [NSMenuItem] {
+        func entry(_ choice: VisualChoice) -> NSMenuItem {
+            let item = item(choice.title, #selector(MainView.setFullVisual(_:)))
+            item.representedObject = choice.raw
+            return item
+        }
+        let all = VisualChoice.all(presetNames: MilkPresetLibrary.names())
+        let plain = all.filter { $0.visual != .presets }
+        return plain.map(entry) + [.separator()] + all.filter { $0.visual == .presets }.map(entry)
+    }
+
     static func choice<T: RawRepresentable>(_ title: String, _ action: Selector, _ value: T) -> NSMenuItem
     where T.RawValue == String {
         let item = item(title, action)

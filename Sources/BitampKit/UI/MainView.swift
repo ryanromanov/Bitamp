@@ -851,9 +851,10 @@ final class MainView: SkinnedView, NSMenuItemValidation {
     }
 
     @objc func setFullVisual(_ sender: NSMenuItem) {
-        guard let visual = choice(FullVisual.self, sender) else { return }
-        preferences.fullVisual = visual.rawValue
-        marquee.flash("VISUALIZER: \(visual.title.uppercased())", for: 1.5)
+        guard let raw = sender.representedObject as? String else { return }
+        let picked = VisualChoice(raw: raw)
+        preferences.fullVisual = picked.raw
+        marquee.flash("VISUALIZER: \(picked.title.uppercased())", for: 1.5)
     }
 
     @objc func setPeakFalloff(_ sender: NSMenuItem) {

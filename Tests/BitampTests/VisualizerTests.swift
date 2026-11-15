@@ -108,6 +108,38 @@ import Testing
         }
     }
 
+    @Test func driftFadesThroughThePresetsAndAHeldPresetStays() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let view = MTKView(frame: NSRect(x: 0, y: 0, width: 320, height: 200), device: device)
+        let analyzer = SpectrumAnalyzer()
+        playing(analyzer)
+        let renderer = try #require(VisualizerRenderer(view: view, analyzer: analyzer))
+        renderer.setPalette(DefaultSkin().visColors)
+        renderer.pixelDivisor = 2
+        renderer.presetSeconds = 0.15
+        renderer.fadeSeconds = 0.25
+        var names: [String] = []
+        renderer.onPreset = { names.append($0) }
+        renderer.select(VisualChoice(visual: .presets))
+        var images = 0
+        for _ in 0..<60 {
+            if renderer.snapshot(width: 320, height: 200, frames: 1) != nil { images += 1 }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        #expect(images == 60)
+        #expect(names.count >= 3, "Drift started a preset, then fades to at least two more: \(names)")
+        #expect(zip(names, names.dropFirst()).allSatisfy { $0 != $1 }, "each fade goes to a different preset")
+
+        var held: [String] = []
+        renderer.onPreset = { held.append($0) }
+        renderer.select(VisualChoice(visual: .presets, preset: "Tidepool"))
+        for _ in 0..<30 {
+            _ = renderer.snapshot(width: 320, height: 200, frames: 1)
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        #expect(held == ["Tidepool"], "a chosen preset is shown and never fades away: \(held)")
+    }
+
     @Test func aShootingStarCrossesTheStarfield() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { return }
         let view = MTKView(frame: NSRect(x: 0, y: 0, width: 320, height: 200), device: device)
@@ -172,7 +204,7 @@ import Testing
         #expect(preferences.fullVisual == FullVisual.plasma.rawValue)
         view.step(-1)
         view.step(-1)
-        #expect(preferences.fullVisual == FullVisual.alchemy.rawValue, "stepping back from the first wraps to the last")
+        #expect(preferences.fullVisual == VisualChoice(visual: .presets, preset: MilkPresetLibrary.names().last).raw, "stepping back from the first wraps to the last")
     }
 
     @Test func theWindowStaysAtLeastItsMinimumSize() {
@@ -204,5 +236,22 @@ import Testing
         // and that the flag is what the call reads.
         controller.updateListener(visualizerOn: false)
         #expect(controller.visualizerWindowOpen)
+    }
+}
+
+@Suite struct VisualChoiceTests {
+    @Test func choicesRoundTripThroughTheirSavedString() {
+        for choice in VisualChoice.all(presetNames: ["Tidepool", "Lattice Rain"]) {
+            #expect(VisualChoice(raw: choice.raw) == choice)
+        }
+        #expect(VisualChoice(raw: "preset:Tidepool") == VisualChoice(visual: .presets, preset: "Tidepool"))
+        #expect(VisualChoice(raw: "presets").preset == nil, "Drift has no preset of its own")
+        #expect(VisualChoice(raw: "nonsense").visual == .barsAndWaves)
+    }
+
+    @Test func menuOrderIsVisualsThenDriftThenEachPreset() {
+        let all = VisualChoice.all(presetNames: ["A", "B"])
+        #expect(all.map(\.title).suffix(3) == ["Drift", "A", "B"])
+        #expect(all.first?.visual == .barsAndWaves)
     }
 }
