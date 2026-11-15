@@ -32,16 +32,19 @@ Bitamp isn't affiliated with or endorsed by Winamp or Nullsoft. Its default skin
 
 Bitamp has two kinds. The little spectrum or oscilloscope in the main window follows your skin, as in the classic players. The **full-window visualizer** (Window ▸ Visualizer, ⌥V) is a panel you can resize or take full screen with F or a double-click, drawn with Metal and reading the same sound the analyzer does. ← → step through the visuals, and the choice is remembered. Everything is drawn small, at your skin's own pixel size, and scaled up with no smoothing, so it looks like the rest of the player.
 
-- **Bars and Waves**: the analyzer bars with peaks, over the scope, in your skin's colours.
+### Skin visuals
+
+Hand-written for Bitamp and drawn in your skin's own colours, so they change when you change skins.
+
+- **Bars and Waves**: the analyzer bars with peaks, over the scope.
 - **Plasma**: slow, rolling sine waves run through the skin's palette.
 - **Solar Sailing**: flying through streaking stars, which stretch with the music. A beat brightens the glow, and a hard one sends out a checkered shockwave.
 - **Starfield**: stars drifting past, with a rare shooting star on a strong beat.
 - **Alchemy**: trails that fade and smear into each other, dithered to a few levels per colour.
-- **Drift** and the six presets below.
 
 ### Presets
 
-The last visuals are presets: Tidepool, Metronome Bloom, Lattice Rain, Ember Drift, Orbit Choir and Slow Tunnel, each picked from the Visualizer Window menu (Playback ▸ Visualizer Window) or with ← →. **Drift** shows each for 30 seconds and fades to the next. They're drawn by a small MilkDrop-style engine: every frame is the last one, warped and faded, with new lines and shapes drawn on top, so a few lines of code make something that flows. All six were written for Bitamp, and none came from another preset pack.
+These come after a divider in the menu and bring their own colours, so a skin doesn't change them. They are Drift and six presets: Tidepool, Metronome Bloom, Lattice Rain, Ember Drift, Orbit Choir and Slow Tunnel, each picked from the Visualizer Window menu (Playback ▸ Visualizer Window) or with ← →. **Drift** is the first of them: it shows each preset for 30 seconds and fades to the next. They're drawn by a small MilkDrop-style engine: every frame is the last one, warped and faded, with new lines and shapes drawn on top, so a few lines of code make something that flows. All six were written for Bitamp, and none came from another preset pack.
 
 The engine reads MilkDrop's `.milk` format. Put your own `.milk` files in `~/Library/Application Support/Bitamp/Presets` and they appear in the menu (reopen the menu to see new ones). Presets with their own HLSL shaders run without them, as plain feedback and waves, so some will look plainer than in MilkDrop. Preset authors keep the copyright on their work, so Bitamp doesn't bundle anyone else's.
 
