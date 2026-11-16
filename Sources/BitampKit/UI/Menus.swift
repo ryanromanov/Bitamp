@@ -99,16 +99,19 @@ enum Menus {
     }
 
     /// One option of a setting; the action reads the value back from `representedObject`.
-    /// The visuals, then a separator, Drift and each preset.
+    /// A "Retro" header over the skin-coloured visuals, then a separator, Drift and each preset.
     private static func visualizerChoices() -> [NSMenuItem] {
         func entry(_ choice: VisualChoice) -> NSMenuItem {
             let item = item(choice.title, #selector(MainView.setFullVisual(_:)))
             item.representedObject = choice.raw
             return item
         }
+        // A greyed-out title, since section headers need macOS 14.
+        let header = NSMenuItem(title: "Retro", action: nil, keyEquivalent: "")
+        header.isEnabled = false
         let all = VisualChoice.all(presetNames: MilkPresetLibrary.names())
         let plain = all.filter { $0.visual != .presets }
-        return plain.map(entry) + [.separator()] + all.filter { $0.visual == .presets }.map(entry)
+        return [header] + plain.map(entry) + [.separator()] + all.filter { $0.visual == .presets }.map(entry)
     }
 
     static func choice<T: RawRepresentable>(_ title: String, _ action: Selector, _ value: T) -> NSMenuItem
