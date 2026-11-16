@@ -44,9 +44,9 @@ The original visuals: hand-written for Bitamp and drawn in your skin's own colou
 
 ### Presets
 
-These come after a divider in the menu and bring their own colours, so a skin doesn't change them. They are Drift and six presets: Tidepool, Metronome Bloom, Lattice Rain, Ember Drift, Orbit Choir and Slow Tunnel, each picked from the Visualizer Window menu (Playback ▸ Visualizer Window) or with ← →. **Drift** is the first of them: it shows each preset for 30 seconds and fades to the next. They're drawn by a small MilkDrop-style engine: every frame is the last one, warped and faded, with new lines and shapes drawn on top, so a few lines of code make something that flows. All six were written for Bitamp, and none came from another preset pack.
+In the menu, the Retro visuals sit under a "Retro" header and these come after a divider. They bring their own colours, so a skin doesn't change them. They are Drift and six presets: Tidepool, Metronome Bloom, Lattice Rain, Ember Drift, Orbit Choir and Slow Tunnel, each picked from the Visualizer Window menu (Playback ▸ Visualizer Window) or with ← →. **Drift** is the first of them: it shows each preset for 30 seconds and fades to the next. They're drawn by a small MilkDrop-style engine: every frame is the last one, warped and faded, with new lines and shapes drawn on top, so a few lines of code make something that flows. All six were written for Bitamp, and none came from another preset pack.
 
-The engine reads MilkDrop's `.milk` format. Put your own `.milk` files in `~/Library/Application Support/Bitamp/Presets` and they appear in the menu (reopen the menu to see new ones). Presets with their own HLSL shaders run without them, as plain feedback and waves, so some will look plainer than in MilkDrop. Preset authors keep the copyright on their work, so Bitamp doesn't bundle anyone else's.
+The engine reads MilkDrop's `.milk` format. Put your own `.milk` files in `~/Library/Application Support/Bitamp/Presets` and they appear in the menu (reopen the menu to see new ones). Some presets include their own HLSL shaders. Bitamp can't run those, so it draws just their feedback, waves and shapes, and those presets can look plainer than they do in MilkDrop. Preset authors keep the copyright on their work, so Bitamp doesn't bundle anyone else's.
 
 ## Expansion Paks
 

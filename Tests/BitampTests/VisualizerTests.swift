@@ -207,6 +207,15 @@ import Testing
         #expect(preferences.fullVisual == VisualChoice(visual: .presets, preset: MilkPresetLibrary.names().last).raw, "stepping back from the first wraps to the last")
     }
 
+    @Test func theVisualizerMenuLabelsTheRetroVisuals() throws {
+        let menu = try #require(Menus.visualization().items.first { $0.title == "Visualizer Window" }?.submenu)
+        let first = try #require(menu.items.first)
+        #expect(first.title == "Retro" && !first.isEnabled, "a greyed-out header over the skin-coloured visuals")
+        let titles = menu.items.map(\.title)
+        #expect(titles.firstIndex(of: "Bars and Waves") == 1, "the visuals follow the header")
+        #expect(titles.firstIndex(of: "Drift") ?? 0 > titles.firstIndex(of: "Alchemy") ?? 99, "Drift comes after them")
+    }
+
     @Test func theWindowStaysAtLeastItsMinimumSize() {
         let (view, _, _) = panel()
         let size = view.normalizedPixelSize(CGSize(width: 10, height: 10))
