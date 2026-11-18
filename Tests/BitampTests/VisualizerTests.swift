@@ -108,6 +108,18 @@ import Testing
         }
     }
 
+    @Test func aPresetCanAskForFinerDitherAndOthersKeepTheDefault() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let view = MTKView(frame: NSRect(x: 0, y: 0, width: 320, height: 200), device: device)
+        let renderer = try #require(VisualizerRenderer(view: view, analyzer: SpectrumAnalyzer()))
+        #expect(MilkPreset(text: "bitamp_dither=12").number("bitamp_dither", 6) == 12)
+        #expect(MilkPreset(text: "fDecay=0.9").number("bitamp_dither", 6) == 6, "no setting means the default")
+        renderer.select(VisualChoice(visual: .presets, preset: "Tidepool"))
+        #expect(renderer.shownDitherLevels == FullVisual.presets.ditherLevels, "a preset that doesn't ask keeps the six levels")
+        renderer.select(VisualChoice(visual: .presets, preset: "Aurora"))
+        #expect(renderer.shownDitherLevels > FullVisual.presets.ditherLevels, "Aurora asks for finer dither")
+    }
+
     @Test func driftFadesThroughThePresetsAndAHeldPresetStays() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { return }
         let view = MTKView(frame: NSRect(x: 0, y: 0, width: 320, height: 200), device: device)

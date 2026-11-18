@@ -169,6 +169,15 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
         showPreset(index)
     }
 
+    /// How many levels per colour a preset is reduced to: its own `bitamp_dither` setting, or the visual's default.
+    private func ditherLevels(ofPreset index: Int) -> Float {
+        guard milkPresets.indices.contains(index) else { return FullVisual.presets.ditherLevels }
+        return Float(milkPresets[index].preset.number("bitamp_dither", Double(FullVisual.presets.ditherLevels)))
+    }
+
+    /// The dither levels of the preset on screen.
+    var shownDitherLevels: Float { ditherLevels(ofPreset: milkIndex) }
+
     private func showPreset(_ index: Int) {
         milkIndex = index
         nextIndex = nil
@@ -271,6 +280,7 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
             let delta = min(max(now - milkLastFrame, 0), 0.1)
             milkLastFrame = now
             let audio = MilkAudio(bars: bars, waveform: wave)
+            uniforms.levels = ditherLevels(ofPreset: milkIndex)
             // Drift: after a while, start the next preset behind this one and fade over to it.
             if heldPreset == nil, milkPresets.count > 1, nextIndex == nil, now - milkShownSince > presetSeconds, let milkNext {
                 let next = (milkIndex + 1) % milkPresets.count
@@ -288,6 +298,9 @@ final class VisualizerRenderer: NSObject, MTKViewDelegate {
                 if let sceneNext {
                     milkNext.render(audio: audio, time: Double(uniforms.time), deltaTime: delta, into: sceneNext)
                     uniforms.fade = progress * progress * (3 - 2 * progress)
+                    // The two presets may want different dither; blend between them as the picture does.
+                    let from = ditherLevels(ofPreset: milkIndex), to = ditherLevels(ofPreset: next)
+                    uniforms.levels = from + (to - from) * uniforms.fade
                     if progress >= 1 {
                         // The new preset has the screen; its engine takes over from here.
                         swap(&self.milk, &self.milkNext)
