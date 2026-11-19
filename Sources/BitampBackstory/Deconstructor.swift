@@ -38,6 +38,8 @@ public struct Deconstructor: BackstoryService {
     static let candidateLimit = 5
     static let listLimit = 6
     static let retries = 2
+    /// How many more of the song's recordings are read when the best matches carry no links.
+    static let extraReads = 3
 
     public func notes(for track: PakNowPlaying) -> AsyncThrowingStream<BackstoryUpdate, Error> {
         AsyncThrowingStream { continuation in
@@ -71,10 +73,20 @@ public struct Deconstructor: BackstoryService {
             if Self.merge(details).hasLinks { break }
         }
         var found = Self.merge(details)
-        let workID = found.workID
+        // Still no links: the song's other recordings by this artist (the single, an edit) may
+        // carry them, so a few of those are read too.
         var others: [MBRecording] = []
-        if let workID {
+        if let workID = found.workID {
             others = (try? await recordings(ofWork: workID)) ?? []
+            if !found.hasLinks {
+                let read = Set(details.map(\.id))
+                let mine = others.filter { !read.contains($0.id) && Self.sameArtist($0.artistName, artist) }
+                for other in mine.prefix(Self.extraReads) {
+                    details.append(try await recording(other.id))
+                    found = Self.merge(details)
+                    if found.hasLinks { break }
+                }
+            }
         }
         // The related recordings come without artists, so one search names them all.
         let related = found.relatedIDs
@@ -207,9 +219,18 @@ public struct Deconstructor: BackstoryService {
 
     /// The other artists' recordings of the song, once each.
     static func otherVersions(_ recordings: [MBRecording], besides artist: String) -> [String] {
-        var seen = Set([fold(artist)]), names: [String] = []
-        for name in recordings.compactMap(\.artistName) where seen.insert(fold(name)).inserted { names.append(name) }
+        var seen = Set<String>(), names: [String] = []
+        for name in recordings.compactMap(\.artistName) where !sameArtist(name, artist) && seen.insert(fold(name)).inserted {
+            names.append(name)
+        }
         return names
+    }
+
+    /// Whether `credit` is this artist, alone or with guests: "Coolio feat. L.V." is Coolio's.
+    static func sameArtist(_ credit: String?, _ artist: String) -> Bool {
+        guard let credit else { return false }
+        let wanted = fold(artist)
+        return !wanted.isEmpty && fold(credit).contains(wanted)
     }
 
     // MARK: - Writing

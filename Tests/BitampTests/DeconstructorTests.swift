@@ -199,4 +199,10 @@ import Testing
         #expect(count.calls == 3)
         #expect(!updates.isEmpty)
     }
+
+    @Test func theArtistsOwnCreditVariantsAreNotOtherVersions() throws {
+        let credits = ["Coolio feat. L.V.", "DJ Dave", "Coolio & L.V.", "Coolio", "DJ Dave", "Lo\u{00E9}"]
+        let recordings = try credits.map { try recording("{\"id\":\"x\",\"title\":\"t\",\"artist-credit\":[{\"name\":\"\($0)\"}]}") }
+        #expect(Deconstructor.otherVersions(recordings, besides: "Coolio") == ["DJ Dave", "Loe"].map { $0 == "Loe" ? "Lo\u{00E9}" : $0 })
+    }
 }
