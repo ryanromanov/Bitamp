@@ -9,12 +9,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The Backstory Pak, when this copy of Bitamp has a service for it.
     private let backstoryPak: BackstoryPak?
     private var backstoryView: BackstoryView?
+    /// The Deconstructor Pak, when this copy of Bitamp has a service for it.
+    private let deconstructorPak: DeconstructorPak?
+    private var deconstructorView: BackstoryView?
     /// Third-party notes Paks' windows, by Pak id.
     private var notesViews: [String: BackstoryView] = [:]
     private lazy var pakLibrary = PakLibrary()
     /// The built-in Paks, then the installed ones by name.
-    private lazy var paks = PakRegistry(builtInPaks + [backstoryPak].compactMap { $0 } + pakLibrary.installed(),
+    private lazy var paks = PakRegistry(builtInPaks + companionPaks + pakLibrary.installed(),
                                         preferences: preferences)
+    /// The companion Paks built into this copy, which have no music.
+    private var companionPaks: [Pak] {
+        var companions: [Pak] = []
+        if let backstoryPak { companions.append(backstoryPak) }
+        if let deconstructorPak { companions.append(deconstructorPak) }
+        return companions
+    }
     private var pakView: PakView?
     private var libraryView: MediaLibraryView?
     private var settingsPanels: [String: PakSettingsPanel] = [:]
@@ -32,8 +42,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `paks` are the Expansion Paks built into this copy of Bitamp; `backstory`, the
     /// services the Backstory Pak can ask (none leaves it out), and `backstoryOnDevice`
     /// Apple's on-device model where macOS has it.
-    public init(paks: [Pak] = [], backstory: [BackstoryPak.Provider] = [], backstoryOnDevice: BackstoryPak.OnDevice? = nil) {
+    public init(paks: [Pak] = [], backstory: [BackstoryPak.Provider] = [], backstoryOnDevice: BackstoryPak.OnDevice? = nil,
+                deconstructor: BackstoryService? = nil) {
         builtInPaks = paks
+        deconstructorPak = deconstructor.map { DeconstructorPak(service: $0) }
         backstoryPak = backstory.isEmpty ? nil : BackstoryPak(providers: backstory, onDevice: backstoryOnDevice)
         super.init()
     }
@@ -93,6 +105,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             backstoryView = view
             extraViews.append(view)
         }
+        if let deconstructorPak {
+            let view = makeNotesView(deconstructorPak, panel: .deconstructor, skin: skin)
+            view.keyFallback = mainView
+            deconstructorPak.onChange = { [weak view, weak pakView] in
+                view?.settingsChanged()
+                pakView?.needsDisplay = true
+            }
+            deconstructorView = view
+            extraViews.append(view)
+        }
         let notesPaks = paks.paks.compactMap { $0 as? ExternalPak }.filter(\.writesNotes)
         for pak in notesPaks {
             let view = makeNotesView(pak, panel: .pak(pak.id), skin: skin)
@@ -115,6 +137,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
         if let backstoryView {
             panels[.backstory] = SkinnedWindow(view: backstoryView, layoutName: "BackstoryWindow", isMain: false)
+        }
+        if let deconstructorView {
+            panels[.deconstructor] = SkinnedWindow(view: deconstructorView, layoutName: "DeconstructorWindow", isMain: false)
         }
         for (id, view) in notesViews {
             panels[.pak(id)] = SkinnedWindow(view: view, layoutName: Self.notesLayoutName(id), isMain: false)
@@ -570,6 +595,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             showBackstory()
             return
         }
+        if pak === deconstructorPak {
+            windowGroup?.setVisible(.deconstructor, true)
+            deconstructorView?.window?.makeKeyAndOrderFront(nil)
+            return
+        }
         if let pak = pak as? ExternalPak, pak.writesNotes {
             showNotes(pak)
             return
@@ -616,6 +646,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         windowGroup?.toggle(.backstory)
     }
 
+    @objc private func toggleDeconstructor(_ sender: Any?) {
+        windowGroup?.toggle(.deconstructor)
+    }
+
     @objc private func toggleNotesWindow(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
         windowGroup?.toggle(.pak(id))
@@ -624,7 +658,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The Window menu's items for third-party notes Paks, after the Media Library and Backstory.
     private func rebuildNotesItems(_ menu: NSMenu) {
         for item in menu.items where item.tag == Self.notesItemTag { menu.removeItem(item) }
-        let anchors = [#selector(toggleLibrary(_:)), #selector(toggleBackstory(_:))]
+        let anchors = [#selector(toggleLibrary(_:)), #selector(toggleBackstory(_:)), #selector(toggleDeconstructor(_:))]
         guard var index = menu.items.lastIndex(where: { $0.action.map(anchors.contains) == true }) else { return }
         for pak in paks.paks.compactMap({ $0 as? ExternalPak }).filter({ notesViews[$0.id] != nil }) {
             let item = Menus.item(pak.name, #selector(toggleNotesWindow(_:)))
@@ -676,11 +710,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let shadows = Menus.item("Window Shadows", #selector(toggleShadows(_:)))
         let raiseAll = Menus.item("Bring All Windows Forward", #selector(toggleRaiseAllWindows(_:)))
         let backstory = backstoryPak.map { _ in Menus.item("Backstory", #selector(toggleBackstory(_:)), "b", [.option]) }
+        let deconstructor = deconstructorPak.map { _ in Menus.item("Deconstructor", #selector(toggleDeconstructor(_:)), "d", [.option]) }
         let visualizer = Menus.item("Visualizer", #selector(toggleVisualizer(_:)), "v", [.option])
         for item in [visualizer, mainWindow, equalizer, playlist, paksWindow, library, regroup, minimize, equalizerShade, playlistShade, libraryShade, shadows, raiseAll]
-            + [backstory].compactMap({ $0 }) { item.target = self }
+            + [backstory, deconstructor].compactMap({ $0 }) { item.target = self }
         let windowMenu = Menus.menu("Window", [
-            mainWindow, equalizer, playlist, paksWindow, library] + [backstory].compactMap { $0 } + [visualizer, regroup, .separator(),
+            mainWindow, equalizer, playlist, paksWindow, library] + [backstory, deconstructor].compactMap { $0 } + [visualizer, regroup, .separator(),
             mainShade, equalizerShade, playlistShade, libraryShade, .separator(),
             Menus.submenu(Menus.menu("Size", sizes)), shadows, raiseAll, .separator(),
             minimize, cycle, cycleBack,
@@ -719,6 +754,7 @@ extension AppDelegate: NSMenuItemValidation {
         case #selector(toggleLibrary(_:)): item.state = windowGroup?.isVisible(.library) == true ? .on : .off
         case #selector(toggleVisualizer(_:)): item.state = windowGroup?.isVisible(.visualizer) == true ? .on : .off
         case #selector(toggleBackstory(_:)): item.state = windowGroup?.isVisible(.backstory) == true ? .on : .off
+        case #selector(toggleDeconstructor(_:)): item.state = windowGroup?.isVisible(.deconstructor) == true ? .on : .off
         case #selector(toggleNotesWindow(_:)):
             item.state = (item.representedObject as? String).map { windowGroup?.isVisible(.pak($0)) == true } == true ? .on : .off
         case #selector(setScale(_:)): item.state = item.representedObject as? CGFloat == preferences.scale ? .on : .off
