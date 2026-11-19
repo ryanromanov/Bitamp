@@ -80,6 +80,7 @@ final class WindowGroup {
         static let paks = Panel(rawValue: "paks")
         static let library = Panel(rawValue: "library")
         static let backstory = Panel(rawValue: "backstory")
+        static let deconstructor = Panel(rawValue: "deconstructor")
         static let visualizer = Panel(rawValue: "visualizer")
 
         /// A third-party notes Pak's window.
@@ -107,7 +108,7 @@ final class WindowGroup {
         self.main = main
         self.panels = panels
         self.defaults = defaults
-        let builtIn: [Panel] = [.equalizer, .playlist, .paks, .library, .backstory, .visualizer]
+        let builtIn: [Panel] = [.equalizer, .playlist, .paks, .library, .backstory, .deconstructor, .visualizer]
         order = builtIn.filter { panels[$0] != nil } + panels.keys.filter { !builtIn.contains($0) }.sorted { $0.rawValue < $1.rawValue }
         // The classic three windows show on first launch; Expansion Paks, the Media Library
         // and companion windows wait to be opened.

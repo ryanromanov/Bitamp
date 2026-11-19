@@ -161,6 +161,7 @@ final class BackstoryView: SkinnedView {
     /// Who a lookup asks, for the window's words: "Claude", or "the Demo Notes Pak".
     private var serviceName: String {
         if usesOnDevice { return "the on-device model" }
+        if pak is DeconstructorPak { return DeconstructorPak.serviceName }
         return backstory?.provider.name ?? "the \(pak.name) Pak"
     }
 

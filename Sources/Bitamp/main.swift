@@ -31,7 +31,7 @@ MainActor.assumeIsolated {
         ? BackstoryPak.OnDevice(isAvailable: { AppleOnDevice.isAvailable }, make: { wikipedia in
             AppleOnDevice.service(wikipedia: wikipedia ? WikipediaFacts() : nil)
         }) : nil
-    let delegate = AppDelegate(paks: [AppleMusicPak()], backstory: [claude, openAI], backstoryOnDevice: onDevice)
+    let delegate = AppDelegate(paks: [AppleMusicPak()], backstory: [claude, openAI], backstoryOnDevice: onDevice, deconstructor: Deconstructor())
     NSApplication.shared.delegate = delegate
     NSApplication.shared.setActivationPolicy(.regular)
     NSApplication.shared.run()

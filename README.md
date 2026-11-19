@@ -27,6 +27,7 @@ Bitamp isn't affiliated with or endorsed by Winamp or Nullsoft. Its default skin
 - [Expansion Paks](#expansion-paks): other music sources in Bitamp's playlist, browsed in a skinned Media Library with album art, or notes about the song that's playing, like Backstory. Apple Music comes built in, and anyone can write more
 - A full-window visualizer (Window ▸ Visualizer, ⌥V) in the spirit of Windows Media Player: Bars and Waves, Plasma, Solar Sailing, Starfield and Alchemy, plus [Presets](#presets): Drift, which fades through ten original MilkDrop-style presets, or any one of them. Drawn with Metal; ← → change the visual, F or a double-click goes full screen
 - [Backstory](#backstory): short notes about the song that's playing, free from Apple's on-device model with nothing to set up, or with sources from Claude or OpenAI with your own key
+- [Deconstructor](#deconstructor): how the song that's playing was made, from MusicBrainz's open data: what it samples and what has sampled it, whether it's a cover, its remixes, and who wrote and produced it. No key, no model
 
 ## Visualizers
 
@@ -85,6 +86,15 @@ Backstory is an Expansion Pak that comes plugged in. Instead of music, it tells 
 - **What's sent:** only the song's title, artist and album, never the audio or a file's name, and only while the Backstory window is open. Nothing goes to Bitamp.
 - **Saved notes:** a song you've looked up keeps its notes, so playing it again is free and instant.
 - **+ NEXT EARLY:** beside AUTO, this looks up the next song shortly before it starts, so its notes are ready. With Claude or OpenAI, a song you then skip still costs.
+
+## Deconstructor
+
+Deconstructor is a second companion Pak that comes plugged in (Window ▸ Deconstructor, ⌥D, or its cartridge). Where Backstory writes about a song, Deconstructor takes it apart, using [MusicBrainz](https://musicbrainz.org)'s open music database. It needs no key and no model.
+
+- **What it shows:** what the song **samples**, what has **sampled it**, whether it's a **cover** (and of what, and by whom), its **remixes and mashups**, other artists' **versions of the song**, and who **wrote, produced and mixed** it. The first line names the recording it matched, with a source that opens its MusicBrainz page.
+- **Patchy by nature:** MusicBrainz is edited by volunteers. Covers, remixes and credits are well covered; sampling links less so, so many songs have none, and Deconstructor says so. A song often has several recordings and only one may carry the links, so it reads the best few matches.
+- **When:** like Backstory, AUTO, ASK or OFF along the bottom. It starts on ASK, because a lookup sends the song's title, artist and album to MusicBrainz, and MusicBrainz asks clients to make no more than a request a second. A lookup takes a few seconds.
+- **What's sent:** only the title, artist and album, never the audio or a file's name, and nothing goes to Bitamp. Notes are saved, so playing the song again is instant.
 
 ## Download
 
