@@ -187,4 +187,16 @@ import Testing
         await throttle.wait()
         #expect(Date().timeIntervalSince(start) >= 1.0)
     }
+
+    @Test func aBusyMusicBrainzIsTriedAgainBeforeGivingUp() async throws {
+        final class Count: @unchecked Sendable { var calls = 0 }
+        let count = Count()
+        let flaky = Deconstructor(fetch: { _ in
+            count.calls += 1
+            return count.calls <= 2 ? (Data(), 503) : (Data("{\"recordings\":[]}".utf8), 200)
+        })
+        let updates = try await collect(flaky, PakNowPlaying(title: "Nope", artist: "Nobody"))
+        #expect(count.calls == 3)
+        #expect(!updates.isEmpty)
+    }
 }
