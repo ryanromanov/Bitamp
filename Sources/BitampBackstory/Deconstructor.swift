@@ -15,17 +15,20 @@ public struct Deconstructor: BackstoryService {
     let fetch: Fetch
     let userAgent: String
     let pause: @Sendable () async -> Void
+    /// Seconds to wait before a retry, times the attempt number.
+    let backoff: Double
 
     /// A real lookup is paced to MusicBrainz's limit of a request a second, app-wide.
     public init() {
         self.init(fetch: { request in
             let (data, response) = try await URLSession.shared.data(for: request)
             return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
-        }, version: WikipediaFacts.appVersion, pause: { await MusicBrainzThrottle.shared.wait() })
+        }, version: WikipediaFacts.appVersion, backoff: 3, pause: { await MusicBrainzThrottle.shared.wait() })
     }
 
-    init(fetch: @escaping Fetch, version: String = "dev", pause: @escaping @Sendable () async -> Void = {}) {
+    init(fetch: @escaping Fetch, version: String = "dev", backoff: Double = 0, pause: @escaping @Sendable () async -> Void = {}) {
         self.fetch = fetch
+        self.backoff = backoff
         self.pause = pause
         userAgent = "Bitamp/\(version) (https://github.com/ryanromanov/Bitamp)"
     }
@@ -34,6 +37,7 @@ public struct Deconstructor: BackstoryService {
     /// How many recordings of the song are read, and how many links of each kind are shown.
     static let candidateLimit = 5
     static let listLimit = 6
+    static let retries = 2
 
     public func notes(for track: PakNowPlaying) -> AsyncThrowingStream<BackstoryUpdate, Error> {
         AsyncThrowingStream { continuation in
@@ -110,20 +114,27 @@ public struct Deconstructor: BackstoryService {
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 20
-        try Task.checkCancellation()
-        await pause()
-        try Task.checkCancellation()
-        let data: Data, status: Int
-        do {
-            (data, status) = try await fetch(request)
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            throw BackstoryError.offline("MusicBrainz couldn't be reached.")
+        // MusicBrainz answers 503 when it's busy, and 429 to a client that goes too fast; both
+        // usually clear in seconds, so a request is tried again a couple of times.
+        var status = 0
+        var data = Data()
+        for attempt in 0...Self.retries {
+            try Task.checkCancellation()
+            if attempt > 0 { try await Task.sleep(nanoseconds: UInt64(backoff * Double(attempt) * 1_000_000_000)) }
+            await pause()
+            try Task.checkCancellation()
+            do {
+                (data, status) = try await fetch(request)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                throw BackstoryError.offline("MusicBrainz couldn't be reached.")
+            }
+            if status != 429 && status != 503 { break }
         }
         switch status {
         case 200: break
-        case 429, 503: throw BackstoryError.limited("MusicBrainz is asking for a pause. Try again in a minute.")
+        case 429, 503: throw BackstoryError.limited("MusicBrainz is busy or asking for a pause. Try again in a minute.")
         default: throw BackstoryError.unavailable("MusicBrainz answered with an error (\(status)).")
         }
         do {
