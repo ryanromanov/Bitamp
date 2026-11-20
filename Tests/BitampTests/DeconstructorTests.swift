@@ -227,18 +227,18 @@ import Testing
 
     @Test func aCancelledRequestGivesItsTurnBack() async throws {
         let throttle = MusicBrainzThrottle()
-        let start = Date()
-        try await throttle.wait()          // now
-        let second = Task { try await throttle.wait() }   // 1.1 s
+        try await throttle.wait()
+        let second = Task { try await throttle.wait() }
         try await Task.sleep(for: .milliseconds(50))
-        let third = Task { try await throttle.wait() }    // 2.2 s, cancelled as a song is skipped
+        let afterSecond = await throttle.nextSlot
+        // A third lines up behind the second, then is cancelled, as when a song is skipped.
+        let third = Task { try await throttle.wait() }
         try await Task.sleep(for: .milliseconds(50))
+        #expect(await throttle.nextSlot > afterSecond)
         third.cancel()
         _ = try? await third.value
-        try await second.value
-        // The next real request takes the cancelled turn: 2.2 s from the start, not 3.3 s.
-        try await throttle.wait()
-        let elapsed = Date().timeIntervalSince(start)
-        #expect(elapsed > 2.0 && elapsed < 2.8, "\(elapsed)")
+        // Its turn is given back: the next real request goes right behind the second.
+        #expect(await throttle.nextSlot == afterSecond)
+        second.cancel()
     }
 }
