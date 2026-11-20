@@ -87,11 +87,17 @@ final class PakLibrary {
         guard !contains(bundle) else { return manifest }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let destination = folder.appendingPathComponent("\(manifest.id).\(Self.pathExtension)", isDirectory: true)
+        // Copied beside the destination first and swapped in, so an update that fails
+        // part-way (a file that can't be read, a full disk) leaves the working Pak alone.
+        let staging = folder.appendingPathComponent(".installing-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: staging) }
+        try FileManager.default.copyItem(at: bundle, to: staging)
+        Self.removeQuarantine(staging)
         if FileManager.default.fileExists(atPath: destination.path) {
-            try FileManager.default.removeItem(at: destination)
+            _ = try FileManager.default.replaceItemAt(destination, withItemAt: staging)
+        } else {
+            try FileManager.default.moveItem(at: staging, to: destination)
         }
-        try FileManager.default.copyItem(at: bundle, to: destination)
-        Self.removeQuarantine(destination)
         return manifest
     }
 

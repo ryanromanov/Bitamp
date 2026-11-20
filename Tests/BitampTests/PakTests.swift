@@ -276,6 +276,8 @@ private final class FakeBackend: PlaybackBackend {
         let after = controller(pak)
         after.paks.setInserted(false, pak)
         after.loadPlaylist(list)
+        // A playlist is read in the background.
+        for _ in 0..<200 where after.queue.items.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         #expect(after.queue.items == [one, two])
         #expect(after.info.displayName(for: one) == "Fake Artist - Song 1")
         #expect(after.info.duration(for: one) == 180)

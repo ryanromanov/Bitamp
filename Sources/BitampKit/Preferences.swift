@@ -138,6 +138,13 @@ final class Preferences {
     }
 
     /// The current track's index in the saved queue.
+    /// The current track's address when the queue was saved, so it's found again even if
+    /// files before it are gone.
+    var queueTrack: String? {
+        get { defaults.string(forKey: Key.queueTrack) }
+        set { defaults.set(newValue, forKey: Key.queueTrack) }
+    }
+
     var queueIndex: Int? {
         get { defaults.object(forKey: Key.queueIndex) as? Int }
         set { defaults.set(newValue, forKey: Key.queueIndex) }
@@ -198,6 +205,7 @@ final class Preferences {
         static let equalizer = "equalizer"
         static let customPresets = "equalizerPresets"
         static let queueIndex = "queueIndex"
+        static let queueTrack = "queueTrack"
         static let skinName = "skin"
         static let scale = "scale"
         static let windowShadows = "windowShadows"

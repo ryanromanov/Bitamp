@@ -154,6 +154,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         self.mainView = mainView
         windowGroup = group
 
+        controller.autosavesSession = true
+        controller.onReading = { [weak mainView] reading in
+            if reading { mainView?.flash("READING FILES...", for: 30) } else { mainView?.flash("", for: 0) }
+        }
         controller.restoreSession()
     }
 

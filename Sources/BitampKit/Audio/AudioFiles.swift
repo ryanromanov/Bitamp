@@ -2,9 +2,30 @@ import Foundation
 import UniformTypeIdentifiers
 
 enum AudioFiles {
+    /// Whether each file extension seen is audio. Asking the system for a type is slow
+    /// enough to matter across a library of tens of thousands of files.
+    private static let extensionCache = NSLock()
+    nonisolated(unsafe) private static var audioExtensions: [String: Bool] = [:]
+
     static func isAudio(_ url: URL) -> Bool {
-        guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
-        return type.conforms(to: .audio) && !type.conforms(to: .playlist)
+        let ext = url.pathExtension.lowercased()
+        extensionCache.lock()
+        defer { extensionCache.unlock() }
+        if let known = audioExtensions[ext] { return known }
+        let audio = UTType(filenameExtension: ext).map { $0.conforms(to: .audio) && !$0.conforms(to: .playlist) } ?? false
+        audioExtensions[ext] = audio
+        return audio
+    }
+
+    /// Whether reading `urls` means walking folders or reading playlists, which can take a
+    /// while on a big library or a network volume, so it's done off the main thread.
+    static func needsReading(_ urls: [URL], schemes: Set<String> = []) -> Bool {
+        urls.contains { url in
+            if let scheme = url.scheme?.lowercased(), schemes.contains(scheme) { return false }
+            if M3U.isPlaylist(url) { return true }
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+        }
     }
 
     /// Keeps audio files, expands folders into the audio files inside them (recursively,
