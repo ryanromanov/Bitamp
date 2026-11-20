@@ -389,7 +389,8 @@ class SkinnedView: NSView {
                 top.magnificationFilter = .nearest
                 top.minificationFilter = .nearest
                 top.contentsGravity = .resize
-                layer.addSublayer(top)
+                // Underneath, so views inside this one (the visualizer's Metal view) show over the art.
+                layer.insertSublayer(top, at: 0)
                 artLayer = top
             }
             CATransaction.begin()

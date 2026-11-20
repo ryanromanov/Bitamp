@@ -25,6 +25,21 @@ import Testing
         #expect(view.layer?.magnificationFilter == .nearest)
     }
 
+    /// The visualizer's Metal view is a subview, so its layer is a sublayer. The art must go
+    /// beneath it, or the skin's black picture area hides the animation.
+    @Test func theArtLayerGoesUnderLayersAlreadyInTheView() {
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: Preferences(defaults: UserDefaults(suiteName: "BitampLayer-\(UUID().uuidString)")!))
+        let view = EqualizerView(controller: controller, skin: DefaultSkin(), scale: 1.5)
+        view.setFrameSize(NSSize(width: view.naturalSize.width.rounded(.up) + 1, height: view.naturalSize.height.rounded(.up) + 1))
+        view.wantsLayer = true
+        let inside = CALayer()
+        view.layer?.addSublayer(inside)
+        view.updateLayer()
+        let layers = view.layer?.sublayers ?? []
+        #expect(layers.count == 2)
+        #expect(layers.last === inside, "something inside the view is covered by the art")
+    }
+
     @Test func anOddSizeAtOneAndAHalfKeepsTheArtExactAndFillsTheEdge() {
         let controller = PlaybackController(engine: PlayerEngine(), preferences: Preferences(defaults: UserDefaults(suiteName: "BitampLayer-\(UUID().uuidString)")!))
         let view = EqualizerView(controller: controller, skin: DefaultSkin(), scale: 1.5)
