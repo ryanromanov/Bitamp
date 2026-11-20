@@ -205,4 +205,16 @@ import Testing
         let recordings = try credits.map { try recording("{\"id\":\"x\",\"title\":\"t\",\"artist-credit\":[{\"name\":\"\($0)\"}]}") }
         #expect(Deconstructor.otherVersions(recordings, besides: "Coolio") == ["DJ Dave", "Loe"].map { $0 == "Loe" ? "Lo\u{00E9}" : $0 })
     }
+
+    @Test func guestsAndVersionTagsAreLeftOutOfTheSearch() throws {
+        #expect(Deconstructor.cleanTitle("Still D.R.E (feat. Snoop Dogg)") == "Still D.R.E")
+        #expect(Deconstructor.cleanTitle("Hurt - Remastered 2009") == "Hurt")
+        #expect(Deconstructor.cleanTitle("Song [Explicit] (Live)") == "Song")
+        #expect(Deconstructor.cleanTitle("(Sittin' On) The Dock of the Bay") == "(Sittin' On) The Dock of the Bay")
+        #expect(Deconstructor.cleanTitle("(Live)") == "(Live)")
+        #expect(Deconstructor.cleanArtist("Dr. Dre feat. Snoop Dogg") == "Dr. Dre")
+        #expect(Deconstructor.cleanArtist("Coolio") == "Coolio")
+        let hit = try recording("{\"id\":\"a\",\"title\":\"Still D.R.E.\",\"score\":100}")
+        #expect(Deconstructor.pick([hit], title: "Still D.R.E").count == 1)
+    }
 }
