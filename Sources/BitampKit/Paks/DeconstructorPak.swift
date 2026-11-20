@@ -51,7 +51,7 @@ public final class DeconstructorPak: NotesPak {
 
     /// Notes are saved under this, with a version so a change to what's shown doesn't leave
     /// stale notes behind.
-    var identity: String { "deconstructor/1" }
+    var identity: String { "deconstructor/2" }
 
     func choice() -> NotesChoice? {
         NotesChoice(service: service, identity: identity, onDevice: false)
