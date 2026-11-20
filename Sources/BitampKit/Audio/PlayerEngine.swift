@@ -39,6 +39,7 @@ final class PlayerEngine: PlaybackBackend {
     var retroSound = RetroSound.off {
         didSet {
             retroKernel?.mode = retroSound
+            if retroSound == .chiptune { Self.warmUpTranscriber() }
             startTranscription()
         }
     }
@@ -79,14 +80,18 @@ final class PlayerEngine: PlaybackBackend {
         engine.attach(retro)
         engine.attach(output)
         output.volume = Float(volume * volume)
-        // Compile Basic Pitch's model ahead of the first chiptune.
-        DispatchQueue.global(qos: .utility).async { _ = BasicPitch.shared }
 
         NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.configurationChanged() }
         }
+    }
+
+    /// Loads Basic Pitch's model ahead of the first chiptune, once chiptune is chosen, so
+    /// listeners who never use it don't pay for it at every launch.
+    private static func warmUpTranscriber() {
+        DispatchQueue.global(qos: .utility).async { _ = BasicPitch.shared }
     }
 
     private func applyEqualizer() {

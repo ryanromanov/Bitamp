@@ -149,6 +149,55 @@ private final class Marker {}
             + #""settings":[{"key":"server","label":"Server","type":"text"},{"key":"password","label":"Password","type":"password"}]}"#
     }
 
+    /// An update is copied beside the installed Pak and swapped in, so it either replaces the
+    /// Pak whole or leaves it as it was, and no staging folder is left behind.
+    @Test func anUpdateReplacesThePakWholeAndLeavesNothingBehind() throws {
+        defer { try? FileManager.default.removeItem(at: root) }
+        let installedFolder = root.appendingPathComponent("installed")
+        let library = PakLibrary(folder: installedFolder, settings: MemorySettingsStore(defaults: UserDefaults(suiteName: "BitampPakLibrary-\(UUID().uuidString)")!))
+        try library.install(makePak("Radio", manifest()), reservedIDs: [])
+        let installed = installedFolder.appendingPathComponent("radio.bitpak")
+        try "old".write(to: installed.appendingPathComponent("old.txt"), atomically: true, encoding: .utf8)
+
+        let update = try makePak("Radio2", manifest())
+        try "new".write(to: update.appendingPathComponent("new.txt"), atomically: true, encoding: .utf8)
+        try library.install(update, reservedIDs: [])
+        #expect(FileManager.default.fileExists(atPath: installed.appendingPathComponent("new.txt").path))
+        #expect(!FileManager.default.fileExists(atPath: installed.appendingPathComponent("old.txt").path))
+        #expect(library.installed().map(\.id) == ["radio"])
+        let names = try FileManager.default.contentsOfDirectory(atPath: installedFolder.path)
+        #expect(names == ["radio.bitpak"], "\(names)")
+    }
+
+    /// A copy that fails part-way (a folder that can't be read) must not cost the working Pak.
+    @Test func aFailedUpdateKeepsTheWorkingPak() throws {
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.appendingPathComponent("source/Broken.bitpak/locked").path)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let installedFolder = root.appendingPathComponent("installed")
+        let library = PakLibrary(folder: installedFolder, settings: MemorySettingsStore(defaults: UserDefaults(suiteName: "BitampPakLibrary-\(UUID().uuidString)")!))
+        try library.install(makePak("Radio", manifest()), reservedIDs: [])
+        let installed = installedFolder.appendingPathComponent("radio.bitpak")
+        try "old".write(to: installed.appendingPathComponent("old.txt"), atomically: true, encoding: .utf8)
+
+        let broken = try makePak("Broken", manifest())
+        let locked = broken.appendingPathComponent("locked")
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try "x".write(to: locked.appendingPathComponent("file"), atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        do {
+            try library.install(broken, reservedIDs: [])
+        } catch {
+            // Failed: the old Pak is untouched.
+            #expect(FileManager.default.fileExists(atPath: installed.appendingPathComponent("old.txt").path))
+        }
+        // Either way no staging folder is left, and one Pak is installed whole.
+        let names = try FileManager.default.contentsOfDirectory(atPath: installedFolder.path)
+        #expect(names == ["radio.bitpak"], "\(names)")
+        #expect(library.installed().map(\.id) == ["radio"])
+    }
+
     @Test func checksManifests() throws {
         defer { try? FileManager.default.removeItem(at: root) }
         #expect(try PakLibrary.manifest(in: makePak("good", manifest())).id == "radio")

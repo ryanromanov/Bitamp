@@ -29,6 +29,24 @@ final class PlaybackController {
     private(set) var fetching: URL?
     /// Bumped on every load and stop, so a fetch that's been overtaken is dropped.
     private var fetchGeneration = 0
+    /// Bumped by every change to the queue, so a slow read (the saved queue at launch) that
+    /// finishes after the listener has opened something else doesn't overwrite it.
+    private var queueEdits = 0
+    /// Folders and playlists being read off the main thread, one after another.
+    private var reading: Task<Void, Never>?
+    private var readsPending = 0
+    /// Whether folders or playlists are being read now.
+    var isReading: Bool { readsPending > 0 }
+    /// Called when reading starts (true) and when the last read ends (false).
+    var onReading: ((Bool) -> Void)?
+    /// Keeps the queue on disk as it changes, so a crash or a force quit loses little. Off
+    /// until the app turns it on, so tests never write the listener's queue.
+    var autosavesSession = false
+    /// Seconds the queue must stay unchanged before it's saved.
+    var autosaveDelay: TimeInterval = 2
+    /// Where the queue is kept; tests point it elsewhere.
+    var sessionFile = PlaybackController.sessionURL
+    private var saveTask: Task<Void, Never>?
 
     enum LoadError: Error {
         case noPak(URL)
@@ -59,7 +77,11 @@ final class PlaybackController {
     /// Folders and playlists expanded, keeping tracks the installed Paks can play. The
     /// titles a playlist saved fill in the playlist straight away.
     private func expand(_ urls: [URL]) -> [URL] {
-        let entries = AudioFiles.expandEntries(urls, schemes: paks.schemes)
+        adopt(AudioFiles.expandEntries(urls, schemes: paks.schemes))
+    }
+
+    /// Takes the titles a playlist saved, and returns its URLs.
+    private func adopt(_ entries: [M3U.Entry]) -> [URL] {
         for entry in entries {
             // A title saved with an unknown length was only the file name, written before
             // the tags were read; leave it so they're read now.
@@ -67,6 +89,47 @@ final class PlaybackController {
             info.seedIfMissing(TrackMetadata(title: title, duration: duration), for: entry.url)
         }
         return entries.map(\.url)
+    }
+
+    /// Hands `apply` the files in `urls`. A few plain files are read at once; folders and
+    /// playlists, which can be slow (a big library, a network volume), are read in the
+    /// background, in the order asked, and `apply` runs when each is ready. `apply` isn't
+    /// called if `unlessEdited` and the queue changed meanwhile.
+    private func read(_ urls: [URL], unlessEdited: Bool = false, then apply: @escaping ([URL]) -> Void) {
+        let schemes = paks.schemes
+        if !AudioFiles.needsReading(urls, schemes: schemes), reading == nil {
+            apply(expand(urls))
+            return
+        }
+        let edits = queueEdits
+        let previous = reading
+        readsPending += 1
+        if readsPending == 1 { onReading?(true) }
+        reading = Task { [weak self] in
+            await previous?.value
+            let entries = await Task.detached(priority: .userInitiated) {
+                AudioFiles.expandEntries(urls, schemes: schemes)
+            }.value
+            guard let self else { return }
+            if !(unlessEdited && self.queueEdits != edits) { apply(self.adopt(entries)) }
+            self.readsPending -= 1
+            if self.readsPending == 0 {
+                self.reading = nil
+                self.onReading?(false)
+            }
+        }
+    }
+
+    /// Notes that the queue changed, and saves it shortly, once changes pause.
+    private func queueChanged() {
+        queueEdits += 1
+        guard autosavesSession else { return }
+        saveTask?.cancel()
+        saveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64((self?.autosaveDelay ?? 2) * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.saveSession()
+        }
     }
 
     var volume: Double {
@@ -132,25 +195,28 @@ final class PlaybackController {
 
     /// Replaces the queue with `urls`, expanding folders, and starts playing.
     func open(_ urls: [URL]) {
-        let files = expand(urls)
-        guard !files.isEmpty else {
-            onError?("NO AUDIO FILES THERE")
-            return
+        read(urls) { [self] files in
+            guard !files.isEmpty else {
+                onError?("NO AUDIO FILES THERE")
+                return
+            }
+            queue.replace(with: files)
+            loadCurrent(andPlay: true)
         }
-        queue.replace(with: files)
-        loadCurrent(andPlay: true)
     }
 
     /// Adds to the queue. Starts playing if nothing was loaded yet.
     func enqueue(_ urls: [URL]) {
-        let files = expand(urls)
-        guard !files.isEmpty else {
-            onError?("NO AUDIO FILES THERE")
-            return
+        read(urls) { [self] files in
+            guard !files.isEmpty else {
+                onError?("NO AUDIO FILES THERE")
+                return
+            }
+            let wasEmpty = queue.isEmpty
+            queue.append(files)
+            queueChanged()
+            if wasEmpty { loadCurrent(andPlay: true) }
         }
-        let wasEmpty = queue.isEmpty
-        queue.append(files)
-        if wasEmpty { loadCurrent(andPlay: true) }
     }
 
     func play() {
@@ -183,23 +249,28 @@ final class PlaybackController {
     // MARK: - Editing the queue
 
     func insert(_ urls: [URL], at index: Int) {
-        let files = expand(urls)
-        let wasEmpty = queue.isEmpty
-        queue.insert(files, at: index)
-        if wasEmpty && !files.isEmpty { loadCurrent(andPlay: false) }
+        read(urls) { [self] files in
+            let wasEmpty = queue.isEmpty
+            queue.insert(files, at: index)
+            queueChanged()
+            if wasEmpty && !files.isEmpty { loadCurrent(andPlay: false) }
+        }
     }
 
     func remove(_ indexes: IndexSet) {
         queue.remove(indexes)
+        queueChanged()
     }
 
     /// Keeps only `indexes`.
     func crop(to indexes: IndexSet) {
         queue.remove(IndexSet(0..<queue.count).subtracting(indexes))
+        queueChanged()
     }
 
     func removeAll() {
         queue.removeAll()
+        queueChanged()
     }
 
     func removeMissingFiles() {
@@ -207,11 +278,13 @@ final class PlaybackController {
             queue.items[$0].isFileURL && !FileManager.default.fileExists(atPath: queue.items[$0].path)
         }
         queue.remove(IndexSet(missing))
+        queueChanged()
     }
 
     @discardableResult
     func move(_ indexes: IndexSet, by offset: Int) -> IndexSet {
-        queue.move(indexes, by: offset)
+        defer { queueChanged() }
+        return queue.move(indexes, by: offset)
     }
 
     enum SortKey {
@@ -224,22 +297,31 @@ final class PlaybackController {
         case .fileName: queue.sort { $0.lastPathComponent }
         case .path: queue.sort { $0.path }
         }
+        queueChanged()
     }
 
-    func reverse() { queue.reverse() }
-    func randomize() { queue.randomize() }
+    func reverse() {
+        queue.reverse()
+        queueChanged()
+    }
+
+    func randomize() {
+        queue.randomize()
+        queueChanged()
+    }
 
     // MARK: - Playlist files
 
     /// Replaces the queue with a playlist's tracks, without starting playback.
     func loadPlaylist(_ url: URL) {
-        let files = expand([url])
-        guard !files.isEmpty else {
-            onError?("NO PLAYABLE FILES IN \(url.lastPathComponent)")
-            return
+        read([url]) { [self] files in
+            guard !files.isEmpty else {
+                onError?("NO PLAYABLE FILES IN \(url.lastPathComponent)")
+                return
+            }
+            queue.replace(with: files)
+            loadCurrent(andPlay: false)
         }
-        queue.replace(with: files)
-        loadCurrent(andPlay: false)
     }
 
     func savePlaylist(to url: URL) throws {
@@ -257,19 +339,36 @@ final class PlaybackController {
     }
 
     func saveSession() {
-        let url = Self.sessionURL
+        let url = sessionFile
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? savePlaylist(to: url)
         preferences.queueIndex = queue.currentIndex
+        preferences.queueTrack = queue.current?.absoluteString
     }
 
-    /// Reloads last session's queue and loads (doesn't play) its current track.
+    /// Reloads last session's queue and loads (doesn't play) its current track. The queue is
+    /// read in the background, and dropped if the listener opened something meanwhile.
     func restoreSession() {
-        let files = expand([Self.sessionURL])
-        guard !files.isEmpty else { return }
-        queue.replace(with: files)
-        if let index = preferences.queueIndex, files.indices.contains(index) { queue.select(index) }
-        loadCurrent(andPlay: false)
+        let saved = (index: preferences.queueIndex, track: preferences.queueTrack)
+        read([sessionFile], unlessEdited: true) { [self] files in
+            guard !files.isEmpty else { return }
+            queue.replace(with: files)
+            if let index = Self.restoredIndex(in: files, saved: saved) { queue.select(index) }
+            // Stays on the saved track even if it can't load now (its Pak is ejected), instead
+            // of skipping on to another and forgetting where the listener was.
+            loadCurrent(andPlay: false, skippingForward: false)
+        }
+    }
+
+    /// Where the saved current track is now: the same address, nearest its old place, since
+    /// files before it may be gone; failing that, its old place.
+    static func restoredIndex(in files: [URL], saved: (index: Int?, track: String?)) -> Int? {
+        if let track = saved.track {
+            let matches = files.indices.filter { files[$0].absoluteString == track }
+            if let nearest = matches.min(by: { abs($0 - (saved.index ?? 0)) < abs($1 - (saved.index ?? 0)) }) { return nearest }
+        }
+        guard let index = saved.index else { return nil }
+        return min(max(index, 0), files.count - 1)
     }
 
     // Like the classic players, changing tracks while stopped just loads the new one.
@@ -309,14 +408,17 @@ final class PlaybackController {
 
     /// Loads the queue's current track, skipping forward past files that won't open.
     /// However many it skips, it reports them once.
-    private func loadCurrent(andPlay play: Bool, afterFailure: Bool = false) {
+    private func loadCurrent(andPlay play: Bool, afterFailure: Bool = false, skippingForward: Bool = true) {
         if !afterFailure {
             lateFailures = 0
             reportedProblem = false
         }
         var skipped: [String] = []
-        defer { if let message = Self.skipMessage(skipped) { onError?(message) } }
-        for _ in 0..<queue.count {
+        defer {
+            if let message = Self.skipMessage(skipped) { onError?(message) }
+            queueChanged()
+        }
+        for _ in 0..<(skippingForward ? queue.count : 1) {
             guard let url = queue.current else { return }
             do {
                 try load(url, andPlay: play)
@@ -326,7 +428,7 @@ final class PlaybackController {
             } catch {
                 skipped.append("CAN'T OPEN \(url.lastPathComponent)")
             }
-            guard queue.next() != nil else { return }
+            guard skippingForward, queue.next() != nil else { return }
         }
     }
 
