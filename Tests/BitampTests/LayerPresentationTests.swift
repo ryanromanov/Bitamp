@@ -55,4 +55,35 @@ import Testing
         }
         #expect(colours.count > 5, "\(colours.count) colours")
     }
+
+    @Test func aFrameThatComesOutTheSameIsNotShownAgain() {
+        let controller = PlaybackController(engine: PlayerEngine(), preferences: Preferences(defaults: UserDefaults(suiteName: "BitampLayer-\(UUID().uuidString)")!))
+        let view = EqualizerView(controller: controller, skin: DefaultSkin(), scale: 2)
+        view.wantsLayer = true
+        view.updateLayer()
+        #expect(view.presentedFrames == 1 && view.skippedFrames == 0)
+        // Nothing changed: drawn again, but not given to the layer again.
+        view.updateLayer()
+        view.updateLayer()
+        #expect(view.presentedFrames == 1 && view.skippedFrames == 2)
+
+        // Something on the window changes: the next frame is shown.
+        var settings = controller.equalizer
+        settings.preamp = 9
+        controller.equalizer = settings
+        view.updateLayer()
+        #expect(view.presentedFrames == 2)
+        view.updateLayer()
+        #expect(view.presentedFrames == 2 && view.skippedFrames == 3)
+
+        // The window is resized or the scale changes: shown again even if the art is the same.
+        view.setFrameSize(NSSize(width: view.frame.width + 3, height: view.frame.height + 3))
+        view.updateLayer()
+        #expect(view.presentedFrames == 3)
+
+        // If the layer loses its picture, it's put back.
+        view.layer?.contents = nil
+        view.updateLayer()
+        #expect(view.presentedFrames == 4 && view.layer?.contents != nil)
+    }
 }
