@@ -358,6 +358,8 @@ enum NotesText {
 actor MusicBrainzThrottle {
     static let shared = MusicBrainzThrottle()
     private var next = Date.distantPast
+    /// When the next request to arrive would be let through; tests check it.
+    var nextSlot: Date { next }
 
     /// Returns when it's this request's turn. A request cancelled while it waits (the song
     /// was skipped) gives its turn back if it was the last in line, so skipping through songs
