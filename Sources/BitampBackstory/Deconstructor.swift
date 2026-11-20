@@ -15,7 +15,7 @@ public struct Deconstructor: BackstoryService {
 
     let fetch: Fetch
     let userAgent: String
-    let pause: @Sendable () async -> Void
+    let pause: @Sendable () async throws -> Void
     /// Seconds to wait before a retry, times the attempt number.
     let backoff: Double
 
@@ -24,10 +24,10 @@ public struct Deconstructor: BackstoryService {
         self.init(fetch: { request in
             let (data, response) = try await URLSession.shared.data(for: request)
             return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
-        }, version: WikipediaFacts.appVersion, backoff: 3, pause: { await MusicBrainzThrottle.shared.wait() })
+        }, version: WikipediaFacts.appVersion, backoff: 3, pause: { try await MusicBrainzThrottle.shared.wait() })
     }
 
-    init(fetch: @escaping Fetch, version: String = "dev", backoff: Double = 0, pause: @escaping @Sendable () async -> Void = {}) {
+    init(fetch: @escaping Fetch, version: String = "dev", backoff: Double = 0, pause: @escaping @Sendable () async throws -> Void = {}) {
         self.fetch = fetch
         self.backoff = backoff
         self.pause = pause
@@ -124,7 +124,7 @@ public struct Deconstructor: BackstoryService {
         for attempt in 0...Self.retries {
             try Task.checkCancellation()
             if attempt > 0 { try await Task.sleep(nanoseconds: UInt64(backoff * Double(attempt) * 1_000_000_000)) }
-            await pause()
+            try await pause()
             try Task.checkCancellation()
             do {
                 (data, status) = try await fetch(request)
@@ -357,12 +357,22 @@ actor MusicBrainzThrottle {
     static let shared = MusicBrainzThrottle()
     private var next = Date.distantPast
 
-    func wait() async {
+    /// Returns when it's this request's turn. A request cancelled while it waits (the song
+    /// was skipped) gives its turn back if it was the last in line, so skipping through songs
+    /// doesn't leave later lookups waiting for turns nobody takes.
+    func wait() async throws {
         let now = Date()
         let start = max(now, next)
-        next = start.addingTimeInterval(1.1)
+        let end = start.addingTimeInterval(1.1)
+        next = end
         let delay = start.timeIntervalSince(now)
-        if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+        guard delay > 0 else { return }
+        do {
+            try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        } catch {
+            if next == end { next = start }
+            throw error
+        }
     }
 }
 

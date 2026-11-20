@@ -50,7 +50,10 @@ final class TrackInfoStore {
     static let maxConcurrentLoads = 4
 
     private var cache: [URL: TrackMetadata] = [:]
+    /// Tracks waiting to load, oldest first from `waitingHead`; the front is cleared in
+    /// chunks, so taking the next one is O(1) however long the queue.
     private var waiting: [URL] = []
+    private var waitingHead = 0
     private var requested: Set<URL> = []
     private var loading = 0
     /// Looks up tracks that aren't files, such as a Pak's. Nil means it can't say now
@@ -78,7 +81,8 @@ final class TrackInfoStore {
 
     /// Asks again about tracks that got no answer, such as an ejected Pak's once it's back.
     func retryMissing() {
-        requested = requested.filter { cache[$0] != nil || waiting.contains($0) }
+        let queued = Set(waiting[waitingHead...])
+        requested = requested.filter { cache[$0] != nil || queued.contains($0) }
     }
 
     func displayName(for url: URL) -> String {
@@ -97,8 +101,13 @@ final class TrackInfoStore {
     }
 
     private func startLoads() {
-        while loading < Self.maxConcurrentLoads, !waiting.isEmpty {
-            let url = waiting.removeFirst()
+        while loading < Self.maxConcurrentLoads, waitingHead < waiting.count {
+            let url = waiting[waitingHead]
+            waitingHead += 1
+            if waitingHead > 512, waitingHead * 2 > waiting.count {
+                waiting.removeFirst(waitingHead)
+                waitingHead = 0
+            }
             loading += 1
             Task {
                 let metadata = url.isFileURL

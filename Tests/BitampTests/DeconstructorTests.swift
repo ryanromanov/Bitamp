@@ -179,11 +179,11 @@ import Testing
         }
     }
 
-    @Test func theThrottleSpacesRequests() async {
+    @Test func theThrottleSpacesRequests() async throws {
         let throttle = MusicBrainzThrottle()
         let start = Date()
-        await throttle.wait()
-        await throttle.wait()
+        try await throttle.wait()
+        try await throttle.wait()
         #expect(Date().timeIntervalSince(start) >= 1.0)
     }
 
@@ -223,5 +223,22 @@ import Testing
         // Letters stay as they are: the font draws them.
         #expect(NotesText.ascii("Zo\u{00E9} \u{0141}\u{00F3}d\u{017A} \u{0416}") == "Zo\u{00E9} \u{0141}\u{00F3}d\u{017A} \u{0416}")
         #expect(NotesText.ascii("\u{5742}\u{672C}") == "\u{5742}\u{672C}")
+    }
+
+    @Test func aCancelledRequestGivesItsTurnBack() async throws {
+        let throttle = MusicBrainzThrottle()
+        let start = Date()
+        try await throttle.wait()          // now
+        let second = Task { try await throttle.wait() }   // 1.1 s
+        try await Task.sleep(for: .milliseconds(50))
+        let third = Task { try await throttle.wait() }    // 2.2 s, cancelled as a song is skipped
+        try await Task.sleep(for: .milliseconds(50))
+        third.cancel()
+        _ = try? await third.value
+        try await second.value
+        // The next real request takes the cancelled turn: 2.2 s from the start, not 3.3 s.
+        try await throttle.wait()
+        let elapsed = Date().timeIntervalSince(start)
+        #expect(elapsed > 2.0 && elapsed < 2.8, "\(elapsed)")
     }
 }
