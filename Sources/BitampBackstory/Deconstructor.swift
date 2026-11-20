@@ -7,8 +7,9 @@ import Foundation
 /// is backed by a MusicBrainz page.
 ///
 /// MusicBrainz keeps these links on individual recordings, and a song often has several
-/// (the album cut, a single, a live take), of which only one may carry them. So the top
-/// matches are read, in order, until one carries links, and what they say is merged.
+/// (the album cut, a single, a live take), of which only one may carry them. So the song's
+/// work is found from the best match, and all the work's recordings are browsed with their
+/// links in one request, and what they say is merged.
 public struct Deconstructor: BackstoryService {
     public typealias Fetch = @Sendable (URLRequest) async throws -> (Data, Int)
 
@@ -38,8 +39,6 @@ public struct Deconstructor: BackstoryService {
     static let candidateLimit = 5
     static let listLimit = 6
     static let retries = 2
-    /// How many more of the song's recordings are read when the best matches carry no links.
-    static let extraReads = 3
 
     public func notes(for track: PakNowPlaying) -> AsyncThrowingStream<BackstoryUpdate, Error> {
         AsyncThrowingStream { continuation in
@@ -66,28 +65,21 @@ public struct Deconstructor: BackstoryService {
         guard let first = candidates.first else {
             return [.text("MusicBrainz has no recording of this song, so there is nothing to take apart.")]
         }
-        // Read recordings until one carries links, which is usually the first or second.
+        // Read recordings until one names the song's work, which is usually the first.
         var details: [MBRecording] = []
         for candidate in candidates {
             details.append(try await recording(candidate.id))
-            if Self.merge(details).hasLinks { break }
+            if Self.merge(details).workID != nil { break }
         }
-        var found = Self.merge(details)
-        // Still no links: the song's other recordings by this artist (the single, an edit) may
-        // carry them, so a few of those are read too.
+        // A song has many recordings (every compilation adds one) and the links sit on just one
+        // or two, so the recordings of the song are browsed with their links in a single
+        // request, which reaches them wherever they are.
         var others: [MBRecording] = []
-        if let workID = found.workID {
+        if let workID = Self.merge(details).workID {
             others = (try? await recordings(ofWork: workID)) ?? []
-            if !found.hasLinks {
-                let read = Set(details.map(\.id))
-                let mine = others.filter { !read.contains($0.id) && Self.sameArtist($0.artistName, artist) }
-                for other in mine.prefix(Self.extraReads) {
-                    details.append(try await recording(other.id))
-                    found = Self.merge(details)
-                    if found.hasLinks { break }
-                }
-            }
         }
+        var found = Self.merge(details + others)
+        found.workID = Self.merge(details).workID
         // The related recordings come without artists, so one search names them all.
         let related = found.relatedIDs
         let names = related.isEmpty ? [:] : ((try? await artists(of: related)) ?? [:])
@@ -109,7 +101,7 @@ public struct Deconstructor: BackstoryService {
     }
 
     private func recordings(ofWork id: String) async throws -> [MBRecording] {
-        let page: MBSearch = try await get("recording", ["work": id, "inc": "artist-credits", "limit": "60"])
+        let page: MBSearch = try await get("recording", ["work": id, "inc": "recording-rels+artist-credits", "limit": "100"])
         return page.recordings
     }
 
