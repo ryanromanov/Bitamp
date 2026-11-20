@@ -19,6 +19,9 @@ final class PlayerEngine: PlaybackBackend {
     var onTrackEnd: (() -> Void)?
     /// Never called: the engine knows at `load` whether a file opens.
     var onLoadFailure: ((Error) -> Void)?
+    /// Called when playback moved on to the track given to `scheduleNext` without stopping,
+    /// with that track's URL. The engine is already playing it.
+    var onTrackAdvance: ((URL) -> Void)?
     let analyzer = SpectrumAnalyzer()
 
     /// 0...1, applied on a squared curve so the slider feels even.
@@ -39,7 +42,10 @@ final class PlayerEngine: PlaybackBackend {
     var retroSound = RetroSound.off {
         didSet {
             retroKernel?.mode = retroSound
-            if retroSound == .chiptune { Self.warmUpTranscriber() }
+            if retroSound == .chiptune {
+                Self.warmUpTranscriber()
+                reloadForChiptune()
+            }
             startTranscription()
         }
     }
@@ -49,7 +55,7 @@ final class PlayerEngine: PlaybackBackend {
         didSet { retroKernel?.blend = chipBlend.level }
     }
 
-    private let engine = AVAudioEngine()
+    private let engine: AVAudioEngine
     private let player = AVAudioPlayerNode()
     private let equalizer = AVAudioUnitEQ(numberOfBands: 10)
     private let retro = RetroAudioUnit.makeNode()
@@ -60,13 +66,21 @@ final class PlayerEngine: PlaybackBackend {
     private var startFrame: AVAudioFramePosition = 0
     private var pausedFrame: AVAudioFramePosition = 0
     /// Bumped whenever scheduled audio is thrown away, so stale completions are ignored.
-    private var generation = 0
+    private(set) var generation = 0
     /// The chip arrangement of the loaded file, and the background work filling it in, which
     /// starts the first time the file plays as a chiptune.
     private var score: ChipScore?
     private var transcription: NoteTranscription?
+    /// The next track, already scheduled on the player to follow this one with no gap.
+    private var nextFile: AVAudioFile?
+    private var nextURL: URL?
+    /// The loaded file got here by playing on from the last one, so the chip score (made
+    /// when a file is loaded) isn't for it.
+    private var loadedByAdvance = false
 
-    init() {
+    /// `engine` is the audio engine to use; tests give one that renders offline.
+    init(engine: AVAudioEngine = AVAudioEngine()) {
+        self.engine = engine
         for (band, frequency) in zip(equalizer.bands, Self.eqFrequencies) {
             band.filterType = .parametric
             band.frequency = frequency
@@ -116,8 +130,10 @@ final class PlayerEngine: PlaybackBackend {
         case .paused:
             return pausedFrame
         case .playing:
-            guard let nodeTime = player.lastRenderTime,
-                  let playerTime = player.playerTime(forNodeTime: nodeTime)
+            // Before the first render the node time can exist without a valid sample time, and
+            // asking the player about it raises an exception.
+            guard let nodeTime = player.lastRenderTime, nodeTime.isSampleTimeValid,
+                  let playerTime = player.playerTime(forNodeTime: nodeTime), playerTime.isSampleTimeValid
             else { return startFrame }
             return min(startFrame + max(0, playerTime.sampleTime), file?.length ?? 0)
         }
@@ -136,6 +152,7 @@ final class PlayerEngine: PlaybackBackend {
     /// Stops and forgets the loaded file, so nothing shows as loaded.
     func unload() {
         stop()
+        forgetNext()
         transcription?.cancel()
         transcription = nil
         file = nil
@@ -156,6 +173,8 @@ final class PlayerEngine: PlaybackBackend {
         stagedTime = nil
         let file = try AVAudioFile(forReading: url)
         stop()
+        forgetNext()
+        loadedByAdvance = false
         engine.stop()
         retro.removeTap(onBus: 0)
         // The render thread is stopped, so the kernel can take a new score.
@@ -176,14 +195,80 @@ final class PlayerEngine: PlaybackBackend {
 
         self.file = file
         analyzer.sampleRate = format.sampleRate
-        let fileFormat = file.fileFormat
-        let duration = Double(file.length) / fileFormat.sampleRate
-        track = Track(
-            url: url, title: url.deletingPathExtension().lastPathComponent, artist: nil,
-            duration: duration, sampleRate: fileFormat.sampleRate,
-            channels: Int(fileFormat.channelCount), kbps: Self.averageKbps(url: url, duration: duration))
+        track = Self.makeTrack(url: url, file: file)
         loadMetadata(for: url)
         startTranscription()
+    }
+
+    private static func makeTrack(url: URL, file: AVAudioFile) -> Track {
+        let fileFormat = file.fileFormat
+        let duration = Double(file.length) / fileFormat.sampleRate
+        return Track(
+            url: url, title: url.deletingPathExtension().lastPathComponent, artist: nil,
+            duration: duration, sampleRate: fileFormat.sampleRate,
+            channels: Int(fileFormat.channelCount), kbps: averageKbps(url: url, duration: duration))
+    }
+
+    // MARK: - Gapless
+
+    /// The track scheduled to follow this one, if any.
+    var scheduledNext: URL? { nextURL }
+
+    /// Queues `url` on the player right behind the current track, so the music runs on with
+    /// no gap, no click and no rebuilding of the audio chain. Only for a local file in the
+    /// same format as this one (another sample rate or channel count needs the chain
+    /// rebuilt), and not with the chiptune cover, which is worked out per file. Returns
+    /// whether it was queued; if not, the track just changes the usual way when this ends.
+    @discardableResult
+    func scheduleNext(_ url: URL) -> Bool {
+        guard state == .playing, nextFile == nil, retroSound != .chiptune, url.isFileURL,
+              let file, let next = try? AVAudioFile(forReading: url),
+              next.processingFormat == file.processingFormat, next.length > 0
+        else { return false }
+        player.scheduleFile(next, at: nil, completionCallbackType: .dataPlayedBack,
+                            completionHandler: Self.completion(generation: generation, owner: self))
+        nextFile = next
+        nextURL = url
+        return true
+    }
+
+    /// Takes back a track queued by `scheduleNext` (the queue changed): the current one is
+    /// scheduled again from where it is, which can click once.
+    func cancelNext() {
+        guard nextFile != nil, state == .playing else { return }
+        startPlayback(at: currentFrame)
+    }
+
+    private func forgetNext() {
+        nextFile = nil
+        nextURL = nil
+    }
+
+    /// The current file has played out and the queued one is already sounding.
+    private func advance(to next: AVAudioFile, url: URL) {
+        guard let old = file else { return }
+        // The player's clock keeps running across the two files; the new file's position is
+        // that clock less what the old file took.
+        startFrame -= old.length
+        file = next
+        forgetNext()
+        track = Self.makeTrack(url: url, file: next)
+        loadedByAdvance = true
+        score = ChipScore(duration: Double(next.length) / next.processingFormat.sampleRate)
+        loadMetadata(for: url)
+        onTrackAdvance?(url)
+    }
+
+    /// The chiptune cover needs a score made when the file was loaded; a file reached by
+    /// playing on has none, so it's loaded again and picked up where it was.
+    private func reloadForChiptune() {
+        guard loadedByAdvance, let url = track?.url, file != nil else { return }
+        let seconds = currentTime
+        let wasPlaying = state == .playing
+        guard (try? load(url)) != nil else { return }
+        if wasPlaying, let file {
+            startPlayback(at: AVAudioFramePosition(seconds * file.processingFormat.sampleRate))
+        }
     }
 
     /// Starts working out the loaded file's chip arrangement, once it's wanted.
@@ -260,6 +345,7 @@ final class PlayerEngine: PlaybackBackend {
 
     private func halt() {
         generation += 1
+        forgetNext()
         retroKernel?.setClock(offset: nil)
         player.stop()
         if engine.isRunning { engine.pause() }
@@ -269,6 +355,7 @@ final class PlayerEngine: PlaybackBackend {
         guard let file else { return }
         generation += 1
         player.stop()
+        forgetNext()
         retroKernel?.setClock(offset: nil)
         let frame = min(max(0, frame), file.length)
         guard frame < file.length else {
@@ -293,9 +380,16 @@ final class PlayerEngine: PlaybackBackend {
         syncClock(generation: generation)
     }
 
-    private func segmentFinished(_ finishedGeneration: Int) {
+    /// The scheduled audio of generation `finishedGeneration` has been heard to the end.
+    /// Called from the player's completion handler; tests call it, since offline rendering
+    /// has no hardware to hear the audio.
+    func segmentFinished(_ finishedGeneration: Int) {
         guard finishedGeneration == generation, state == .playing else { return }
-        trackEnded()
+        if let next = nextFile, let url = nextURL {
+            advance(to: next, url: url)
+        } else {
+            trackEnded()
+        }
     }
 
     private func trackEnded() {

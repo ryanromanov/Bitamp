@@ -78,6 +78,7 @@ final class MainView: SkinnedView, NSMenuItemValidation {
         marquee.setText(titleText)
         marquee.tick()
         controller.updateListener(visualizerOn: preferences.visMode != .off)
+        controller.tick()
         controller.engine.analyzer.advance()
     }
 

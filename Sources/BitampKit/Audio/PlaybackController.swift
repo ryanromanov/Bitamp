@@ -69,6 +69,7 @@ final class PlaybackController {
         engine.retroSound = preferences.retroSound
         engine.chipBlend = preferences.chipBlend
         engine.onTrackEnd = { [weak self] in self?.trackEnded() }
+        engine.onTrackAdvance = { [weak self] url in self?.trackAdvanced(url) }
         // Only inserted Paks are asked; an ejected one isn't contacted at all.
         info.loadExternal = { [weak paks] url in
             guard let pak = paks?.pak(for: url) else { return nil }
@@ -126,6 +127,7 @@ final class PlaybackController {
     /// Notes that the queue changed, and saves it shortly, once changes pause.
     private func queueChanged() {
         queueEdits += 1
+        revalidateGapless()
         guard autosavesSession else { return }
         saveTask?.cancel()
         saveTask = Task { [weak self] in
@@ -156,6 +158,7 @@ final class PlaybackController {
         set {
             queue.setShuffled(newValue)
             preferences.shuffle = newValue
+            revalidateGapless()
         }
     }
 
@@ -164,6 +167,7 @@ final class PlaybackController {
         set {
             queue.repeats = newValue
             preferences.repeats = newValue
+            revalidateGapless()
         }
     }
 
@@ -385,6 +389,47 @@ final class PlaybackController {
     func previous() {
         guard queue.previous() != nil else { return }
         loadCurrent(andPlay: player.state != .stopped)
+    }
+
+    // MARK: - Gapless
+
+    /// How many seconds before a track ends the next one is lined up behind it.
+    static let gaplessLead: TimeInterval = 4
+    /// Whether to play on into the next track without a gap. On unless a test or setting says not.
+    var gapless = true
+    /// The track and its successor last tried, so one that can't be lined up (another format)
+    /// isn't tried again every frame.
+    private var gaplessAttempt: (current: URL, next: URL)?
+
+    /// Called often (every frame). Near the end of a track played by the engine, lines the
+    /// next one up behind it so the music runs on with no gap.
+    func tick() {
+        guard gapless, player === engine, engine.state == .playing, fetching == nil,
+              let current = loadedURL, let next = queue.upNext, next.isFileURL, engine.scheduledNext == nil,
+              let duration = engine.track?.duration, duration - engine.currentTime <= Self.gaplessLead,
+              gaplessAttempt?.current != current || gaplessAttempt?.next != next
+        else { return }
+        gaplessAttempt = (current, next)
+        engine.scheduleNext(next)
+    }
+
+    /// Takes back a lined-up track that's no longer what's next (the queue was changed).
+    private func revalidateGapless() {
+        if let scheduled = engine.scheduledNext, scheduled != queue.upNext { engine.cancelNext() }
+    }
+
+    /// The engine played on into the track lined up behind the last one: move the queue on.
+    private func trackAdvanced(_ url: URL) {
+        guard player === engine else { return }
+        gaplessAttempt = nil
+        if queue.next() == url {
+            loadedURL = url
+            lateFailures = 0
+            queueChanged()
+        } else {
+            // The queue changed since it was lined up; do what it says now.
+            loadCurrent(andPlay: true)
+        }
     }
 
     private func trackEnded() {
