@@ -308,14 +308,13 @@ class SkinnedView: NSView {
 
     func render(into canvas: Canvas) {}
 
-    /// Draws the skin into `canvas` and returns it as an image.
-    private func renderedImage() -> CGImage {
+    /// Draws the skin into `canvas`.
+    private func renderCanvas() {
         if isShapedWindow {
             // Start from clear pixels, so the window shows through around the shape.
             canvas.context.clear(CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height))
         }
         render(into: canvas)
-        return canvas.image()
     }
 
     private func refreshShadowIfNeeded() {
@@ -350,15 +349,37 @@ class SkinnedView: NSView {
     /// which fills the strip beside the art with the edge pixels.
     private var artLayer: CALayer?
 
+    /// What the layer last showed: the pixels, and how they were laid out.
+    private var presentedPixels: Data?
+    private var presentedGeometry: [CGFloat] = []
+    /// How many frames were given to the layer, and how many were skipped because they
+    /// came out the same as the last. A window that isn't changing costs the system nothing.
+    private(set) var presentedFrames = 0
+    private(set) var skippedFrames = 0
+
     override func updateLayer() {
         guard let layer else { return }
-        let image = renderedImage()
+        // Every frame is drawn, so what's shown can't go stale; but one that comes out the same
+        // as the last isn't handed to Core Animation again, which is where the cost is.
+        renderCanvas()
+        let art = artRect
+        let geometry = [bounds.width, bounds.height, art.minX, art.minY, art.width, art.height, isShapedWindow ? 1 : 0]
+        let pixels = canvas.pixelBytes
+        if layer.contents != nil, geometry == presentedGeometry, let previous = presentedPixels,
+           previous.count == pixels.count, previous.withUnsafeBytes({ memcmp($0.baseAddress!, pixels.baseAddress!, pixels.count) == 0 }) {
+            skippedFrames += 1
+            refreshShadowIfNeeded()
+            return
+        }
+        presentedPixels = Data(pixels)
+        presentedGeometry = geometry
+        presentedFrames += 1
+        let image = canvas.image()
         layer.contents = image
         layer.magnificationFilter = .nearest
         layer.minificationFilter = .nearest
         layer.contentsGravity = .resize
         layer.isOpaque = !isShapedWindow
-        let art = artRect
         if art.width < bounds.width - 0.01 || art.height < bounds.height - 0.01 {
             let top: CALayer
             if let existing = artLayer {
@@ -389,9 +410,9 @@ class SkinnedView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         if isShapedWindow { context.clear(bounds) }
-        let image = renderedImage()
+        renderCanvas()
         context.interpolationQuality = .none
-        drawCanvas(image, in: context)
+        drawCanvas(canvas.image(), in: context)
         refreshShadowIfNeeded()
     }
 

@@ -142,6 +142,11 @@ final class Canvas {
     func image() -> CGImage {
         context.makeImage()!
     }
+
+    /// The pixels as they are now, for telling whether a frame differs from the last one.
+    var pixelBytes: UnsafeRawBufferPointer {
+        UnsafeRawBufferPointer(start: context.data, count: context.bytesPerRow * context.height)
+    }
 }
 
 func rgb(_ hex: UInt32) -> CGColor {
