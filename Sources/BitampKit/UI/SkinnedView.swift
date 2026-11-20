@@ -308,24 +308,97 @@ class SkinnedView: NSView {
 
     func render(into canvas: Canvas) {}
 
-    func drawOverlay(in context: CGContext) {}
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
+    /// Draws the skin into `canvas` and returns it as an image.
+    private func renderedImage() -> CGImage {
         if isShapedWindow {
             // Start from clear pixels, so the window shows through around the shape.
             canvas.context.clear(CGRect(x: 0, y: 0, width: canvas.width, height: canvas.height))
-            context.clear(bounds)
         }
         render(into: canvas)
-        context.interpolationQuality = .none
-        drawCanvas(canvas.image(), in: context)
-        drawOverlay(in: context)
-        if shadowIsStale {
-            // The shadow follows the window's pixels, so redo it once they're drawn.
-            shadowIsStale = false
-            DispatchQueue.main.async { [weak self] in self?.window?.invalidateShadow() }
+        return canvas.image()
+    }
+
+    private func refreshShadowIfNeeded() {
+        guard shadowIsStale else { return }
+        // The shadow follows the window's pixels, so redo it once they're drawn.
+        shadowIsStale = false
+        DispatchQueue.main.async { [weak self] in self?.window?.invalidateShadow() }
+    }
+
+    // The window is shown by giving its layer the small skin-sized picture and letting the
+    // graphics card enlarge it with no smoothing. Drawing it enlarged on the CPU into a
+    // bigger backing bitmap, as `draw(_:)` does, cost a large share of the app's CPU while
+    // playing, and used several times the memory.
+
+    override var wantsUpdateLayer: Bool { true }
+
+    /// A view that isn't on screen (a screenshot, a test) has no layer to show, so it's drawn
+    /// straight into the bitmap by `draw(_:)`.
+    override func cacheDisplay(in rect: NSRect, to bitmapRep: NSBitmapImageRep) {
+        guard let context = NSGraphicsContext(bitmapImageRep: bitmapRep) else {
+            super.cacheDisplay(in: rect, to: bitmapRep)
+            return
         }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        draw(rect)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    /// The art at exactly its size, on top, when the view is a little bigger than the art
+    /// (see `drawCanvas`); the layer under it then stretches the picture over the whole view,
+    /// which fills the strip beside the art with the edge pixels.
+    private var artLayer: CALayer?
+
+    override func updateLayer() {
+        guard let layer else { return }
+        let image = renderedImage()
+        layer.contents = image
+        layer.magnificationFilter = .nearest
+        layer.minificationFilter = .nearest
+        layer.contentsGravity = .resize
+        layer.isOpaque = !isShapedWindow
+        let art = artRect
+        if art.width < bounds.width - 0.01 || art.height < bounds.height - 0.01 {
+            let top: CALayer
+            if let existing = artLayer {
+                top = existing
+            } else {
+                top = CALayer()
+                top.magnificationFilter = .nearest
+                top.minificationFilter = .nearest
+                top.contentsGravity = .resize
+                layer.addSublayer(top)
+                artLayer = top
+            }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            top.frame = art
+            top.contents = image
+            top.isOpaque = !isShapedWindow
+            CATransaction.commit()
+        } else if let top = artLayer {
+            top.removeFromSuperlayer()
+            artLayer = nil
+        }
+        refreshShadowIfNeeded()
+    }
+
+    /// Used where AppKit draws the view itself rather than showing its layer, such as
+    /// `cacheDisplay` for screenshots.
+    override func draw(_ dirtyRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        if isShapedWindow { context.clear(bounds) }
+        let image = renderedImage()
+        context.interpolationQuality = .none
+        drawCanvas(image, in: context)
+        refreshShadowIfNeeded()
+    }
+
+    /// Where the art goes, in view coordinates: at exactly `scale` points per pixel from the top-left.
+    private var artRect: CGRect {
+        CGRect(x: 0, y: bounds.height - CGFloat(canvas.height) * scale,
+               width: CGFloat(canvas.width) * scale, height: CGFloat(canvas.height) * scale)
     }
 
     /// A rect in skin pixels (top-left origin) as view coordinates.
@@ -352,8 +425,7 @@ class SkinnedView: NSView {
     /// pixel wider than the rest, so the art keeps its exact size and the edge pixels fill
     /// the strip.
     private func drawCanvas(_ image: CGImage, in context: CGContext) {
-        let art = CGRect(x: 0, y: bounds.height - CGFloat(canvas.height) * scale,
-                         width: CGFloat(canvas.width) * scale, height: CGFloat(canvas.height) * scale)
+        let art = artRect
         context.draw(image, in: art)
         let right = bounds.width - art.maxX, below = art.minY
         guard right > 0 || below > 0 else { return }
