@@ -217,4 +217,11 @@ import Testing
         let hit = try recording("{\"id\":\"a\",\"title\":\"Still D.R.E.\",\"score\":100}")
         #expect(Deconstructor.pick([hit], title: "Still D.R.E").count == 1)
     }
+
+    @Test func lookalikePunctuationBecomesPlain() {
+        #expect(NotesText.ascii("Wick\u{2010}it the Instigator") == "Wick-it the Instigator")
+        #expect(NotesText.ascii("A\u{2010}Plus \u{2019}93 \u{201C}x\u{201D} \u{2013} y\u{2026}") == "A-Plus '93 \"x\" - y...")
+        #expect(NotesText.ascii("Zo\u{00E9}") == "Zoe")
+        #expect(NotesText.ascii("\u{5742}\u{672C}") == "??")
+    }
 }
