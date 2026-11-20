@@ -64,8 +64,26 @@ final class BackstoryCache {
     }
 
     static func standard() -> BackstoryCache {
-        BackstoryCache(folder: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.ryanromanov.Bitamp/BackstoryNotes", isDirectory: true))
+        let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("com.ryanromanov.Bitamp/BackstoryNotes", isDirectory: true)
+        DispatchQueue.global(qos: .utility).async { prune(folder) }
+        return BackstoryCache(folder: folder)
+    }
+
+    /// Notes not looked at for this long are dropped, and no more than `maxFiles` are kept
+    /// (the newest), so the folder doesn't grow for ever.
+    static let maxAge: TimeInterval = 90 * 24 * 3600
+    static let maxFiles = 3000
+
+    static func prune(_ folder: URL, maxAge: TimeInterval = maxAge, maxFiles: Int = maxFiles, now: Date = Date()) {
+        let keys: [URLResourceKey] = [.contentModificationDateKey]
+        guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys) else { return }
+        let dated = files.filter { $0.pathExtension == "json" }.map { url in
+            (url, (try? url.resourceValues(forKeys: Set(keys)).contentModificationDate) ?? .distantPast)
+        }.sorted { $0.1 > $1.1 }
+        for (index, entry) in dated.enumerated() where index >= maxFiles || now.timeIntervalSince(entry.1) > maxAge {
+            try? FileManager.default.removeItem(at: entry.0)
+        }
     }
 
     static func key(_ track: PakNowPlaying, _ identity: String) -> String {
@@ -78,13 +96,21 @@ final class BackstoryCache {
         if let notes = memory[key] { return notes }
         guard let folder, let data = try? Data(contentsOf: folder.appendingPathComponent("\(key).json")),
               let notes = try? JSONDecoder().decode(BackstoryNotes.self, from: data) else { return nil }
-        memory[key] = notes
+        // Looked at now, so it isn't pruned as old.
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: folder.appendingPathComponent("\(key).json").path)
+        remember(notes, for: key)
         return notes
+    }
+
+    /// Keeps recent notes at hand, and no more than a few hundred.
+    private func remember(_ notes: BackstoryNotes, for key: String) {
+        if memory.count >= 300 { memory.removeAll() }
+        memory[key] = notes
     }
 
     func save(_ notes: BackstoryNotes, for track: PakNowPlaying, identity: String) {
         let key = Self.key(track, identity)
-        memory[key] = notes
+        remember(notes, for: key)
         guard let folder, let data = try? JSONEncoder().encode(notes) else { return }
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try? data.write(to: folder.appendingPathComponent("\(key).json"), options: .atomic)
@@ -145,6 +171,8 @@ final class BackstorySession {
     private var trackURL: URL?
     private var lastTick: TimeInterval?
     private var task: Task<Void, Never>?
+    /// Reading the current song's tags and picture, dropped if the song changes first.
+    private var describing: Task<Void, Never>?
     /// The next song, being looked up before it plays.
     private struct Early {
         let url: URL
@@ -325,6 +353,7 @@ final class BackstorySession {
     private func switchTo(_ url: URL?) {
         task?.cancel()
         task = nil
+        describing?.cancel()
         if early?.url != url {
             early?.task?.cancel()
             early = nil
@@ -337,10 +366,10 @@ final class BackstorySession {
         phase = url == nil ? .idle : .reading
         onChange?()
         guard let url else { return }
-        Task { [weak self] in
+        describing = Task { [weak self] in
             guard let self else { return }
             let (track, artwork) = await self.describe(url)
-            guard self.trackURL == url else { return }
+            guard self.trackURL == url, !Task.isCancelled else { return }
             self.track = track
             self.artwork = artwork
             self.settle()

@@ -71,6 +71,8 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
 
     let covers: CoverCache
     private var coverTasks: [CoverCache.Key: Task<Void, Never>] = [:]
+    /// The page or sidebar being asked for, stopped when another replaces it.
+    private var pageTask: Task<Void, Never>?
     /// The covers the last frame drew, so ones that scrolled away stop loading.
     private var wantedCovers: Set<CoverCache.Key> = []
 
@@ -184,6 +186,7 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
     /// Forgets the Pak and everything shown, stopping its loads: for when it's ejected.
     func clear() {
         generation += 1
+        pageTask?.cancel()
         coverTasks.values.forEach { $0.cancel() }
         coverTasks = [:]
         pak = nil
@@ -209,7 +212,8 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
         generation += 1
         let generation = generation
         message = "Loading…"
-        Task {
+        pageTask?.cancel()
+        pageTask = Task {
             do {
                 let root = try await pak.browse(.root, after: nil)
                 guard generation == self.generation else { return }
@@ -259,7 +263,8 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
         loadingMore = false
         message = "Loading…"
         relayout()
-        Task {
+        pageTask?.cancel()
+        pageTask = Task {
             do {
                 let page = try await pak.browse(location, after: nil)
                 guard generation == self.generation else { return }
@@ -278,6 +283,7 @@ final class MediaLibraryView: SkinnedView, NSDraggingSource {
     private func goBack() {
         guard let previous = history.popLast() else { return }
         generation += 1
+        pageTask?.cancel()
         shown = previous
         selection = []
         focus = nil

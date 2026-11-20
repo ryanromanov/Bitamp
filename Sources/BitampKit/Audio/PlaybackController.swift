@@ -29,6 +29,9 @@ final class PlaybackController {
     private(set) var fetching: URL?
     /// Bumped on every load and stop, so a fetch that's been overtaken is dropped.
     private var fetchGeneration = 0
+    /// The download of a Pak's audio, stopped when it's overtaken, so a track skipped past
+    /// doesn't keep downloading.
+    private var fetchTask: Task<Void, Never>?
     /// Bumped by every change to the queue, so a slow read (the saved queue at launch) that
     /// finishes after the listener has opened something else doesn't overwrite it.
     private var queueEdits = 0
@@ -230,6 +233,7 @@ final class PlaybackController {
     /// Stops, including a track that's still being fetched.
     func stop() {
         fetchGeneration += 1
+        fetchTask?.cancel()
         fetching = nil
         player.stop()
     }
@@ -484,6 +488,7 @@ final class PlaybackController {
     /// and plays it if asked. A Pak track that has to be fetched loads when it arrives.
     private func load(_ url: URL, andPlay play: Bool) throws {
         fetchGeneration += 1
+        fetchTask?.cancel()
         fetching = nil
         var backend: PlaybackBackend = engine
         var source = url
@@ -508,7 +513,7 @@ final class PlaybackController {
             engine.unload()
             fetching = url
             let generation = fetchGeneration
-            Task {
+            fetchTask = Task {
                 do {
                     let file = try await fetch()
                     guard generation == fetchGeneration else { return }
