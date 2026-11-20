@@ -330,14 +330,26 @@ public struct Deconstructor: BackstoryService {
 
 /// Plain letters for the pixel font: accents and typographic marks made plain.
 enum NotesText {
+    /// Look-alikes of plain punctuation, which MusicBrainz uses freely ("Wick\u{2010}it").
+    private static let lookalikes: [Character: String] = [
+        "\u{2010}": "-", "\u{2011}": "-", "\u{2012}": "-", "\u{2013}": "-", "\u{2014}": "-", "\u{2015}": "-",
+        "\u{2212}": "-", "\u{FE63}": "-", "\u{FF0D}": "-",
+        "\u{2018}": "'", "\u{2019}": "'", "\u{201A}": "'", "\u{201B}": "'", "\u{2032}": "'", "\u{02BC}": "'", "\u{00B4}": "'", "`": "'",
+        "\u{201C}": "\"", "\u{201D}": "\"", "\u{201E}": "\"", "\u{2033}": "\"",
+        "\u{2026}": "...", "\u{00A0}": " ", "\u{2009}": " ", "\u{202F}": " ", "\u{2002}": " ", "\u{2003}": " ",
+        "\u{00D7}": "x", "\u{2022}": "-", "\u{00B7}": "-", "\u{2215}": "/", "\u{FF0F}": "/",
+    ]
+
+    /// Plain letters for the pixel font: look-alike punctuation made plain, accents dropped
+    /// ("Zo\u{00E9}" is "Zoe"), and anything else it can't draw (such as Japanese) a "?".
     static func ascii(_ text: String) -> String {
-        var out = text
-        for (fancy, plain) in [("\u{2018}", "'"), ("\u{2019}", "'"), ("\u{201C}", "\""), ("\u{201D}", "\""),
-                               ("\u{2013}", "-"), ("\u{2014}", "-"), ("\u{2026}", "..."), ("\u{00A0}", " ")] {
-            out = out.replacingOccurrences(of: fancy, with: plain)
+        var out = ""
+        for character in text {
+            if let plain = lookalikes[character] { out += plain; continue }
+            let folded = String(character).folding(options: .diacriticInsensitive, locale: nil)
+            out += folded.unicodeScalars.allSatisfy(\.isASCII) ? folded : "?"
         }
-        let folded = out.folding(options: .diacriticInsensitive, locale: nil)
-        return String(folded.unicodeScalars.map { $0.isASCII ? Character($0) : "?" })
+        return out
     }
 }
 
