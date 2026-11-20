@@ -79,8 +79,9 @@ final class PakConnection {
     func request<Params: Codable, Result: Codable>(
         _ method: String, _ params: Params, as result: Result.Type
     ) async throws -> Result {
-        try await ensureStarted()
-        return try await send(method, params, as: result)
+        // Cancelling the task stops the request, so a search or page that's been replaced
+        // doesn't keep the Pak busy.
+        try await request(method, params, as: result, timeout: nil, onUpdate: { _ in })
     }
 
     /// A request whose answer may come in pieces first: `update` lines, handed to
@@ -247,13 +248,20 @@ final class PakConnection {
         }
     }
 
+    /// Writes go through their own queue, in order, so a Pak that has stopped reading its
+    /// input (a full pipe) can't freeze Bitamp's window while a write waits.
+    private let writeQueue = DispatchQueue(label: "bitamp.pak.write")
+
     private func write<Params: Codable>(_ request: PakRequest<Params>) {
-        guard var data = try? JSONEncoder().encode(request) else { return }
+        guard var data = try? JSONEncoder().encode(request), let input else { return }
         data.append(0x0A)
-        do {
-            try input?.write(contentsOf: data)
-        } catch {
-            NSLog("Bitamp: couldn't write to the \(name) Pak: \(error)")
+        let name = name
+        writeQueue.async { [data] in
+            do {
+                try input.write(contentsOf: data)
+            } catch {
+                NSLog("Bitamp: couldn't write to the \(name) Pak: \(error)")
+            }
         }
     }
 
@@ -294,16 +302,37 @@ final class PakConnection {
 
 /// Splits a byte stream into lines, keeping a partial last line for the next chunk.
 /// Used from one reading queue at a time, as `readabilityHandler` calls it.
-private final class LineBuffer: @unchecked Sendable {
+final class LineBuffer: @unchecked Sendable {
+    /// The longest line kept. A program that sends more than this without a line break is
+    /// broken or hostile, and the rest of that line is dropped rather than filling memory.
+    static let maxLine = 16 * 1024 * 1024
+
+    private let limit: Int
     private var buffer = Data()
+    private var discarding = false
+
+    init(maxLine: Int = LineBuffer.maxLine) {
+        limit = maxLine
+    }
 
     func append(_ data: Data) -> [Data] {
+        var data = data
+        if discarding {
+            // Throw away the rest of an over-long line, up to its end.
+            guard let newline = data.firstIndex(of: 0x0A) else { return [] }
+            data = Data(data[data.index(after: newline)...])
+            discarding = false
+        }
         buffer.append(data)
         var lines: [Data] = []
         while let newline = buffer.firstIndex(of: 0x0A) {
             let line = buffer[buffer.startIndex..<newline]
             if !line.isEmpty { lines.append(Data(line)) }
             buffer.removeSubrange(buffer.startIndex...newline)
+        }
+        if buffer.count > limit {
+            buffer = Data()
+            discarding = true
         }
         return lines
     }
