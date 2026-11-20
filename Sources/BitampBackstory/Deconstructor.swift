@@ -55,13 +55,12 @@ public struct Deconstructor: BackstoryService {
     }
 
     func lookup(_ track: PakNowPlaying) async throws -> [BackstoryUpdate] {
-        guard let artist = track.artist, !artist.isEmpty else { throw BackstoryError.declined }
-        // The recording on this album comes first, but it's often a bare copy of a song whose
-        // links sit on another recording, so the search without the album follows it.
-        var hits: [MBRecording] = []
-        if track.album != nil { hits = try await search(title: track.title, artist: artist, album: track.album) }
-        hits += try await search(title: track.title, artist: artist, album: nil)
-        let candidates = Self.pick(hits, title: track.title).prefix(Self.candidateLimit)
+        guard let artist = track.artist.map(Self.cleanArtist), !artist.isEmpty else { throw BackstoryError.declined }
+        let title = Self.cleanTitle(track.title)
+        // One search is enough: the song's recordings are all browsed below, so which copy
+        // matches first (an album's, a compilation's) doesn't matter.
+        let hits = try await search(title: title, artist: artist, album: nil)
+        let candidates = Self.pick(hits, title: title).prefix(Self.candidateLimit)
         guard let first = candidates.first else {
             return [.text("MusicBrainz has no recording of this song, so there is nothing to take apart.")]
         }
@@ -154,6 +153,28 @@ public struct Deconstructor: BackstoryService {
     }
 
     // MARK: - Reading
+
+    /// The title without what's added in brackets or after a dash: "Still D.R.E (feat. Snoop Dogg)"
+    /// and "Song - Remastered 2009" are both just the song.
+    static func cleanTitle(_ title: String) -> String {
+        var text = title
+        if let dash = text.range(of: " - ") { text = String(text[..<dash.lowerBound]) }
+        while let last = text.last, last == ")" || last == "]",
+              let open = text.lastIndex(where: { $0 == "(" || $0 == "[" }), open != text.startIndex {
+            text = String(text[..<open]).trimmingCharacters(in: .whitespaces)
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? title : trimmed
+    }
+
+    /// The main artist, without guests: "Dr. Dre feat. Snoop Dogg" is Dr. Dre.
+    static func cleanArtist(_ artist: String) -> String {
+        var text = artist
+        for marker in [" feat.", " feat ", " featuring ", " ft.", " ft ", " with "] {
+            if let range = text.range(of: marker, options: .caseInsensitive) { text = String(text[..<range.lowerBound]) }
+        }
+        return text.trimmingCharacters(in: .whitespaces)
+    }
 
     /// Lowercase, without accents or punctuation, for comparing names.
     static func fold(_ text: String) -> String {
