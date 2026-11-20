@@ -83,8 +83,7 @@ import Testing
         #expect(body.contains("SAMPLES\n- \"Through the Wire\" by Kanye West"))
         #expect(body.contains("SAMPLED BY\n- \"Later Song\""))
         #expect(body.contains("remix of: \"Original Mix\""))
-        #expect(body.contains("- Zoe"))
-        #expect(body.allSatisfy { $0.isASCII })
+        #expect(body.contains("- Zo\u{00E9}"))
     }
 
     @Test func aSongWithNoLinksSaysSo() throws {
@@ -221,7 +220,8 @@ import Testing
     @Test func lookalikePunctuationBecomesPlain() {
         #expect(NotesText.ascii("Wick\u{2010}it the Instigator") == "Wick-it the Instigator")
         #expect(NotesText.ascii("A\u{2010}Plus \u{2019}93 \u{201C}x\u{201D} \u{2013} y\u{2026}") == "A-Plus '93 \"x\" - y...")
-        #expect(NotesText.ascii("Zo\u{00E9}") == "Zoe")
-        #expect(NotesText.ascii("\u{5742}\u{672C}") == "??")
+        // Letters stay as they are: the font draws them.
+        #expect(NotesText.ascii("Zo\u{00E9} \u{0141}\u{00F3}d\u{017A} \u{0416}") == "Zo\u{00E9} \u{0141}\u{00F3}d\u{017A} \u{0416}")
+        #expect(NotesText.ascii("\u{5742}\u{672C}") == "\u{5742}\u{672C}")
     }
 }

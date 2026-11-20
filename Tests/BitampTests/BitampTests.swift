@@ -977,6 +977,20 @@ import Testing
         #expect(accent == .diaeresis)
     }
 
+    @Test func drawsLatinGreekAndCyrillicWithoutTheFallback() {
+        let samples = [
+            "Łódź Đorđe Čeština Šťastný Žluťoučký Ångström Őű řěąęăā İıñçžğ Æsir Œuvre þorn ð ħ",
+            "£ € ¥ ¢ © ® ™ ° ± × ÷ ¡ ¿ « » · • § ¶ ² ³ ¹ µ ♪ ♥ ★ → ← ↑ ↓ † ‡ ¬",
+            "ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ αβγδεζηθικλμνξοπρσςτυφχψω Ελληνικά ά έ ή ί ό ύ ώ ϊ",
+            "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ абвгдеёжзийклмнопрстуфхцчшщъыьэюя Київ Їжак Є Ґ ґ є",
+        ]
+        for sample in samples {
+            for piece in ListFont.pieces(sample) {
+                if case .fallback(let text) = piece { Issue.record("\(text) is drawn by the fallback font") }
+            }
+        }
+    }
+
     @Test func fallsBackForOtherScripts() {
         #expect(ListFont.pieces("坂本 - Merry") == [.fallback("坂本")] + ListFont.pieces(" - Merry"))
         #expect(ListFont.width(of: "坂本") > 0)

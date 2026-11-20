@@ -248,7 +248,7 @@ public struct Deconstructor: BackstoryService {
 
     // MARK: - Writing
 
-    /// The notes: plain ASCII, as the window's pixel font draws it.
+    /// The notes, in what the window's pixel font draws.
     static func render(_ found: Findings, matched: MBRecording, artists: [String: String]) -> [BackstoryUpdate] {
         func label(_ ref: Ref) -> String {
             let by = artists[ref.id].flatMap { $0.isEmpty ? nil : " by \($0)" } ?? ""
@@ -340,14 +340,12 @@ enum NotesText {
         "\u{00D7}": "x", "\u{2022}": "-", "\u{00B7}": "-", "\u{2215}": "/", "\u{FF0F}": "/",
     ]
 
-    /// Plain letters for the pixel font: look-alike punctuation made plain, accents dropped
-    /// ("Zo\u{00E9}" is "Zoe"), and anything else it can't draw (such as Japanese) a "?".
+    /// Look-alike punctuation made plain. Letters are left alone: the pixel font draws accented
+    /// Latin, Greek and Cyrillic itself, and anything else in a fallback font.
     static func ascii(_ text: String) -> String {
         var out = ""
         for character in text {
-            if let plain = lookalikes[character] { out += plain; continue }
-            let folded = String(character).folding(options: .diacriticInsensitive, locale: nil)
-            out += folded.unicodeScalars.allSatisfy(\.isASCII) ? folded : "?"
+            out += lookalikes[character] ?? String(character)
         }
         return out
     }
