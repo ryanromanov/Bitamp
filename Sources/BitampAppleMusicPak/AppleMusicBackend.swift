@@ -14,6 +14,7 @@ final class AppleMusicBackend: PlaybackBackend {
     private(set) var state = PlaybackState.stopped
     private(set) var nowPlaying: NowPlaying?
     let capabilities: PlaybackCapabilities = []
+    var audioSource: PlaybackAudioSource? { .appleMusicPlayer }
     var onTrackEnd: (() -> Void)?
     var onLoadFailure: ((Error) -> Void)?
 

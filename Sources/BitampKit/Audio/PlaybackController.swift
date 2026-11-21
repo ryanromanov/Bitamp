@@ -508,7 +508,8 @@ final class PlaybackController {
     var visualizerWindowOpen = false
 
     func updateListener(visualizerOn: Bool) {
-        listener.update(listening: (visualizerOn || visualizerWindowOpen) && player.state == .playing && !player.capabilities.contains(.visualizer))
+        listener.update(listening: (visualizerOn || visualizerWindowOpen) && player.state == .playing && !player.capabilities.contains(.visualizer),
+                        source: player.audioSource)
     }
 
     /// Why a control does nothing for the current track, or nil when it works: a Pak
