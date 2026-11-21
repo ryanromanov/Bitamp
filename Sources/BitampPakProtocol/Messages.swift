@@ -12,16 +12,22 @@ public enum PakProtocol {
     /// The newest version Bitamp speaks. A Pak declares the one it needs; Bitamp runs any
     /// up to this, and an older Bitamp won't install a Pak that needs a newer one.
     /// 1: music Paks (search, track, resolve, browse). 2: also `notes` companions, which
-    /// an older Bitamp would otherwise show as an empty music cartridge.
-    public static let version = 2
+    /// an older Bitamp would otherwise show as an empty music cartridge. 3: also `playback`
+    /// Paks, which play their own audio; an older Bitamp would try to download it instead.
+    public static let version = 3
     /// The version a Pak with the `notes` capability declares.
     public static let notesVersion = 2
+    /// The version a Pak with the `playback` capability declares.
+    public static let playbackVersion = 3
     /// The manifest's `capabilities` Bitamp knows. `browse`: the Media Library asks the Pak
     /// what's in it. `notes`: a companion Pak, with no music of its own, that writes about
     /// the song that's playing, in a window of its own.
     public static let browse = "browse"
     public static let notes = "notes"
-    public static let knownCapabilities: Set<String> = [browse, notes]
+    /// `playback`: the Pak plays its tracks itself (see `PakMethod.load` and `PakPlaybackEvent`),
+    /// so Bitamp's equalizer and Retro Sound can't reach them.
+    public static let playback = "playback"
+    public static let knownCapabilities: Set<String> = [browse, notes, playback]
     /// The manifest inside every `.bitpak` folder.
     public static let manifestName = "pak.json"
 }
@@ -483,6 +489,31 @@ public enum PakMethod {
         }
     }
 
+    /// Loads one of the Pak's own tracks, stopped, ready to play (`load`). Sent only to Paks
+    /// whose manifest lists the `playback` capability, which play every track themselves.
+    /// The answer comes when the track is ready; `play`, `pause`, `resume`, `stop` and `seek`
+    /// answer at once, and what really happens comes back as `PakPlaybackEvent`s.
+    public struct LoadResult: Codable, Equatable, Sendable {
+        /// Seconds, if the Pak knows it. Shown in the main window.
+        public var duration: Double?
+        public var title: String?
+        public var artist: String?
+        /// Whose sound the visualizer should listen to: `PakAudioProcess.itself` (the Pak's
+        /// own process) or a known player service. Missing means the visualizer can't hear it.
+        public var audio: String?
+        public init(duration: Double? = nil, title: String? = nil, artist: String? = nil, audio: String? = nil) {
+            self.duration = duration
+            self.title = title
+            self.artist = artist
+            self.audio = audio
+        }
+    }
+
+    public struct Seek: Codable, Sendable {
+        public var seconds: Double
+        public init(seconds: Double) { self.seconds = seconds }
+    }
+
     /// Bitamp no longer wants the answer to request `id`, such as notes for a song that was
     /// skipped. Not answered. The Pak should stop working on it; any later lines for it are ignored.
     public struct Cancel: Codable, Sendable {
@@ -501,6 +532,17 @@ public enum PakMethod {
     public static let resolve = "resolve"
     public static let browse = "browse"
     public static let notes = "notes"
+    /// `load` a track; then `play` (from the top), `pause`, `resume`, `stop` and `seek`. A Pak
+    /// that plays its own tracks answers these in order, apart from searches and browsing.
+    public static let load = "load"
+    public static let play = "play"
+    public static let pause = "pause"
+    public static let resume = "resume"
+    public static let stop = "stop"
+    public static let seek = "seek"
+    /// The methods that control playback. Kept apart from searching and browsing, so a slow
+    /// page doesn't hold up a pause.
+    public static let playbackMethods: Set<String> = [load, play, pause, resume, stop, seek]
     public static let cancel = "cancel"
     /// Bitamp is quitting or removing the Pak; it should exit after answering.
     public static let shutdown = "shutdown"
@@ -538,5 +580,51 @@ public struct PakResponse<Result: Codable>: Codable {
         self.id = id
         self.result = result
         self.error = error
+    }
+}
+
+/// Whose sound the visualizer listens to, for a Pak that plays its own audio. Bitamp has
+/// permission to record other apps' audio, so a Pak can't name any process it likes.
+public enum PakAudioProcess {
+    /// The Pak's own process.
+    public static let itself = "self"
+    /// Apple Music's player service, for a Pak that plays through MusicKit.
+    public static let appleMusic = "apple-music"
+    public static let known: Set<String> = [itself, appleMusic]
+}
+
+public enum PakPlayerState: String, Codable, Sendable {
+    case playing, paused, stopped
+}
+
+/// A line from a `playback` Pak that isn't the answer to a request: what the player is
+/// doing now. It has an `event` key and no `id`. The Pak sends `state` when anything changes
+/// and every half second or so while playing, so Bitamp's clock follows the player's.
+///
+///     ← {"event":"state","track":"ode","state":"playing","position":12.5,"duration":180}
+///     ← {"event":"ended","track":"ode"}
+///     ← {"event":"error","track":"ode","message":"The stream dropped."}
+public struct PakPlaybackEvent: Codable, Equatable, Sendable {
+    public static let state = "state"
+    public static let ended = "ended"
+    public static let error = "error"
+
+    public var event: String
+    /// The id the track was loaded with. Bitamp ignores an event about a track that's no longer loaded.
+    public var track: String?
+    public var state: PakPlayerState?
+    /// Seconds into the track.
+    public var position: Double?
+    public var duration: Double?
+    public var message: String?
+
+    public init(event: String, track: String? = nil, state: PakPlayerState? = nil, position: Double? = nil,
+                duration: Double? = nil, message: String? = nil) {
+        self.event = event
+        self.track = track
+        self.state = state
+        self.position = position
+        self.duration = duration
+        self.message = message
     }
 }
