@@ -27,7 +27,29 @@ public protocol PakProvider: AnyObject {
     /// companion Pak. Asked only if `pak.json` lists the `notes` capability. Stop when the
     /// task is cancelled: Bitamp no longer wants them. See docs/PAK-SDK.md.
     func notes(for song: PakSongInfo, writer: PakNotesWriter) async throws
+
+    // Playback, for a Pak whose manifest lists `playback` and declares protocol 3: it plays
+    // every track itself, instead of handing Bitamp a file. Bitamp sends these in order, apart
+    // from searches and browsing. Answer each as soon as the player has been told, and say
+    // what really happens with the `PakPlaybackReporter` from `attach`. `load` may take a
+    // while (preparing a stream); stop if the task is cancelled, because Bitamp has moved on.
+    // See docs/PAK-SDK.md.
+
+    /// Called once, before the first request, with where to report what the player is doing.
+    func attach(_ reporter: PakPlaybackReporter)
+    /// Gets track `id` ready, stopped, and says what's known about it.
+    func load(id: String) async throws -> PakPlaybackLoad
+    /// Starts the loaded track from the top.
+    func play() async throws
+    func pause() async throws
+    /// Continues after `pause`.
+    func resume() async throws
+    func stop() async throws
+    func seek(to seconds: Double) async throws
 }
+
+/// What `load` says about the track it prepared.
+public typealias PakPlaybackLoad = PakMethod.LoadResult
 
 extension PakProvider {
     public func configure(_ context: PakContext) async throws -> PakAccountState { .connected }
@@ -40,6 +62,14 @@ extension PakProvider {
     public func notes(for song: PakSongInfo, writer: PakNotesWriter) async throws {
         throw PakFailure("This Pak doesn't write notes.")
     }
+
+    public func attach(_ reporter: PakPlaybackReporter) {}
+    public func load(id: String) async throws -> PakPlaybackLoad { throw PakFailure("This Pak doesn't play its own audio.") }
+    public func play() async throws { throw PakFailure("This Pak doesn't play its own audio.") }
+    public func pause() async throws { throw PakFailure("This Pak doesn't play its own audio.") }
+    public func resume() async throws { throw PakFailure("This Pak doesn't play its own audio.") }
+    public func stop() async throws { throw PakFailure("This Pak doesn't play its own audio.") }
+    public func seek(to seconds: Double) async throws { throw PakFailure("This Pak doesn't play its own audio.") }
 
     /// Search's tracks for a search, an empty sidebar, and nothing to open.
     public func browse(_ location: PakBrowseLocation, cursor: String?) async throws -> PakBrowsePage {
@@ -106,6 +136,51 @@ public final class PakNotesWriter: @unchecked Sendable {
     }
 }
 
+/// Tells Bitamp what a `playback` Pak's player is doing: playing, paused or stopped and
+/// where it is, when a track ends, and when it fails. Safe to call from any thread. Report
+/// when anything changes, and every half second or so while playing, so Bitamp's clock
+/// follows the player's. Events are about the track most recently loaded.
+public final class PakPlaybackReporter: @unchecked Sendable {
+    private let output: PakRunner.Output
+    private let lock = NSLock()
+    private var track: String?
+
+    init(output: PakRunner.Output) {
+        self.output = output
+    }
+
+    /// Set by the runner when a `load` arrives, so events name the track they're about.
+    func loading(_ id: String) {
+        lock.lock()
+        track = id
+        lock.unlock()
+    }
+
+    public func report(_ state: PakPlayerState, position: Double, duration: Double? = nil) {
+        send(PakPlaybackEvent(event: PakPlaybackEvent.state, track: currentTrack, state: state, position: position, duration: duration))
+    }
+
+    /// The track played to its end and the player has stopped.
+    public func ended() {
+        send(PakPlaybackEvent(event: PakPlaybackEvent.ended, track: currentTrack))
+    }
+
+    /// The track can't play, or stopped without being asked to.
+    public func failed(_ message: String) {
+        send(PakPlaybackEvent(event: PakPlaybackEvent.error, track: currentTrack, message: message))
+    }
+
+    private var currentTrack: String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return track
+    }
+
+    private func send(_ event: PakPlaybackEvent) {
+        output.write(PakRunner.encode(event))
+    }
+}
+
 /// Throw this to send Bitamp a message it can show.
 public struct PakFailure: LocalizedError {
     public var message: String
@@ -115,39 +190,53 @@ public struct PakFailure: LocalizedError {
 
 public enum PakRunner {
     /// Answers Bitamp's requests until it asks the Pak to stop or closes the pipe, then exits.
+    ///
+    /// The main thread runs the main run loop, which a Pak that plays audio needs for its
+    /// player's callbacks and timers; requests are answered on other threads.
     public static func run(_ provider: PakProvider) -> Never {
-        let done = DispatchSemaphore(value: 0)
-        Task {
+        Task.detached {
             await serve(provider, input: FileHandle.standardInput.bytes.lines) { line in
                 FileHandle.standardOutput.write(Data((line + "\n").utf8))
             }
-            done.signal()
+            exit(0)
         }
-        done.wait()
-        exit(0)
+        // A run loop with nothing to wait for returns at once, so give it a timer that never fires.
+        let idle = Timer(timeInterval: 1e9, repeats: true) { _ in }
+        RunLoop.main.add(idle, forMode: .common)
+        while true { RunLoop.main.run(mode: .default, before: .distantFuture) }
     }
 
     /// The request loop, separate from standard input and output so it can be tested.
     ///
     /// Requests are answered one at a time, in order, so a Pak never has two running at
-    /// once. A `cancel` is read while a request runs, and cancels it (or drops it, if it
-    /// hasn't started); a cancelled request isn't answered. `shutdown` cancels whatever runs.
+    /// once, with one exception: playback commands (`load`, `play`, `pause`, `resume`, `stop`
+    /// and `seek`) go in a line of their own, in order among themselves, so a slow search
+    /// doesn't hold up a pause. A `cancel` is read while a request runs, and cancels it (or
+    /// drops it, if it hasn't started); a cancelled request isn't answered. `shutdown`
+    /// cancels whatever runs.
     public static func serve<Lines: AsyncSequence>(
         _ provider: PakProvider, input: Lines, write: @escaping (String) -> Void
     ) async where Lines.Element == String {
         let output = Output(write)
         let running = Running()
+        let reporter = PakPlaybackReporter(output: output)
+        let context = ContextBox()
+        provider.attach(reporter)
         let (requests, queue) = AsyncStream<(PakRequestHeader, Data)>.makeStream()
-        let worker = Task {
-            let context = ContextBox()
-            for await (header, data) in requests {
-                guard let task = running.start(header.id, { Task { await answer(header, data, provider, context, output) } })
-                else { continue }
-                let reply = await task.value
-                if running.finish(header.id), let reply { output.write(reply) }
-                if header.method == PakMethod.shutdown { return }
+        let (playbackRequests, playbackQueue) = AsyncStream<(PakRequestHeader, Data)>.makeStream()
+        func worker(_ requests: AsyncStream<(PakRequestHeader, Data)>) -> Task<Void, Never> {
+            Task {
+                for await (header, data) in requests {
+                    guard let task = running.start(header.id, { Task { await answer(header, data, provider, context, output, reporter) } })
+                    else { continue }
+                    let reply = await task.value
+                    if running.finish(header.id), let reply { output.write(reply) }
+                    if header.method == PakMethod.shutdown { return }
+                }
             }
         }
+        let general = worker(requests)
+        let playback = worker(playbackRequests)
         do {
             for try await line in input {
                 guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
@@ -161,20 +250,26 @@ public enum PakRunner {
                     continue
                 }
                 if header.method == PakMethod.shutdown { running.cancelCurrent() }
-                queue.yield((header, data))
+                if PakMethod.playbackMethods.contains(header.method) {
+                    playbackQueue.yield((header, data))
+                } else {
+                    queue.yield((header, data))
+                }
                 if header.method == PakMethod.shutdown { break }
             }
         } catch {
             log("input ended: \(error)")
         }
         queue.finish()
-        await worker.value
+        playbackQueue.finish()
+        await general.value
+        await playback.value
     }
 
-    /// The request running now, and those cancelled before they started.
+    /// The requests running now, and those cancelled before they started.
     final class Running: @unchecked Sendable {
         private let lock = NSLock()
-        private var current: (id: Int, task: Task<String?, Never>, cancelled: Bool)?
+        private var current: [Int: (task: Task<String?, Never>, cancelled: Bool)] = [:]
         private var cancelled: Set<Int> = []
 
         /// Starts a request, unless it was cancelled while it waited.
@@ -183,7 +278,7 @@ public enum PakRunner {
             defer { lock.unlock() }
             guard cancelled.remove(id) == nil else { return nil }
             let task = make()
-            current = (id, task, false)
+            current[id] = (task, false)
             return task
         }
 
@@ -191,17 +286,17 @@ public enum PakRunner {
         func finish(_ id: Int) -> Bool {
             lock.lock()
             defer { lock.unlock() }
-            let answered = current?.id == id && current?.cancelled == false
-            current = nil
+            let answered = current[id]?.cancelled == false
+            current[id] = nil
             return answered
         }
 
         func cancel(_ id: Int) {
             lock.lock()
             defer { lock.unlock() }
-            if current?.id == id {
-                current?.cancelled = true
-                current?.task.cancel()
+            if current[id] != nil {
+                current[id]?.cancelled = true
+                current[id]?.task.cancel()
             } else {
                 cancelled.insert(id)
             }
@@ -210,8 +305,10 @@ public enum PakRunner {
         func cancelCurrent() {
             lock.lock()
             defer { lock.unlock() }
-            current?.cancelled = true
-            current?.task.cancel()
+            for id in Array(current.keys) {
+                current[id]?.cancelled = true
+                current[id]?.task.cancel()
+            }
         }
     }
 
@@ -233,7 +330,8 @@ public enum PakRunner {
 
     /// The answer to one request, or nil if it was cancelled.
     private static func answer(
-        _ header: PakRequestHeader, _ data: Data, _ provider: PakProvider, _ box: ContextBox, _ output: Output
+        _ header: PakRequestHeader, _ data: Data, _ provider: PakProvider, _ box: ContextBox, _ output: Output,
+        _ reporter: PakPlaybackReporter
     ) async -> String? {
         do {
             switch header.method {
@@ -265,6 +363,25 @@ public enum PakRunner {
                 try Task.checkCancellation()
                 writer.close()
                 return encode(header.id, PakMethod.NotesResult())
+            case PakMethod.load:
+                let id = try params(PakMethod.TrackID.self, data).id
+                reporter.loading(id)
+                return encode(header.id, try await provider.load(id: id))
+            case PakMethod.play:
+                try await provider.play()
+                return encode(header.id, PakMethod.Empty())
+            case PakMethod.pause:
+                try await provider.pause()
+                return encode(header.id, PakMethod.Empty())
+            case PakMethod.resume:
+                try await provider.resume()
+                return encode(header.id, PakMethod.Empty())
+            case PakMethod.stop:
+                try await provider.stop()
+                return encode(header.id, PakMethod.Empty())
+            case PakMethod.seek:
+                try await provider.seek(to: try params(PakMethod.Seek.self, data).seconds)
+                return encode(header.id, PakMethod.Empty())
             case PakMethod.shutdown:
                 return encode(header.id, PakMethod.Empty())
             default:
