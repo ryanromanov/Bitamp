@@ -62,8 +62,10 @@ private final class FakeTransport: PakPlaybackTransport {
     }
 
     private func event(_ kind: String = "state", track: String? = "ode", state: PakPlayerState? = nil,
-                       position: Double? = nil, duration: Double? = nil, message: String? = nil) -> PakPlaybackEvent {
-        PakPlaybackEvent(event: kind, track: track, state: state, position: position, duration: duration, message: message)
+                       position: Double? = nil, duration: Double? = nil, message: String? = nil,
+                       advice: String? = nil) -> PakPlaybackEvent {
+        PakPlaybackEvent(event: kind, track: track, state: state, position: position, duration: duration, message: message,
+                         advice: advice)
     }
 
     @Test func loadsTheTrackAndShowsWhatThePakSaid() async throws {
@@ -141,6 +143,20 @@ private final class FakeTransport: PakPlaybackTransport {
         backend.play()
         transport.send(event("error", message: "The stream dropped."))
         #expect(failures == ["The stream dropped."] && backend.state == .stopped)
+    }
+
+    @Test func anErrorWithAdviceReachesTheControllerAsAdvice() async throws {
+        let (backend, transport) = make()
+        var failures: [Error] = []
+        backend.onLoadFailure = { failures.append($0) }
+        try backend.load(url)
+        backend.play()
+        try await waitForCalls(transport, 2)
+        for _ in 0..<100 { try await Task.sleep(nanoseconds: 4_000_000) }
+
+        transport.send(event("error", message: "Apple Music won't play this song.", advice: "Open the Music app first."))
+        let advice = try #require(failures.first as? PlaybackAdvice)
+        #expect(advice.title == "Apple Music won't play this song." && advice.advice == "Open the Music app first.")
     }
 
     @Test func ignoresWordAboutAnEarlierTrack() async throws {

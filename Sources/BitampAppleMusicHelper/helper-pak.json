@@ -1,0 +1,9 @@
+{
+  "id": "apple-music",
+  "name": "Apple Music Helper",
+  "version": "0.1.0",
+  "executable": "Helper.app/Contents/MacOS/BitampAppleMusicHelper",
+  "protocol": 3,
+  "capabilities": ["browse", "playback"],
+  "description": "Apple Music, in a program of its own: your library and the catalog, played through MusicKit."
+}

@@ -249,7 +249,9 @@ final class ExternalBackend: PlaybackBackend {
             position = 0
             onTrackEnd?()
         case PakPlaybackEvent.error:
-            fail(Failure.pak(event.message ?? "The \(pakName) Pak couldn't play this track."))
+            let message = event.message ?? "The \(pakName) Pak couldn't play this track."
+            // With advice, the listener gets the same title and what-to-try as a built-in backend's.
+            fail(event.advice.map { PlaybackAdvice(title: message, advice: $0) } ?? Failure.pak(message))
         default:
             break
         }

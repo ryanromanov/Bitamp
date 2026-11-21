@@ -35,6 +35,12 @@ public protocol PakProvider: AnyObject {
     // while (preparing a stream); stop if the task is cancelled, because Bitamp has moved on.
     // See docs/PAK-SDK.md.
 
+    /// The picture for an artwork `id` the Pak gave in a `PakArtworkInfo`, drawn into a file
+    /// under `PakContext.cacheDirectory`, about `size` pixels square; nil if there's none. Asked
+    /// for many at once, as a page of covers is shown, and alongside other requests, so keep
+    /// how many draw at a time down. Stop if the task is cancelled.
+    func artwork(id: String, size: Int) async throws -> URL?
+
     /// Called once, before the first request, with where to report what the player is doing.
     func attach(_ reporter: PakPlaybackReporter)
     /// Gets track `id` ready, stopped, and says what's known about it.
@@ -63,6 +69,7 @@ extension PakProvider {
         throw PakFailure("This Pak doesn't write notes.")
     }
 
+    public func artwork(id: String, size: Int) async throws -> URL? { nil }
     public func attach(_ reporter: PakPlaybackReporter) {}
     public func load(id: String) async throws -> PakPlaybackLoad { throw PakFailure("This Pak doesn't play its own audio.") }
     public func play() async throws { throw PakFailure("This Pak doesn't play its own audio.") }
@@ -165,9 +172,9 @@ public final class PakPlaybackReporter: @unchecked Sendable {
         send(PakPlaybackEvent(event: PakPlaybackEvent.ended, track: currentTrack))
     }
 
-    /// The track can't play, or stopped without being asked to.
-    public func failed(_ message: String) {
-        send(PakPlaybackEvent(event: PakPlaybackEvent.error, track: currentTrack, message: message))
+    /// The track can't play, or stopped without being asked to. `advice` is what the listener can try.
+    public func failed(_ message: String, advice: String? = nil) {
+        send(PakPlaybackEvent(event: PakPlaybackEvent.error, track: currentTrack, message: message, advice: advice))
     }
 
     private var currentTrack: String? {
@@ -209,9 +216,9 @@ public enum PakRunner {
     /// The request loop, separate from standard input and output so it can be tested.
     ///
     /// Requests are answered one at a time, in order, so a Pak never has two running at
-    /// once, with one exception: playback commands (`load`, `play`, `pause`, `resume`, `stop`
-    /// and `seek`) go in a line of their own, in order among themselves, so a slow search
-    /// doesn't hold up a pause. A `cancel` is read while a request runs, and cancels it (or
+    /// once, with two exceptions. `artwork` requests run alongside everything, each in its own
+    /// task. Playback commands (`load`, `play`, `pause`, `resume`, `stop` and `seek`) go in a
+    /// line of their own, in order among themselves, so a slow search doesn't hold up a pause. A `cancel` is read while a request runs, and cancels it (or
     /// drops it, if it hasn't started); a cancelled request isn't answered. `shutdown`
     /// cancels whatever runs.
     public static func serve<Lines: AsyncSequence>(
@@ -237,6 +244,16 @@ public enum PakRunner {
         }
         let general = worker(requests)
         let playback = worker(playbackRequests)
+        // Artwork requests run alongside everything, each in its own task.
+        let artwork = Tasks()
+        func concurrently(_ header: PakRequestHeader, _ data: Data) {
+            guard let task = running.start(header.id, { Task { await answer(header, data, provider, context, output, reporter) } })
+            else { return }
+            artwork.add(Task {
+                let reply = await task.value
+                if running.finish(header.id), let reply { output.write(reply) }
+            })
+        }
         do {
             for try await line in input {
                 guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
@@ -252,6 +269,8 @@ public enum PakRunner {
                 if header.method == PakMethod.shutdown { running.cancelCurrent() }
                 if PakMethod.playbackMethods.contains(header.method) {
                     playbackQueue.yield((header, data))
+                } else if header.method == PakMethod.artwork {
+                    concurrently(header, data)
                 } else {
                     queue.yield((header, data))
                 }
@@ -264,6 +283,27 @@ public enum PakRunner {
         playbackQueue.finish()
         await general.value
         await playback.value
+        await artwork.finished()
+    }
+
+    /// Tasks started and not yet waited for.
+    final class Tasks: @unchecked Sendable {
+        private let lock = NSLock()
+        private var tasks: [Task<Void, Never>] = []
+
+        func add(_ task: Task<Void, Never>) {
+            lock.lock()
+            tasks.append(task)
+            lock.unlock()
+        }
+
+        func finished() async {
+            lock.lock()
+            let all = tasks
+            tasks = []
+            lock.unlock()
+            for task in all { await task.value }
+        }
     }
 
     /// The requests running now, and those cancelled before they started.
@@ -363,6 +403,10 @@ public enum PakRunner {
                 try Task.checkCancellation()
                 writer.close()
                 return encode(header.id, PakMethod.NotesResult())
+            case PakMethod.artwork:
+                let request = try params(PakMethod.Artwork.self, data)
+                let file = try await provider.artwork(id: request.id, size: request.size)
+                return encode(header.id, PakMethod.ArtworkResult(file: file?.path))
             case PakMethod.load:
                 let id = try params(PakMethod.TrackID.self, data).id
                 reporter.loading(id)
