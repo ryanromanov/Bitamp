@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "BitampPakSDK", targets: ["BitampPakSDK"]),
         .executable(name: "BitampDemoPak", targets: ["BitampDemoPak"]),
         .executable(name: "BitampDemoNotesPak", targets: ["BitampDemoNotesPak"]),
+        .executable(name: "BitampDemoPlaybackPak", targets: ["BitampDemoPlaybackPak"]),
     ],
     targets: [
         // Everything but the entry point lives in BitampKit so tests can import it.
@@ -30,13 +31,15 @@ let package = Package(
         .target(name: "BitampPakSDK", dependencies: ["BitampPakProtocol"]),
         .executableTarget(name: "BitampDemoPak", dependencies: ["BitampPakSDK"], exclude: ["pak.json"]),
         .executableTarget(name: "BitampDemoNotesPak", dependencies: ["BitampPakSDK"], exclude: ["pak.json"]),
+        // Shares the Demo Pak's tunes and synthesizer (symlinked), and plays them itself.
+        .executableTarget(name: "BitampDemoPlaybackPak", dependencies: ["BitampPakSDK"], exclude: ["pak.json"]),
         // Expansion Paks built into Bitamp. Each depends on BitampPakKit only.
         .target(name: "BitampAppleMusicPak", dependencies: ["BitampPakKit"]),
         // The services the Backstory Pak can ask about a song (Claude so far).
         .target(name: "BitampBackstory", dependencies: ["BitampPakKit"]),
         .executableTarget(name: "Bitamp", dependencies: ["BitampKit", "BitampAppleMusicPak", "BitampBackstory"]),
         .testTarget(name: "BitampTests", dependencies: [
-            "BitampKit", "BitampPakKit", "BitampAppleMusicPak", "BitampPakSDK", "BitampDemoPak", "BitampDemoNotesPak", "BitampBackstory",
+            "BitampKit", "BitampPakKit", "BitampAppleMusicPak", "BitampPakSDK", "BitampDemoPak", "BitampDemoNotesPak", "BitampDemoPlaybackPak", "BitampBackstory",
         ]),
     ]
 )
