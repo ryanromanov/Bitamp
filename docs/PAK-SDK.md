@@ -8,9 +8,9 @@ An Expansion Pak adds a music source to Bitamp: a server, a radio directory, an 
 
 A Pak is a program. Bitamp starts it, asks it questions over standard input and output, and plays the audio it points to. You can write one in Swift with the small SDK in this repository, or in any language that can read and write lines of JSON.
 
-A Pak can also be a **companion** with no music of its own, which writes about the song that's playing in a window of its own, the way Bitamp's Backstory does. See [Notes](#notes).
+A Pak can also be a **companion** with no music of its own, which writes about the song that's playing in a window of its own, the way Bitamp's Backstory does. See [Notes](#notes). And a Pak that makes its own sound, through a player of its own, can say so and be told when to play and pause. See [Playback](#playback).
 
-The demo Pak in `Sources/BitampDemoPak` is a complete example. It plays a few public-domain tunes as chiptunes and needs no server. `Sources/BitampDemoNotesPak` is a companion that writes a few lines about those tunes. Build both with `scripts/make-pak.sh`, then double-click `Demo.bitpak` and `Demo Notes.bitpak` to install them.
+The demo Pak in `Sources/BitampDemoPak` is a complete example. It plays a few public-domain tunes as chiptunes and needs no server. `Sources/BitampDemoNotesPak` is a companion that writes a few lines about those tunes, and `Sources/BitampDemoPlaybackPak` plays them through a player of its own. Build them with `scripts/make-pak.sh`, then double-click `Demo.bitpak`, `Demo Notes.bitpak` and `Demo Playback.bitpak` to install them.
 
 ## What a Pak is
 
@@ -43,8 +43,8 @@ Radio.bitpak/
 - **id** is 1 to 32 lowercase letters, digits and hyphens, starting with a letter. It names the Pak's settings, and its tracks' URLs in playlists (`bitpak-radio://track/<your id>`). Keep it the same between versions.
 - **name** is shown on the cartridge and in menus ("Radio Pak").
 - **executable** is the program, relative to the folder. It must be inside the folder and executable.
-- **protocol** is the version of the messages below that the Pak needs. Use 1, which every Bitamp with Paks understands, unless the Pak writes notes: those need 2 (Bitamp 0.12.0 and later). Bitamp won't install a Pak that needs a newer version than it has, and says it needs a newer Bitamp.
-- **capabilities** are optional. `["browse"]` says the Pak can be browsed in the Media Library, with a sidebar, albums, artists, playlists and covers (see [Browsing](#browsing)). Bitamp 0.10 and earlier ignore it and show the Pak's search instead, so one Pak works in both. `["notes"]` makes it a companion that writes notes instead of supplying music (see [Notes](#notes)); it needs `"protocol": 2`, so Bitamp 0.11 and earlier decline to install it rather than showing an empty music cartridge.
+- **protocol** is the version of the messages below that the Pak needs. Use 1, which every Bitamp with Paks understands, unless the Pak writes notes (those need 2, Bitamp 0.12.0 and later) or plays its own sound (those need 3). Bitamp won't install a Pak that needs a newer version than it has, and says it needs a newer Bitamp.
+- **capabilities** are optional. `["browse"]` says the Pak can be browsed in the Media Library, with a sidebar, albums, artists, playlists and covers (see [Browsing](#browsing)). Bitamp 0.10 and earlier ignore it and show the Pak's search instead, so one Pak works in both. `["notes"]` makes it a companion that writes notes instead of supplying music (see [Notes](#notes)); it needs `"protocol": 2`, so Bitamp 0.11 and earlier decline to install it rather than showing an empty music cartridge. `["playback"]` says the Pak plays its tracks itself (see [Playback](#playback)); it needs `"protocol": 3`, so older Bitamps decline to install it instead of trying to download its audio.
 - **settings** are optional. Bitamp shows a form for them (right-click the cartridge ▸ Settings…) and passes their values to the Pak. `text` is one line, `password` is kept in the macOS Keychain, `choice` is a pop-up of `options`.
 
 ## Messages
@@ -129,6 +129,35 @@ Bitamp asks for notes with the song's tags, never its audio or its file's name. 
 - **Text** is plain, as Bitamp's pixel font draws it; a blank line starts a paragraph. Markdown isn't drawn.
 - **cancel** comes when the song changes before the notes are done. Stop working on them, and don't answer. Anything you still send for that `id` is ignored. The 30-second limit counts from the last line you sent, and is 60 seconds for notes, so a long answer is fine as long as words keep coming.
 - **An error** shows in the window, so word it for the listener. A Pak with settings to fill in should answer `hello` with `disconnected`: the window asks the listener to set it up.
+
+## Playback
+
+A Pak that makes its own sound (a streaming service's own player, another app it drives, an audio library Bitamp doesn't have) says `"capabilities": ["playback"]` and `"protocol": 3`. Bitamp then never asks it to `resolve` a track and download a file. Instead it tells the Pak to load a track, play it, pause it and so on, and the Pak tells Bitamp what its player is doing. Bitamp's equalizer, Retro Sound and volume can't reach the sound, so their controls dim, as they do for Apple Music; the visualizer can still hear it (see `audio` below). Search, `track` and `browse` work as for any music Pak. The demo is `Sources/BitampDemoPlaybackPak`.
+
+```
+→ {"id":3,"method":"load","params":{"id":"42"}}
+← {"id":3,"result":{"duration":324,"title":"Take Five","artist":"Dave Brubeck","audio":"self"}}
+→ {"id":4,"method":"play","params":{}}
+← {"id":4,"result":{}}
+← {"event":"state","track":"42","state":"playing","position":0,"duration":324}
+← {"event":"state","track":"42","state":"playing","position":0.5}
+→ {"id":5,"method":"seek","params":{"seconds":60}}
+← {"id":5,"result":{}}
+← {"event":"ended","track":"42"}
+```
+
+- **load** gets the track ready, stopped, and replaces whatever was playing. Answer when it's ready; that can take a while (preparing a stream), and the 30-second limit counts from the last line you sent. If the listener skips on, Bitamp sends `cancel`: stop and don't answer. The answer can say the track's `duration`, `title` and `artist`, which the main window shows.
+- **play** starts the loaded track from the top. **pause** pauses it, **resume** continues, **stop** stops it, **seek** moves to `seconds`. Answer each as soon as the player has been told, not when something has finished; the events say what actually happened.
+- **Order.** These six go to the Pak in the order Bitamp gave them, and on a line of their own: a slow search or page doesn't hold up a pause. Everything else is still one request at a time.
+- **Events** are lines with an `event` key and no `id`. `state` (`"playing"`, `"paused"` or `"stopped"`, with the `position` in seconds and, if you know it, the `duration`) when anything changes and about every half second while playing, so Bitamp's clock follows your player's. `ended` when the track played to its end and the player has stopped; Bitamp moves to the next song. `error` with a `message` when the track can't play or stopped without being asked to. `track` names the id the track was loaded with; Bitamp ignores an event about a track that's no longer the loaded one.
+- **Bitamp answers the listener at once.** Its buttons change when pressed and your reports then correct them, so a paused player that you report as playing a moment too late doesn't flicker back.
+- **audio** says whose sound the visualizer listens to: `"self"`, the Pak's own process, or `"apple-music"`, for a Pak that plays through MusicKit (whose sound comes out of an Apple service, not the Pak). Any other value is refused, since Bitamp has permission to record other apps' audio. Leave it out and the visualizer shows the Pak's cartridge, as it does when it can't hear a Pak. The first time, macOS asks the listener to let Bitamp record audio from other apps.
+- **If the program exits** while a song plays, Bitamp stops, says so, and starts the program again at the next play, loading the track first.
+- **A Pak with settings** to fill in answers `hello` with `disconnected`, as always.
+
+In Swift, implement `load(id:)`, `play()`, `pause()`, `resume()`, `stop()` and `seek(to:)` on your `PakProvider`, and keep the reporter that `attach(_:)` gives you: `reporter.report(.playing, position: 12.5, duration: 324)`, `reporter.ended()`, `reporter.failed("…")`. `PakRunner.run` keeps the main run loop going, which players that call back on the main thread (`AVAudioPlayer`, timers) need. [Sources/BitampDemoPlaybackPak/main.swift](../Sources/BitampDemoPlaybackPak/main.swift) is a complete example.
+
+**Playing through MusicKit.** A Pak can use Apple's MusicKit, but MusicKit needs the program to claim an App ID with the MusicKit service enabled, and a bare executable can't: it has to be an app bundle (`Helper.app`) with its own provisioning profile, signed with a Developer ID, inside the `.bitpak`, and `executable` in `pak.json` points at the program inside it (`"Helper.app/Contents/MacOS/Helper"`). Run it without windows (`LSUIElement`, no dock icon). That takes an Apple Developer account, an App ID with MusicKit under App Services and a Developer ID profile for it; a new App ID can take a few minutes before MusicKit's catalog answers.
 
 ## In Swift
 
@@ -290,7 +319,7 @@ Save it as `hello.py` in `Hello.bitpak`, `chmod +x` it, and point `pak.json`'s `
   The Radio Pak looks good. Double-click it to install it.
   ```
 
-  It reads `pak.json` as installing does, then starts the program and has the same conversation Bitamp has, using the first track it finds. With the `browse` capability, it also opens the sidebar, every section, one album, artist and playlist, and one page after a cursor, and checks that each cover's file is there. A companion with `notes` is asked for notes on Ode to Joy instead, then asked again and cancelled, to check it stops and answers the next request promptly. It catches what usually goes wrong: answers that aren't flushed, other output on standard output, a `track` that forgets an id `search` gave, a file that isn't there, and a program that doesn't exit. Settings take their defaults unless you give `--setting key=value`, once per setting. What the program writes to standard error is shown as it runs. It exits with status 0 when there's nothing to fix.
+  It reads `pak.json` as installing does, then starts the program and has the same conversation Bitamp has, using the first track it finds. With the `browse` capability, it also opens the sidebar, every section, one album, artist and playlist, and one page after a cursor, and checks that each cover's file is there. A Pak with `playback` is loaded with its first track and made to play, seek, pause, resume and stop, checking each answer and that its events say what happened; this makes a few seconds of sound. A companion with `notes` is asked for notes on Ode to Joy instead, then asked again and cancelled, to check it stops and answers the next request promptly. It catches what usually goes wrong: answers that aren't flushed, other output on standard output, a `track` that forgets an id `search` gave, a file that isn't there, and a program that doesn't exit. Settings take their defaults unless you give `--setting key=value`, once per setting. What the program writes to standard error is shown as it runs. It exits with status 0 when there's nothing to fix.
 - Install by double-clicking the `.bitpak`, dropping it on Bitamp, or File ▸ Install Expansion Pak…. Installing a Pak with the same id replaces the old one.
 - Installed Paks live in `~/Library/Application Support/Bitamp/Paks`; their caches in `~/Library/Caches/com.ryanromanov.Bitamp/Paks`.
 - Click the cartridge to open the Pak in the Media Library, where it shows what `search ""` gives and searches when the user presses Return; a companion's opens its window. Right-click it to browse, change settings, eject or remove it.
@@ -301,6 +330,5 @@ A Pak runs with the same permissions as the person who installed it, so Bitamp a
 
 ## Not yet
 
-- **Streaming.** Bitamp downloads the whole file before it starts playing. Fine for songs on a home server, not for endless radio streams.
-- **Paks that play audio themselves**, as a streaming service's own player would, can't be third-party yet; a third-party Pak always hands Bitamp audio to play.
+- **Streaming into Bitamp's own player.** Bitamp downloads the whole file before it starts playing, so a Pak that hands it audio can't have the equalizer on an endless radio stream. A [playback](#playback) Pak can stream through its own player, without the equalizer and Retro Sound.
 - **Companions beyond notes**, such as lyrics that follow the song or a visualizer. A companion gets the song's tags and writes text.
