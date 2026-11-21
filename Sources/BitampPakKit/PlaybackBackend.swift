@@ -61,8 +61,22 @@ public struct PlaybackAdvice: LocalizedError {
     public var errorDescription: String? { "\(title) \(advice)" }
 }
 
+/// Whose sound the visualizer listens to, for a backend that plays audio itself.
+public enum PlaybackAudioSource: Sendable, Equatable {
+    /// The processes of the app or service with this bundle ID.
+    case bundleID(String)
+    /// One process.
+    case processID(Int32)
+
+    /// Apple Music's player service, where MusicKit's sound comes out whichever process asked for it.
+    public static let appleMusicPlayer = PlaybackAudioSource.bundleID("com.apple.MediaPlayer.RemotePlayerService")
+}
+
 public protocol PlaybackBackend: AnyObject {
     var state: PlaybackState { get }
+    /// Whose sound the visualizer can listen to, or nil when it can't hear this backend (or, for
+    /// Bitamp's own engine, doesn't need to).
+    var audioSource: PlaybackAudioSource? { get }
     var nowPlaying: NowPlaying? { get }
     /// Seconds into the loaded track.
     var currentTime: Double { get }
@@ -81,4 +95,8 @@ public protocol PlaybackBackend: AnyObject {
     func pause()
     func stop()
     func seek(to seconds: Double)
+}
+
+extension PlaybackBackend {
+    public var audioSource: PlaybackAudioSource? { nil }
 }

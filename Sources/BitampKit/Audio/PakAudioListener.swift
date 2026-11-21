@@ -1,16 +1,17 @@
 import AVFoundation
+import BitampPakKit
 import CoreAudio
 
 /// Lets the visualizer show a Pak that plays its own audio, by listening to the process
 /// that plays it with a Core Audio process tap (macOS 14.2+) and feeding the analyzer.
 ///
 /// MusicKit plays Apple Music in a helper, `com.apple.MediaPlayer.RemotePlayerService`,
-/// not in Bitamp, so that's the process tapped. The first tap asks the user's permission
+/// not in Bitamp, so that's the process tapped; a Pak that plays its own audio names its own
+/// process instead (`PlaybackBackend.audioSource`). The first tap asks the user's permission
 /// to record other apps' audio (NSAudioCaptureUsageDescription); if they say no, the tap
 /// hears silence and the visualizer keeps showing the Pak's badge.
 @MainActor
 final class PakAudioListener {
-    static let playerBundleID = "com.apple.MediaPlayer.RemotePlayerService"
     /// How often to look for the player's process again while tapping, in case it restarts.
     static let rescanInterval: TimeInterval = 1
     /// A running tap that hears nothing for this long stops counting as working.
@@ -38,11 +39,11 @@ final class PakAudioListener {
     /// switching back to the Pak's badge.
     private(set) var works = false
 
-    /// Starts or stops listening. Called every frame, so it only looks for the player's
-    /// process once every `rescanInterval`.
-    func update(listening: Bool) {
+    /// Starts or stops listening to `source`. Called every frame, so it only looks for the
+    /// player's process once every `rescanInterval`.
+    func update(listening: Bool, source: PlaybackAudioSource?) {
         guard #available(macOS 14.2, *) else { return }
-        guard listening else { return stop() }
+        guard listening, let source else { return stop() }
         let now = ProcessInfo.processInfo.systemUptime
         if isHearing {
             works = true
@@ -51,7 +52,7 @@ final class PakAudioListener {
         }
         guard tap == nil || now - scannedAt >= Self.rescanInterval else { return }
         scannedAt = now
-        let players = AudioProcesses.objects(bundleID: Self.playerBundleID)
+        let players = AudioProcesses.objects(source)
         guard players != tapped else { return }
         stop()
         guard !players.isEmpty else {
@@ -69,7 +70,7 @@ final class PakAudioListener {
             tapped = players
             startedAt = now
         } catch {
-            NSLog("Bitamp: couldn't listen to \(Self.playerBundleID): \(error)")
+            NSLog("Bitamp: couldn't listen to \(source): \(error)")
             tapped = players  // Don't retry until the processes change.
             works = false
         }
@@ -106,6 +107,21 @@ enum AudioProcesses {
         return CoreAudioProperty.array(system, kAudioHardwarePropertyProcessObjectList)
             .filter { CoreAudioProperty.string($0, kAudioProcessPropertyBundleID) == bundleID }
             .sorted()
+    }
+
+    /// The Core Audio process objects for one process id.
+    static func objects(processID: Int32) -> [AudioObjectID] {
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        return CoreAudioProperty.array(system, kAudioHardwarePropertyProcessObjectList)
+            .filter { CoreAudioProperty.scalar($0, kAudioProcessPropertyPID, Int32(-1)) == processID }
+            .sorted()
+    }
+
+    static func objects(_ source: PlaybackAudioSource) -> [AudioObjectID] {
+        switch source {
+        case .bundleID(let id): return objects(bundleID: id)
+        case .processID(let pid): return objects(processID: pid)
+        }
     }
 }
 

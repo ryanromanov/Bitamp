@@ -42,6 +42,11 @@ final class PakConnection {
     var onLog: ((String) -> Void)?
     /// A line on standard output that isn't the answer to a request. Logged unless set.
     var onUnexpectedOutput: ((String) -> Void)?
+    /// A line from a `playback` Pak about its player (`PakPlaybackEvent`): it has an `event`
+    /// key and no `id`. Dropped quietly unless set.
+    var onEvent: ((PakPlaybackEvent) -> Void)?
+    /// The program has ended, on its own or not, after its pending requests were failed.
+    var onExit: (() -> Void)?
 
     private var process: Process?
     private var input: FileHandle?
@@ -74,6 +79,8 @@ final class PakConnection {
     }
 
     var isRunning: Bool { process?.isRunning ?? false }
+    /// The running program's process id, for the visualizer to listen to its sound.
+    var processIdentifier: Int32? { process.flatMap { $0.isRunning ? $0.processIdentifier : nil } }
 
     /// Sends a request, starting the program first if needed, and decodes its result.
     func request<Params: Codable, Result: Codable>(
@@ -203,6 +210,7 @@ final class PakConnection {
         let waiting = pending
         pending = [:]
         for (_, request) in waiting { request.continuation.resume(throwing: Failure.exited) }
+        onExit?()
     }
 
     // MARK: - Messages
@@ -266,6 +274,12 @@ final class PakConnection {
     }
 
     private func received(_ line: Data) {
+        // An event about the player isn't an answer, so it never reaches the id matching below
+        // (where it would be logged as stray output).
+        if let kind = try? JSONDecoder().decode(EventKind.self, from: line), kind.isEvent {
+            if let event = try? JSONDecoder().decode(PakPlaybackEvent.self, from: line) { onEvent?(event) }
+            return
+        }
         let header = try? JSONDecoder().decode(ResponseID.self, from: line)
         if let header, header.id == shutdownID || cancelled.contains(header.id) { return }
         if let header, header.isUpdate, let onUpdate = pending[header.id]?.onUpdate {
@@ -283,6 +297,16 @@ final class PakConnection {
 
     private func logged(_ line: String) {
         if let onLog { onLog(line) } else { NSLog("Bitamp: %@ Pak: %@", name, line) }
+    }
+
+    /// Whether a line is an event: it has an `event` key and no `id`.
+    private struct EventKind: Decodable {
+        let isEvent: Bool
+        private enum Keys: String, CodingKey { case id, event }
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: Keys.self)
+            isEvent = container.contains(.event) && !container.contains(.id)
+        }
     }
 
     private struct ResponseID: Decodable {

@@ -10,6 +10,9 @@ import ImageIO
 ///
 /// A Pak whose manifest lists `notes` is a companion instead: it has no music, and writes
 /// about the song that's playing in a window of its own.
+///
+/// A Pak whose manifest lists `playback` plays every track itself: Bitamp tells it to load,
+/// play, pause and seek (`ExternalBackend`), and the equalizer and Retro Sound can't reach the sound.
 @MainActor
 final class ExternalPak: NotesPak {
     let manifest: PakManifest
@@ -26,6 +29,14 @@ final class ExternalPak: NotesPak {
                 protocol: PakProtocol.version, settings: settings.values(for: manifest),
                 cacheDirectory: cacheDirectory.path))
         })
+    /// Set by `ExternalBackend`, which follows the Pak's player.
+    var onPlaybackEvent: ((PakPlaybackEvent) -> Void)?
+    var onProgramExit: (() -> Void)?
+    /// What plays the tracks of a `playback` Pak. One for the whole Pak, so Bitamp reuses it
+    /// from track to track.
+    private lazy var playbackBackend = ExternalBackend(transport: self, name: manifest.name) { [id = manifest.id] in
+        Self.trackID($0, pak: id)
+    }
     private var lastAccount: PakAccountState? {
         didSet { if lastAccount != oldValue { onChange?() } }
     }
@@ -41,6 +52,8 @@ final class ExternalPak: NotesPak {
         self.settings = settings
         self.defaults = defaults
         connection.onHello = { [weak self] result in self?.lastAccount = result.account }
+        connection.onEvent = { [weak self] event in self?.onPlaybackEvent?(event) }
+        connection.onExit = { [weak self] in self?.onProgramExit?() }
     }
 
     var id: String { manifest.id }
@@ -108,6 +121,7 @@ final class ExternalPak: NotesPak {
 
     func playback(for url: URL) throws -> PakPlayback {
         guard let trackID = trackID(url) else { throw PakConnection.Failure.pak("\(url) isn't one of the \(name) Pak's tracks.") }
+        if manifest.can(PakProtocol.playback) { return .backend(playbackBackend) }
         return .fetch { [self] in try await audio(for: trackID) }
     }
 
@@ -336,4 +350,20 @@ struct PakNotesService: BackstoryService {
             continuation.onTermination = { _ in task.cancel() }
         }
     }
+}
+
+extension ExternalPak: PakPlaybackTransport {
+    func load(trackID: String) async throws -> PakMethod.LoadResult {
+        try await connection.request(PakMethod.load, PakMethod.TrackID(id: trackID), as: PakMethod.LoadResult.self)
+    }
+
+    func command(_ method: String) async throws {
+        _ = try await connection.request(method, PakMethod.Empty(), as: PakMethod.Empty.self)
+    }
+
+    func seek(to seconds: Double) async throws {
+        _ = try await connection.request(PakMethod.seek, PakMethod.Seek(seconds: seconds), as: PakMethod.Empty.self)
+    }
+
+    var audioProcessID: Int32? { connection.processIdentifier }
 }
