@@ -1,0 +1,9 @@
+{
+  "id": "demo-playback",
+  "name": "Demo Playback",
+  "version": "1.0",
+  "executable": "demo-playback-pak",
+  "protocol": 3,
+  "description": "A Pak that plays its own sound: the Demo tunes through its own audio player, not Bitamp's. Shows the playback capability, and that the visualizer still hears it.",
+  "capabilities": ["playback"]
+}

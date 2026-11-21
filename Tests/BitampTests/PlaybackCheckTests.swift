@@ -105,3 +105,27 @@ import Testing
         #expect(lines.contains { $0.contains("“playback” capability needs \"protocol\": 3") })
     }
 }
+
+private final class DemoMarker {}
+
+/// The demo playback Pak's real program, run by the host as Bitamp runs it. It makes sound, and
+/// needs an audio device, so it only runs when BITAMP_PLAY_SOUND is set.
+@MainActor @Suite struct DemoPlaybackPakTests {
+    private static let enabled = ProcessInfo.processInfo.environment["BITAMP_PLAY_SOUND"] != nil
+
+    @Test(.enabled(if: DemoPlaybackPakTests.enabled)) func passesTheCheck() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("BitampDemoPlayback-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let program = Bundle(for: DemoMarker.self).bundleURL.deletingLastPathComponent().appendingPathComponent("BitampDemoPlaybackPak")
+        let manifest = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../Sources/BitampDemoPlaybackPak/pak.json").standardizedFileURL
+        let folder = root.appendingPathComponent("Demo Playback.bitpak")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: manifest, to: folder.appendingPathComponent("pak.json"))
+        try FileManager.default.copyItem(at: program, to: folder.appendingPathComponent("demo-playback-pak"))
+        var lines: [String] = []
+        let check = PakCheck(folder: folder, reservedIDs: ["applemusic"]) { lines.append($0) }
+        #expect(await check.run(), "\(lines.joined(separator: "\n"))")
+        #expect(lines.last == "The Demo Playback Pak looks good. Double-click it to install it.")
+    }
+}
