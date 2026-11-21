@@ -13,6 +13,8 @@ let package = Package(
         .executable(name: "BitampDemoPak", targets: ["BitampDemoPak"]),
         .executable(name: "BitampDemoNotesPak", targets: ["BitampDemoNotesPak"]),
         .executable(name: "BitampDemoPlaybackPak", targets: ["BitampDemoPlaybackPak"]),
+        // Apple Music as a Pak of its own. Needs a signed app bundle: scripts/make-applemusic-pak.sh.
+        .executable(name: "BitampAppleMusicHelper", targets: ["BitampAppleMusicHelper"]),
     ],
     targets: [
         // Everything but the entry point lives in BitampKit so tests can import it.
@@ -35,11 +37,18 @@ let package = Package(
         .executableTarget(name: "BitampDemoPlaybackPak", dependencies: ["BitampPakSDK"], exclude: ["pak.json"]),
         // Expansion Paks built into Bitamp. Each depends on BitampPakKit only.
         .target(name: "BitampAppleMusicPak", dependencies: ["BitampPakKit"]),
+        // The Apple Music Pak again, as a program Bitamp runs: it answers the Pak protocol with
+        // BitampAppleMusicPak. Not packaged by make-pak.sh (hence helper-pak.json), because
+        // MusicKit needs the program to be a signed app with a provisioning profile.
+        .executableTarget(
+            name: "BitampAppleMusicHelper", dependencies: ["BitampAppleMusicPak", "BitampPakKit", "BitampPakSDK"],
+            exclude: ["helper-pak.json"]),
         // The services the Backstory Pak can ask about a song (Claude so far).
         .target(name: "BitampBackstory", dependencies: ["BitampPakKit"]),
         .executableTarget(name: "Bitamp", dependencies: ["BitampKit", "BitampAppleMusicPak", "BitampBackstory"]),
         .testTarget(name: "BitampTests", dependencies: [
             "BitampKit", "BitampPakKit", "BitampAppleMusicPak", "BitampPakSDK", "BitampDemoPak", "BitampDemoNotesPak", "BitampDemoPlaybackPak", "BitampBackstory",
+            "BitampAppleMusicHelper",
         ]),
     ]
 )

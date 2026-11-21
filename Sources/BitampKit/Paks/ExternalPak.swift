@@ -225,8 +225,12 @@ final class ExternalPak: NotesPak {
             cursor: page.cursor)
     }
 
-    /// The cover's id: its URL, or its file as a `file://` URL. Nil if it has neither.
+    /// What marks a cover's id as one the Pak draws on request (`PakArtworkInfo.id`), not an address.
+    private static let drawnPrefix = "pak-art:"
+
+    /// The cover's id: the Pak's own, its URL, or its file as a `file://` URL. Nil if it has none.
     func artwork(_ info: PakArtworkInfo) -> PakArtwork? {
+        if let id = info.id, !id.isEmpty { return PakArtwork(Self.drawnPrefix + id) }
         if let text = info.url, let url = URL(string: text), ["http", "https"].contains(url.scheme?.lowercased()) {
             if let headers = info.headers, !headers.isEmpty { artworkHeaders[url.absoluteString] = headers }
             return PakArtwork(url: url)
@@ -236,6 +240,14 @@ final class ExternalPak: NotesPak {
     }
 
     func image(for artwork: PakArtwork, size: Int) async -> CGImage? {
+        if artwork.id.hasPrefix(Self.drawnPrefix) {
+            let id = String(artwork.id.dropFirst(Self.drawnPrefix.count))
+            guard let result = try? await connection.request(PakMethod.artwork, PakMethod.Artwork(id: id, size: size),
+                                                             as: PakMethod.ArtworkResult.self),
+                  let path = result.file, let data = try? Data(contentsOf: URL(fileURLWithPath: path))
+            else { return nil }
+            return Self.thumbnail(of: data, size: size)
+        }
         guard let url = URL(string: artwork.id) else { return nil }
         let data: Data
         if url.isFileURL {
@@ -249,6 +261,10 @@ final class ExternalPak: NotesPak {
             if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return nil }
             data = body
         }
+        return Self.thumbnail(of: data, size: size)
+    }
+
+    private static func thumbnail(of data: Data, size: Int) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
                                         kCGImageSourceThumbnailMaxPixelSize: max(size, 1),

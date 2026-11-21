@@ -127,17 +127,22 @@ public struct PakTrackInfo: Codable, Equatable, Sendable {
     }
 }
 
-/// A picture: a file the Pak made or downloaded, or a URL Bitamp fetches, with headers
-/// for servers that need them. Shaped like `PakSource`.
+/// A picture: a file the Pak made or downloaded, a URL Bitamp fetches (with headers for
+/// servers that need them), or an `id` of the Pak's own that Bitamp asks it to draw when the
+/// picture is wanted (`PakMethod.artwork`), for art that is costly to make or that only the Pak
+/// can reach. Shaped like `PakSource`. An `id` must name the same picture every time, because
+/// Bitamp keeps the pictures it gets, across launches.
 public struct PakArtworkInfo: Codable, Equatable, Hashable, Sendable {
     public var file: String?
     public var url: String?
     public var headers: [String: String]?
+    public var id: String?
 
-    public init(file: String? = nil, url: String? = nil, headers: [String: String]? = nil) {
+    public init(file: String? = nil, url: String? = nil, headers: [String: String]? = nil, id: String? = nil) {
         self.file = file
         self.url = url
         self.headers = headers
+        self.id = id
     }
 
     public static func file(_ url: URL) -> PakArtworkInfo { PakArtworkInfo(file: url.path) }
@@ -509,6 +514,25 @@ public enum PakMethod {
         }
     }
 
+    /// Asks for the picture an `id` in a `PakArtworkInfo` names, about `size` pixels square, at
+    /// the time Bitamp wants to show it. The Pak answers with a file it drew, or none if there's
+    /// no picture. Unlike other requests these run alongside each other (a page of covers
+    /// asks for many at once) and alongside searches and browsing, so a slow cover doesn't hold
+    /// up a page; the Pak may take them a few at a time.
+    public struct Artwork: Codable, Sendable {
+        public var id: String
+        public var size: Int
+        public init(id: String, size: Int) {
+            self.id = id
+            self.size = size
+        }
+    }
+
+    public struct ArtworkResult: Codable, Sendable {
+        public var file: String?
+        public init(file: String? = nil) { self.file = file }
+    }
+
     public struct Seek: Codable, Sendable {
         public var seconds: Double
         public init(seconds: Double) { self.seconds = seconds }
@@ -540,6 +564,8 @@ public enum PakMethod {
     public static let resume = "resume"
     public static let stop = "stop"
     public static let seek = "seek"
+    /// The picture for an artwork `id`. Answered concurrently, not in line with other requests.
+    public static let artwork = "artwork"
     /// The methods that control playback. Kept apart from searching and browsing, so a slow
     /// page doesn't hold up a pause.
     public static let playbackMethods: Set<String> = [load, play, pause, resume, stop, seek]
@@ -603,7 +629,7 @@ public enum PakPlayerState: String, Codable, Sendable {
 ///
 ///     ← {"event":"state","track":"ode","state":"playing","position":12.5,"duration":180}
 ///     ← {"event":"ended","track":"ode"}
-///     ← {"event":"error","track":"ode","message":"The stream dropped."}
+///     ← {"event":"error","track":"ode","message":"The stream dropped.","advice":"Check your connection."}
 public struct PakPlaybackEvent: Codable, Equatable, Sendable {
     public static let state = "state"
     public static let ended = "ended"
@@ -617,14 +643,17 @@ public struct PakPlaybackEvent: Codable, Equatable, Sendable {
     public var position: Double?
     public var duration: Double?
     public var message: String?
+    /// For `error`: what the listener can try, shown after `message`.
+    public var advice: String?
 
     public init(event: String, track: String? = nil, state: PakPlayerState? = nil, position: Double? = nil,
-                duration: Double? = nil, message: String? = nil) {
+                duration: Double? = nil, message: String? = nil, advice: String? = nil) {
         self.event = event
         self.track = track
         self.state = state
         self.position = position
         self.duration = duration
         self.message = message
+        self.advice = advice
     }
 }

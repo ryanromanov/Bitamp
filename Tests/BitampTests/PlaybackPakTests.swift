@@ -45,6 +45,11 @@ private final class FakePlayer: PakProvider, @unchecked Sendable {
         reporter?.report(.paused, position: 4.5)
     }
 
+    func artwork(id: String, size: Int) async throws -> URL? {
+        record("artwork \(id)")
+        return id == "none" ? nil : URL(fileURLWithPath: "/tmp/art-\(id)-\(size).png")
+    }
+
     func resume() async throws { record("resume") }
     func stop() async throws { record("stop") }
 
@@ -106,6 +111,25 @@ private final class Lines: @unchecked Sendable {
         player.searchGate.signal()
         for _ in 0..<200 where !lines.contains(#""id":1"#) { try await Task.sleep(nanoseconds: 10_000_000) }
         #expect(lines.contains(#""id":1"#))
+        feed.finish()
+        await serving.value
+    }
+
+    @Test func coversAreAnsweredAlongsideAStuckSearchAndInAnyOrder() async throws {
+        let player = FakePlayer()
+        let lines = Lines()
+        let (input, feed) = AsyncStream<String>.makeStream()
+        let serving = Task { await PakRunner.serve(player, input: input) { lines.add($0) } }
+
+        feed.yield(#"{"id":1,"method":"search","params":{"term":"slow"}}"#)
+        feed.yield(#"{"id":2,"method":"artwork","params":{"id":"library-album/9","size":96}}"#)
+        feed.yield(#"{"id":3,"method":"artwork","params":{"id":"none","size":96}}"#)
+        for _ in 0..<200 where !(lines.contains(#""id":2"#) && lines.contains(#""id":3"#)) { try await Task.sleep(nanoseconds: 10_000_000) }
+        #expect(lines.contains(#"{"id":2,"result":{"file":"/tmp/art-library-album/9-96.png"}}"#), "\(lines.all)")
+        #expect(lines.contains(#"{"id":3,"result":{}}"#), "no picture is an empty result: \(lines.all)")
+        #expect(!lines.contains(#""id":1"#), "the search was still stuck")
+
+        player.searchGate.signal()
         feed.finish()
         await serving.value
     }
