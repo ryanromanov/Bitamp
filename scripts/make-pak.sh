@@ -2,7 +2,7 @@
 # Packages an Expansion Pak written in Swift as <Name>.bitpak: its pak.json plus the
 # program it names. Double-click the result, or drop it on Bitamp, to install it.
 #
-#   scripts/make-pak.sh                      # every Pak in this package (here, the demos → Demo.bitpak, Demo Notes.bitpak)
+#   scripts/make-pak.sh                      # every Pak in this package (here, the demos → Demo.bitpak, Demo Notes.bitpak, Demo Playback.bitpak)
 #   scripts/make-pak.sh MyPak                # the executable target MyPak, with Sources/MyPak/pak.json
 #   scripts/make-pak.sh --universal [MyPak]  # Apple Silicon + Intel
 #

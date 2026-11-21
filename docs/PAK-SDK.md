@@ -132,7 +132,7 @@ Bitamp asks for notes with the song's tags, never its audio or its file's name. 
 
 ## Playback
 
-A Pak that makes its own sound (a streaming service's own player, another app it drives, an audio library Bitamp doesn't have) says `"capabilities": ["playback"]` and `"protocol": 3`. Bitamp then never asks it to `resolve` a track and download a file. Instead it tells the Pak to load a track, play it, pause it and so on, and the Pak tells Bitamp what its player is doing. Bitamp's equalizer, Retro Sound and volume can't reach the sound, so their controls dim, as they do for Apple Music; the visualizer can still hear it (see `audio` below). Search, `track` and `browse` work as for any music Pak. The demo is `Sources/BitampDemoPlaybackPak`.
+A Pak that makes its own sound (a streaming service's own player, another app it drives, an audio library Bitamp doesn't have) says `"capabilities": ["playback"]` and `"protocol": 3`. Bitamp then never asks it to `resolve` a track and download a file. Instead it tells the Pak to load a track, play it, pause it and so on, and the Pak tells Bitamp what its player is doing. Bitamp's equalizer, Retro Sound and volume can't reach the sound, so their controls dim, as they do for Apple Music; the visualizer can still hear it (see `audio` below). Search, `track` and `browse` work as for any music Pak. The demo is `Sources/BitampDemoPlaybackPak`: install `Demo Playback.bitpak` (build it with `scripts/make-pak.sh`; none of the demos come installed), open it from the Expansion Paks window and play a tune. The main window's equalizer and Retro Sound dim, the clock and seek bar follow its player, and the visualizer moves with it.
 
 ```
 → {"id":3,"method":"load","params":{"id":"42"}}
