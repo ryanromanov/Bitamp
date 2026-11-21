@@ -79,6 +79,7 @@ public final class PakCheck {
         var account: PakAccountState?
         connection.onHello = { account = $0.account }
         connection.onLog = { [output] in output("    │ \($0)") }
+        connection.onEvent = { [weak self] event in self?.events.append(event) }
         connection.onUnexpectedOutput = { [weak self] line in
             self?.fail("It printed a line that isn't an answer: \(line)\n"
                 + "      Only answers go to standard output. Print anything else to standard error.")
@@ -101,6 +102,13 @@ public final class PakCheck {
             return finish(manifest)
         }
 
+        if manifest.can(PakProtocol.playback), manifest.protocol < PakProtocol.playbackVersion {
+            fail("\(PakProtocol.manifestName): a Pak with the “playback” capability needs \"protocol\": \(PakProtocol.playbackVersion), "
+                + "so Bitamp 0.16 and earlier don't install it and then try to download its audio.")
+            connection.shutdown()
+            return finish(manifest)
+        }
+
         // hello is sent on the first request, before search.
         let tracks: [PakTrackInfo]
         do {
@@ -120,7 +128,11 @@ public final class PakCheck {
         checkTracks(tracks, manifest)
         if let first = tracks.first {
             await checkTrack(first, connection)
-            await checkResolve(first, connection)
+            if manifest.can(PakProtocol.playback) {
+                await checkPlayback(first, connection)
+            } else {
+                await checkResolve(first, connection)
+            }
         }
         if manifest.can(PakProtocol.browse) { await checkBrowse(connection) }
         await checkShutdown(connection)
@@ -345,6 +357,103 @@ public final class PakCheck {
             pass("resolve “\(first.id)”: \(url.absoluteString) (not downloaded)")
         } else {
             fail("resolve “\(first.id)”: the source has neither a file nor a url.")
+        }
+    }
+
+    // MARK: - Playback
+
+    /// What the Pak's player reported, in order. Set by the connection.
+    private var events: [PakPlaybackEvent] = []
+    /// How long to wait for the player to report each change; twice that for it to start.
+    var patience: TimeInterval = 5
+
+    /// The first event after `index` that `matches`, waiting up to `timeout` seconds for it.
+    private func waitForEvent(after index: Int, timeout: TimeInterval, _ matches: (PakPlaybackEvent) -> Bool) async -> PakPlaybackEvent? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let hit = events.dropFirst(index).first(where: matches) { return hit }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return events.dropFirst(index).first(where: matches)
+    }
+
+    /// Loads the first track and drives the player through play, seek, pause, resume and stop,
+    /// checking that each is answered and that the Pak's events say what happened. It makes
+    /// a few seconds of sound, and always ends with `stop`.
+    private func checkPlayback(_ first: PakTrackInfo, _ connection: PakConnection) async {
+        output("  playback: the Pak will play a few seconds of “\(first.title)” through your speakers.")
+        func send(_ method: String, _ what: String) async -> Bool {
+            do {
+                _ = try await connection.request(method, PakMethod.Empty(), as: PakMethod.Empty.self)
+                return true
+            } catch {
+                fail("\(what): \(explain(error))")
+                return false
+            }
+        }
+        let loaded: PakMethod.LoadResult
+        do {
+            loaded = try await connection.request(PakMethod.load, PakMethod.TrackID(id: first.id), as: PakMethod.LoadResult.self)
+        } catch {
+            return fail("load “\(first.id)”: \(explain(error))")
+        }
+        pass("load “\(first.id)”: \(loaded.title ?? first.title)" + (loaded.duration.map { String(format: ", %.0f s", $0) } ?? ""))
+        switch loaded.audio {
+        case nil:
+            warn("load: no \"audio\", so Bitamp's visualizer can't show this Pak. Say \"self\" if the Pak's own process plays the sound.")
+        case let audio? where PakAudioProcess.known.contains(audio):
+            pass("load: the visualizer listens to “\(audio)”")
+        case let audio?:
+            fail("load: “\(audio)” isn't an audio source Bitamp knows. Use \"self\" or \"apple-music\".")
+        }
+
+        var mark = events.count
+        guard await send(PakMethod.play, "play") else { return }
+        guard let playing = await waitForEvent(after: mark, timeout: patience * 2, { $0.event == PakPlaybackEvent.state && $0.state == .playing }) else {
+            fail("play: no \"state\" event said it was playing within \(Int(patience * 2)) seconds. Report with the reporter when the player starts.")
+            _ = await send(PakMethod.stop, "stop")
+            return
+        }
+        pass("play: the player reported playing")
+        if playing.track != first.id {
+            warn("events: “\(playing.track ?? "none")” is named as the track, not “\(first.id)”. Name the id the track was loaded with.")
+        }
+        try? await Task.sleep(for: .milliseconds(1500))
+        let reports = events.dropFirst(mark).filter { $0.event == PakPlaybackEvent.state && $0.state == .playing }
+        if reports.count < 2 {
+            warn("events: one report in 1.5 seconds of playing. Report every half second or so, so Bitamp's clock follows the player's.")
+        }
+
+        let target = min((loaded.duration ?? 10) / 2, 5)
+        do {
+            _ = try await connection.request(PakMethod.seek, PakMethod.Seek(seconds: target), as: PakMethod.Empty.self)
+            pass("seek: answered")
+        } catch {
+            fail("seek: \(explain(error))")
+        }
+        mark = events.count
+        if await send(PakMethod.pause, "pause") {
+            if await waitForEvent(after: mark, timeout: patience, { $0.event == PakPlaybackEvent.state && $0.state == .paused }) != nil {
+                pass("pause: the player reported paused")
+            } else {
+                fail("pause: no \"state\" event said it was paused within \(Int(patience)) seconds.")
+            }
+        }
+        mark = events.count
+        if await send(PakMethod.resume, "resume") {
+            if await waitForEvent(after: mark, timeout: patience, { $0.event == PakPlaybackEvent.state && $0.state == .playing }) != nil {
+                pass("resume: the player reported playing")
+            } else {
+                fail("resume: no \"state\" event said it was playing again within \(Int(patience)) seconds.")
+            }
+        }
+        mark = events.count
+        if await send(PakMethod.stop, "stop") {
+            if await waitForEvent(after: mark, timeout: patience, { $0.event == PakPlaybackEvent.state && $0.state == .stopped }) != nil {
+                pass("stop: the player reported stopped")
+            } else {
+                warn("stop: no \"state\" event said it was stopped. Report it, so Bitamp's clock stops at once.")
+            }
         }
     }
 
