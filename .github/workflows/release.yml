@@ -92,6 +92,12 @@ jobs:
           case "$archs" in *arm64*x86_64*|*x86_64*arm64*) ;; *) echo "::error::Not universal"; exit 1 ;; esac
           test "$(plutil -extract CFBundleShortVersionString raw Bitamp.app/Contents/Info.plist)" = "${{ steps.version.outputs.version }}"
           codesign --verify --deep --strict Bitamp.app
+          # Apple Music comes inside the app as a Pak whose program is a helper app.
+          helper="Bitamp.app/Contents/Resources/Paks/Apple Music.bitpak/Helper.app"
+          test -f "$helper/Contents/MacOS/BitampAppleMusicHelper"
+          helper_archs="$(lipo -archs "$helper/Contents/MacOS/BitampAppleMusicHelper")"
+          case "$helper_archs" in *arm64*x86_64*|*x86_64*arm64*) ;; *) echo "::error::The Apple Music Pak isn't universal"; exit 1 ;; esac
+          codesign --verify --strict "$helper"
           codesign --display --verbose=2 Bitamp.app 2>&1 | grep -E "Authority|flags"
 
       - name: Package
