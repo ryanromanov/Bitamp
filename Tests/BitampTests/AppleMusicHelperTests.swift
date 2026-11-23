@@ -15,11 +15,11 @@ import Testing
     }
 
     @Test func aTrackSurvivesTheTripThroughBitampsURLs() {
-        // The Pak's id becomes bitpak-apple-music://track/library/song/123, and comes back as it was.
+        // The Pak's id becomes bitpak-applemusic://track/library/song/123, and comes back as it was.
         let id = "library/song/123"
-        let url = ExternalPak.trackURL(id, pak: "apple-music")
-        #expect(url.absoluteString == "bitpak-apple-music://track/library/song/123")
-        #expect(ExternalPak.trackID(url, pak: "apple-music") == id)
+        let url = ExternalPak.trackURL(id, pak: "applemusic")
+        #expect(url.absoluteString == "bitpak-applemusic://track/library/song/123")
+        #expect(ExternalPak.trackID(url, pak: "applemusic") == id)
     }
 
     @Test func aPageKeepsItsHeaderShelvesAndCoversAsKeys() {
