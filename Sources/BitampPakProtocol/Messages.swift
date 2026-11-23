@@ -49,10 +49,12 @@ public struct PakManifest: Codable, Equatable, Sendable {
     /// `hello` reply, because Bitamp needs to know before it starts the Pak. Bitamp versions
     /// that don't know a capability ignore it, so a Pak that browses still searches there.
     public var capabilities: [String]?
+    /// The oldest macOS it runs on, such as "14.0". Before that it shows as unavailable.
+    public var minimumMacOS: String?
 
     public init(id: String, name: String, version: String, executable: String,
                 protocol: Int = PakProtocol.version, description: String? = nil, settings: [PakSettingDefinition]? = nil,
-                capabilities: [String]? = nil) {
+                capabilities: [String]? = nil, minimumMacOS: String? = nil) {
         self.id = id
         self.name = name
         self.version = version
@@ -61,6 +63,17 @@ public struct PakManifest: Codable, Equatable, Sendable {
         self.description = description
         self.settings = settings
         self.capabilities = capabilities
+        self.minimumMacOS = minimumMacOS
+    }
+
+    /// Whether this Mac's macOS is new enough, going by `minimumMacOS` (a missing or
+    /// unreadable one allows any).
+    public var runsOnThisMac: Bool {
+        let parts = (minimumMacOS ?? "").split(separator: ".").compactMap { Int($0) }
+        guard let major = parts.first else { return true }
+        return ProcessInfo.processInfo.isOperatingSystemAtLeast(
+            OperatingSystemVersion(majorVersion: major, minorVersion: parts.count > 1 ? parts[1] : 0,
+                                   patchVersion: parts.count > 2 ? parts[2] : 0))
     }
 
     /// Whether the manifest lists `capability`.

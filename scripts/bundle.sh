@@ -1,7 +1,8 @@
 #!/bin/sh
 # Builds a release binary and wraps it in a signed Bitamp.app, ad-hoc unless --sign names
 # an identity. It always signs with the hardened runtime, which notarization requires.
-# Signed with an identity, the app also gets Resources/Bitamp.provisionprofile.
+# Apple Music comes inside the app as a Pak (scripts/make-applemusic-pak.sh), which Bitamp installs
+# on first launch; signed with an identity, it also gets Resources/Bitamp.provisionprofile.
 #
 #   scripts/bundle.sh                                # this Mac's architecture
 #   scripts/bundle.sh --universal --version 1.2.3    # Apple Silicon + Intel, stamped 1.2.3
@@ -41,19 +42,21 @@ if [ -n "$version" ]; then
     plutil -replace CFBundleVersion -string "${version%%-*}" "$app/Contents/Info.plist"
 fi
 swift scripts/make-icon.swift "$app/Contents/Resources/AppIcon.icns"
+# Apple Music is a Pak whose program is a helper app, signed before the app that holds it. Its
+# provisioning profile lets it claim the App ID MusicKit needs to reach the catalog; it's only
+# valid for team KL362RST7H, so to sign as another team, set BUNDLE_ID, PROFILE and TEAM
+# (see make-applemusic-pak.sh).
+mkdir -p "$app/Contents/Resources/Paks"
+if [ "$universal" = 1 ]; then
+    scripts/make-applemusic-pak.sh --universal --sign "$identity" --out "$app/Contents/Resources/Paks"
+else
+    scripts/make-applemusic-pak.sh --sign "$identity" --out "$app/Contents/Resources/Paks"
+fi
 if [ "$identity" = "-" ]; then
     codesign --force --options runtime --sign - "$app"
 else
-    # The profile lets the app claim its App ID, which MusicKit needs to reach the Apple
-    # Music catalog. It's only valid for team KL362RST7H; to sign as another team, swap in
-    # your own profile and entitlements, or delete the profile to build without them.
-    set --
-    if [ -f Resources/Bitamp.provisionprofile ]; then
-        cp Resources/Bitamp.provisionprofile "$app/Contents/embedded.provisionprofile"
-        set -- --entitlements Resources/Bitamp.entitlements
-    fi
     # A secure timestamp is required for notarization; ad-hoc signatures can't have one.
-    codesign --force --options runtime --timestamp "$@" --sign "$identity" "$app"
+    codesign --force --options runtime --timestamp --sign "$identity" "$app"
 fi
 
 echo "Built $app"

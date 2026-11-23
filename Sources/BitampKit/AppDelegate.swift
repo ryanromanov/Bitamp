@@ -15,9 +15,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Third-party notes Paks' windows, by Pak id.
     private var notesViews: [String: BackstoryView] = [:]
     private lazy var pakLibrary = PakLibrary()
-    /// The built-in Paks, then the installed ones by name.
-    private lazy var paks = PakRegistry(builtInPaks + companionPaks + pakLibrary.installed(),
-                                        preferences: preferences)
+    /// The built-in Paks, then the installed ones by name, after the ones that come in the app
+    /// (Apple Music) are installed.
+    private lazy var paks: PakRegistry = {
+        pakLibrary.installBundled()
+        return PakRegistry(builtInPaks + companionPaks + pakLibrary.installed(), preferences: preferences)
+    }()
     /// The companion Paks built into this copy, which have no music.
     private var companionPaks: [Pak] {
         var companions: [Pak] = []

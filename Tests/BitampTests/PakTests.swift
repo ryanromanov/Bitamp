@@ -2,7 +2,7 @@ import AppKit
 import AVFoundation
 import Foundation
 import Testing
-@testable import BitampAppleMusicPak
+@testable import BitampAppleMusicHelper
 @testable import BitampKit
 import MusicKit
 
