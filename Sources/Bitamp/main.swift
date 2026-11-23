@@ -1,12 +1,10 @@
 import AppKit
-import BitampAppleMusicPak
 import BitampKit
 import BitampBackstory
 
 // `Bitamp --check-pak <folder.bitpak>` tries a Pak for its author, then exits. See docs/PAK-SDK.md.
 if CommandLine.arguments.dropFirst().first == "--check-pak" {
-    let reserved = MainActor.assumeIsolated { AppleMusicPak().id }
-    PakCheck.main(Array(CommandLine.arguments.dropFirst(2)), reservedIDs: [reserved])
+    PakCheck.main(Array(CommandLine.arguments.dropFirst(2)), reservedIDs: [])
 }
 
 OldSettings.copyIfNeeded()
@@ -31,7 +29,7 @@ MainActor.assumeIsolated {
         ? BackstoryPak.OnDevice(isAvailable: { AppleOnDevice.isAvailable }, make: { wikipedia in
             AppleOnDevice.service(wikipedia: wikipedia ? WikipediaFacts() : nil)
         }) : nil
-    let delegate = AppDelegate(paks: [AppleMusicPak()], backstory: [claude, openAI], backstoryOnDevice: onDevice, deconstructor: Deconstructor())
+    let delegate = AppDelegate(backstory: [claude, openAI], backstoryOnDevice: onDevice, deconstructor: Deconstructor())
     NSApplication.shared.delegate = delegate
     NSApplication.shared.setActivationPolicy(.regular)
     NSApplication.shared.run()

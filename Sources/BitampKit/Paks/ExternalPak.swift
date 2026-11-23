@@ -63,7 +63,7 @@ final class ExternalPak: NotesPak {
     static func scheme(for id: String) -> String { "bitpak-\(id)" }
 
     var isAvailable: Bool {
-        manifest.protocol <= PakProtocol.version
+        manifest.protocol <= PakProtocol.version && manifest.runsOnThisMac
             && FileManager.default.isExecutableFile(atPath: folder.appendingPathComponent(manifest.executable).path)
     }
 

@@ -1,5 +1,4 @@
 import AppKit
-import BitampAppleMusicPak
 import BitampPakKit
 import BitampPakSDK
 import CryptoKit

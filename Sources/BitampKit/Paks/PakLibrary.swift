@@ -101,6 +101,49 @@ final class PakLibrary {
         return manifest
     }
 
+    /// Installs the Paks that come inside the app (`Contents/Resources/Paks`), without asking:
+    /// they are Bitamp's own. A Pak is installed the first time it's seen, and updated when the
+    /// app brings a newer version of one that's still installed. One the listener removed stays
+    /// removed (`defaults` remembers which came and at what version).
+    func installBundled(from folder: URL? = Bundle.main.resourceURL?.appendingPathComponent("Paks", isDirectory: true),
+                        defaults: UserDefaults = .standard) {
+        guard let folder,
+              let bundles = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        else { return }
+        var seen = defaults.dictionary(forKey: Self.bundledKey) as? [String: String] ?? [:]
+        for bundle in bundles.filter(Self.isPak) {
+            do {
+                let manifest = try Self.manifest(in: bundle)
+                let installed = try? Self.manifest(in: folderOf(manifest.id))
+                if let installed {
+                    // Updated only to a newer version, so a newer one the listener put here stays.
+                    guard seen[manifest.id] != nil, Self.isNewer(manifest.version, than: installed.version) else {
+                        if seen[manifest.id] == nil { seen[manifest.id] = manifest.version }
+                        continue
+                    }
+                } else if seen[manifest.id] != nil {
+                    continue
+                }
+                try install(bundle, reservedIDs: [])
+                seen[manifest.id] = manifest.version
+            } catch {
+                NSLog("Bitamp: couldn't install the bundled Pak \(bundle.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+        defaults.set(seen, forKey: Self.bundledKey)
+    }
+
+    private static let bundledKey = "bundledPaks"
+
+    private func folderOf(_ id: String) -> URL {
+        folder.appendingPathComponent("\(id).\(Self.pathExtension)", isDirectory: true)
+    }
+
+    /// Whether dotted version `a` is newer than `b`.
+    static func isNewer(_ a: String, than b: String) -> Bool {
+        a.compare(b, options: .numeric) == .orderedDescending
+    }
+
     /// Whether `bundle` is one of the installed Paks itself, rather than a copy to install.
     func contains(_ bundle: URL) -> Bool {
         func path(_ url: URL) -> String { url.resolvingSymlinksInPath().standardizedFileURL.path }
