@@ -4,11 +4,13 @@
 # provisioning profile, which is what lets MusicKit use it. make-pak.sh can't do this: it
 # packages a bare program. scripts/bundle.sh runs this and puts the result in the app.
 #
-#   scripts/make-applemusic-pak.sh [--universal] [--sign IDENTITY] [--out DIR]
+#   scripts/make-applemusic-pak.sh [--universal] [--sign IDENTITY] [--out DIR] [--version X.Y.Z]
 #
 # Without --sign it signs with the Developer ID below. `--sign -` signs ad hoc, without the
 # profile: library songs play, the catalog doesn't. Set BUNDLE_ID, PROFILE and TEAM to build
 # under an App ID of your own (the profile must be for that App ID, with MusicKit enabled).
+# --version stamps the Pak (bundle.sh passes the app's), so Bitamp updates an installed copy when
+# the app brings a newer one; without it the manifest's version is used.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -18,12 +20,14 @@ bundle_id="${BUNDLE_ID:-com.ryanromanov.Bitamp}"
 profile="${PROFILE:-Resources/Bitamp.provisionprofile}"
 out=.
 arch=
+version=
 while [ $# -gt 0 ]; do
     case "$1" in
         --universal) arch="--arch arm64 --arch x86_64" ;;
         --sign) identity="$2"; shift ;;
         --out) out="$2"; shift ;;
-        *) echo "usage: $0 [--universal] [--sign IDENTITY] [--out DIR]" >&2; exit 64 ;;
+        --version) version="$2"; shift ;;
+        *) echo "usage: $0 [--universal] [--sign IDENTITY] [--out DIR] [--version X.Y.Z]" >&2; exit 64 ;;
     esac
     shift
 done
@@ -37,7 +41,9 @@ bin="$(swift build -c release $arch --show-bin-path)/$product"
 
 name=$(plutil -extract name raw "$manifest")
 executable=$(plutil -extract executable raw "$manifest")
-version=$(plutil -extract version raw "$manifest")
+# A pre-release suffix like "-beta.1" is dropped: versions are compared as numbers.
+version="${version:-$(plutil -extract version raw "$manifest")}"
+version="${version%%-*}"
 pak="$out/$name.bitpak"
 helper="$pak/Helper.app"
 rm -rf "$pak"
@@ -76,5 +82,6 @@ PLIST
     rm -f "$entitlements"
 fi
 cp "$manifest" "$pak/pak.json"
+plutil -replace version -string "$version" "$pak/pak.json"
 [ -x "$pak/$executable" ] || { echo "The manifest's executable $executable isn't in the package." >&2; exit 1; }
 echo "Built $pak (bundle id $bundle_id)"

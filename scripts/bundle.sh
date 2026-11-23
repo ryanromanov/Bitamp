@@ -47,11 +47,11 @@ swift scripts/make-icon.swift "$app/Contents/Resources/AppIcon.icns"
 # valid for team KL362RST7H, so to sign as another team, set BUNDLE_ID, PROFILE and TEAM
 # (see make-applemusic-pak.sh).
 mkdir -p "$app/Contents/Resources/Paks"
-if [ "$universal" = 1 ]; then
-    scripts/make-applemusic-pak.sh --universal --sign "$identity" --out "$app/Contents/Resources/Paks"
-else
-    scripts/make-applemusic-pak.sh --sign "$identity" --out "$app/Contents/Resources/Paks"
-fi
+# The Pak takes the app's version, so each release brings an update of it.
+set --
+if [ "$universal" = 1 ]; then set -- --universal; fi
+if [ -n "$version" ]; then set -- "$@" --version "$version"; fi
+scripts/make-applemusic-pak.sh "$@" --sign "$identity" --out "$app/Contents/Resources/Paks"
 if [ "$identity" = "-" ]; then
     codesign --force --options runtime --sign - "$app"
 else
